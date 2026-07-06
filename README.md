@@ -36,8 +36,10 @@ Phases 1–4 are built and reported:
 - **Phase 3 — UI shell** ([report](phase3-ui/PHASE3_REPORT.md)): chat + tool-call cards + explicit mode selector + permission/approval panel + a multi-sidecar supervisor.
 - **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): orb-ui integrated as a voice-reactive orb + a Siri-style overlay, wired to the live pipeline.
 
-The master plan, findings, and forward roadmap (Phases 5–6 + bring-your-own-key)
-live in [`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md); open issues in
+The master plan, findings, and forward roadmap (Phase 5 OS-computer-use → Phase 6
+CAD-by-voice → Odysseus fork + one-command installer → name + wake-word → UI
+polish → real-hardware QA → launch) live in
+[`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md) §10; open issues in
 [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md); the build rules Nightjar follows in
 [`CLAUDE.md`](CLAUDE.md).
 
