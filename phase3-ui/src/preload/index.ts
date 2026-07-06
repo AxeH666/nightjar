@@ -28,6 +28,16 @@ contextBridge.exposeInMainWorld("nightjar", {
     ipcRenderer.on("nightjar:status", handler)
     return () => ipcRenderer.removeListener("nightjar:status", handler)
   },
+  // Local vision (Ollama gemma3:4b): status, one-click model install, and an
+  // "install Ollama" link for when it isn't present.
+  getVisionStatus: (): Promise<unknown> => ipcRenderer.invoke("nightjar:visionStatus"),
+  installVisionModel: (): Promise<unknown> => ipcRenderer.invoke("nightjar:visionInstallModel"),
+  openOllamaDownload: (): Promise<void> => ipcRenderer.invoke("nightjar:openOllamaDownload"),
+  onVisionStatus: (cb: (s: unknown) => void) => {
+    const handler = (_e: unknown, s: unknown) => cb(s)
+    ipcRenderer.on("nightjar:visionStatus", handler)
+    return () => ipcRenderer.removeListener("nightjar:visionStatus", handler)
+  },
   // BYOK — raw keys never cross this bridge; only masked status in, key text out.
   byok: {
     keyStorageMode: (): Promise<string> => ipcRenderer.invoke("byok:keyStorageMode"),

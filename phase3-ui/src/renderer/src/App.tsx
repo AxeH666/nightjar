@@ -10,6 +10,7 @@ import { NightjarOrb } from "./components/orb/NightjarOrb"
 import { HealthStrip, type ServiceStatus } from "./components/HealthStrip"
 import { ModelSwitcher } from "./components/ModelSwitcher"
 import { CloudBanner } from "./components/CloudBanner"
+import { VisionBanner } from "./components/VisionBanner"
 import { BYOKSettings } from "./components/BYOKSettings"
 import {
   byok,
@@ -367,6 +368,7 @@ export default function App() {
       <CloudBanner model={activeChoice} onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)} />
 
       <HealthStrip services={services} />
+      <VisionBanner />
 
       {rateLimitOffer && (
         <div className="flex items-center gap-3 border-b border-nightjar-alert/50 bg-nightjar-alert/10 px-4 py-2 text-sm text-nightjar-text/90">
