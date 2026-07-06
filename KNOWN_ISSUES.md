@@ -8,6 +8,55 @@ kept for the historical record with their root cause + fix + verification.
 
 ## 🔧 OPEN
 
+## NJ-6 — image_gen: cloud path enabled (permission + endpoint); local-first backend still pending — PARTIAL 2026-07-06
+- **Severity:** medium (was: does not work at all). Chat→image now works via a **cloud**
+  OpenAI-compatible endpoint once seeded; the **local-first/offline** backend is still pending.
+- **✅ Progress (2026-07-06):**
+  - **Gap 1 FIXED** — `odysseus-image_generate_image` granted (`"ask"`) in **assistant** mode
+    (`opencode.json`), so the agent can call it (still approval-gated, per rule 1).
+  - **Gap 2 — cloud endpoint mechanism added + verified.** `phase2-odysseus/seed_image_endpoint.py`
+    registers an OpenAI-compatible image endpoint in Odysseus's `model_endpoints` DB (key
+    Fernet-encrypted at rest), enables `image_gen_enabled`, and sets `image_model`. **Verified
+    end-to-end** by `phase2-odysseus/test_image_gen.py` against a **mock** OpenAI endpoint: the
+    real `image_gen_server.py` path resolved the endpoint → POST `/images/generations` → b64
+    decode → **wrote a real PNG** → returned a link (PASS).
+  - **Gap 2b — auto-wired from the single BYOK key (no separate script).** The main process
+    (`phase3-ui/src/main/index.ts`) now runs the seed automatically whenever an **OpenAI**
+    key is set/removed in the BYOK panel (`byok:set`/`byok:remove`, passing the decrypted key
+    via env → `NIGHTJAR_IMAGE_MODEL=dall-e-3` by default), and re-seeds any stored key at
+    startup. So pasting the OpenAI key is the only step — image gen, chat, etc. all work from
+    it. Verified end-to-end (mock OpenAI): set→endpoint row (encrypted key decrypts) + image
+    generated; remove→endpoint deleted. (`test_image_gen.py`, 4/4.)
+  - ⚠️ **Not yet verified against real OpenAI** (no key in this environment; `gpt-image-1`
+    needs OpenAI org verification — `dall-e-3`, the auto-wire default, works without). The full
+    live **paste-key → chat → approval → image** flow needs a running-app + real-key check.
+  - **Still OPEN:** the **local-first/offline** backend (Z-Image-Turbo via `diffusion_server.py`)
+    is deferred to **Step 11** (installer model-download) as planned — the cloud path above is
+    an interim opt-in that sends prompts off-machine.
+- **Severity note (original, for history):** image generation **did not work at all** — two
+  independent gaps below.
+- **Gap 1 — no mode can call the tool.** All three agent modes in `opencode.json`
+  (assistant/coding/research) are deny-by-default (`"*": "deny"`) and none whitelists
+  `odysseus-image_generate_image`, so the agent is **not permitted to invoke it even when the
+  user asks in chat** (correct per rule 1 — the tool was simply never added to an allow-list).
+- **Gap 2 — no image endpoint configured (not local-first).** The `odysseus-image` MCP
+  (`research/odysseus/mcp_servers/image_gen_server.py`) is API-based and resolves its endpoint
+  from **Odysseus's own `ModelEndpoint` DB — NOT Nightjar's BYOK keys** — which is empty, so
+  even a permitted call returns "No image model found." As shipped it would only work by
+  pointing at **cloud** OpenAI (`gpt-image-1`/`dall-e-3`), contradicting local-first.
+- **Root cause:** the tool was never granted to a mode, and the local `diffusers` server
+  (`research/odysseus/scripts/diffusion_server.py`) exists but is launched/wired nowhere with
+  no `image_model` configured.
+- **Fix idea (Step-3 audit recommendation):** (a) grant `odysseus-image_generate_image` to a
+  mode (e.g. assistant, `"ask"`); (b) run `diffusion_server.py --model Tongyi-MAI/Z-Image-Turbo`
+  (Apache-2.0, ~6 GB VRAM) as a managed sidecar and register it as the Odysseus image endpoint;
+  pull the model in the installer's model-download step. **Never** default to FLUX.1-dev / SD 3.5
+  (non-commercial / community-licensed). Full audit + license table:
+  `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md` → "Image-generation model licenses".
+- **Scheduled:** small implementation task — natural home is the **one-command installer**
+  (Step 11, model download) + a one-line `opencode.json` permission grant. The license audit
+  itself (Step 3) is ✅ done.
+
 ## NJ-5 — BYOK key change can't be applied to an *adopted* opencode-serve — OPEN 2026-07-06
 - **Severity:** low — only affects the adopt path (a `opencode serve` already on
   :4096 when Nightjar starts, e.g. a leftover/dev instance); the normal path
