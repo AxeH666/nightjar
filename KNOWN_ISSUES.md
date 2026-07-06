@@ -6,6 +6,42 @@ kept for the historical record with their root cause + fix + verification.
 
 ---
 
+## 🔧 OPEN
+
+## NJ-5 — BYOK key change can't be applied to an *adopted* opencode-serve — OPEN 2026-07-06
+- **Severity:** low — only affects the adopt path (a `opencode serve` already on
+  :4096 when Nightjar starts, e.g. a leftover/dev instance); the normal path
+  where Nightjar spawns the engine is unaffected.
+- **Symptom:** adding/removing a cloud key does not take effect; the key stays
+  inert until Nightjar (and the engine) is fully restarted.
+- **Root cause:** the supervisor adopts a healthy service by *port probe* and
+  never captures the external PID, so `restartService()` has no process to stop
+  and cannot re-exec it with the new `NIGHTJAR_BYOK_*` env.
+- **Mitigation shipped (feat/byok-cloud-keys):** `restartService()` now detects
+  this instead of spawning a colliding second engine that the stale one would
+  shadow — it surfaces an "adopted / can't apply" state + health-strip detail
+  telling the user to restart Nightjar. So the failure is honest, not silent.
+- **Fix idea:** capture the PID at adoption (port→PID lookup) so adopted services
+  can be cleanly restarted, or offer to take over the port.
+
+## NJ-4 — Renderer SSE stream does not auto-reconnect after an engine restart — OPEN 2026-07-06
+- **Severity:** medium — chat silently stops working (dead stream + stale session
+  id) until a full window reload.
+- **Symptom:** after `opencode-serve` restarts, the renderer keeps its original
+  one-shot SSE subscription and session id; new prompts target a session that no
+  longer exists and no events arrive.
+- **Root cause:** the connect `useEffect` in `App.tsx` subscribes exactly once and,
+  on stream close, only calls `setStatus("stream closed…")` — it never re-enters
+  the connect/retry loop. Predates BYOK; the supervisor's crash→auto-restart of
+  opencode-serve already triggered it.
+- **Mitigation shipped (feat/byok-cloud-keys):** the BYOK-triggered restart now
+  forces a reconnect (recreate session + resubscribe) via a `reconnectTick`. The
+  **crash-restart** path is still uncovered.
+- **Fix idea:** on SSE close, re-enter the bounded connect/retry loop (the same one
+  used at startup) instead of parking on a status string.
+
+---
+
 ## ✅ RESOLVED
 
 ## NJ-3 — Duplicate messages in the chat surface — FIXED 2026-07-05

@@ -48,6 +48,12 @@ export default function App() {
   const [activeModel, setActiveModel] = useState<string>(LOCAL_MODEL.id)
   const [showKeys, setShowKeys] = useState(false)
   const [fallbackOffer, setFallbackOffer] = useState<string | null>(null) // last prompt text, if a cloud send failed
+  // Bump to force the connect effect to re-run. A BYOK key change restarts
+  // opencode-serve, which kills our SSE stream and invalidates the session id;
+  // without a reconnect, chat stays broken (dead stream, stale session) until a
+  // full reload. byok.set/remove await the restart, so by the time we bump this
+  // the fresh engine is already healthy and the reconnect lands on it.
+  const [reconnectTick, setReconnectTick] = useState(0)
   const lastSentRef = useRef<string>("")
   // mirror activeModel into a ref so the SSE handler can read it without being a
   // dependency (which would tear down + resubscribe the stream on every switch).
@@ -200,11 +206,15 @@ export default function App() {
         case "session.error":
           if (mine) {
             setBusy(false)
-            const detail = p.error?.name ?? p.error ?? "unknown"
-            setStatus(`error: ${detail}`)
+            const name: string | undefined = p.error?.name
+            setStatus(`error: ${name ?? p.error ?? "unknown"}`)
             // Graceful cloud fallback: a cloud model failing (bad/expired key,
             // rate limit, provider down) should offer local, not silently die.
-            if (!isLocalModel(activeModelRef.current) && lastSentRef.current) {
+            // But NOT every session.error is the cloud provider's fault — a user
+            // abort or a local tool/MCP failure isn't, and offering "the cloud
+            // model failed, retry on local" for those is misleading. Skip those.
+            const notProviderFailure = name === "MessageAbortedError" || name === "MCPFailed"
+            if (!isLocalModel(activeModelRef.current) && lastSentRef.current && !notProviderFailure) {
               setFallbackOffer(lastSentRef.current)
             }
           }
@@ -250,7 +260,7 @@ export default function App() {
       }
     })()
     return () => ac.abort()
-  }, [handleEvent])
+  }, [handleEvent, reconnectTick])
 
   // ---- actions ----
   function send(text: string, modelOverride?: string) {
@@ -352,10 +362,12 @@ export default function App() {
         <BYOKSettings
           onClose={() => setShowKeys(false)}
           onChanged={() => {
-            // key added/removed → engine is restarting; refresh model choices +
-            // show the user the reconnect status.
-            setStatus("applying key — restarting engine…")
+            // key added/removed → engine was restarted; refresh model choices and
+            // re-establish the session + SSE stream against the fresh engine (the
+            // old session id and stream are dead after the restart).
+            setStatus("applying key — reconnecting…")
             loadModels()
+            setReconnectTick((t) => t + 1)
           }}
         />
       )}

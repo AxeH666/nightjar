@@ -7,18 +7,21 @@ import { join, resolve, sep } from "path"
 import { homedir, tmpdir } from "os"
 import { readFile } from "fs/promises"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices } from "./services"
+import { nightjarServices, REPO } from "./services"
 import * as byok from "./byok"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
-const NIGHTJAR_ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
 
 // The env opencode-serve runs with: repo root + the (decrypted) BYOK keys under
 // their non-standard NIGHTJAR_BYOK_* names, which opencode.json references via
 // {env:...}. Recomputed on every key change so a removed key's var disappears.
+// NIGHTJAR_ROOT MUST match services.ts's REPO (module-derived, portable) — do NOT
+// re-derive it here with a ~/nightjar default, or this overlay would clobber the
+// correct value and break every {env:NIGHTJAR_ROOT} MCP path when the repo isn't
+// literally at ~/nightjar.
 function opencodeServeEnv(): Record<string, string> {
-  return { NIGHTJAR_ROOT, ...byok.envForOpencode() }
+  return { NIGHTJAR_ROOT: REPO, ...byok.envForOpencode() }
 }
 
 // Roots the renderer is allowed to read TTS audio from (Kokoro writes under the

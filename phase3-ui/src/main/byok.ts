@@ -132,10 +132,15 @@ export function getKey(providerId: string): string | null {
   return b64 ? decrypt(b64) : null
 }
 
-// Status for the renderer — masked, never the raw key.
+// Status for the renderer — masked, never the raw key. `hasKey` must mean "a
+// USABLE key is present", i.e. the ciphertext both exists AND decrypts — not just
+// "ciphertext on disk". Otherwise a key that can no longer be decrypted (keychain
+// reset, moved machine, safeStorage backend flip) would show as configured in the
+// UI and be offered in the model switcher while envForOpencode() silently skips
+// it, so the engine never gets it — a confusing "key set but cloud calls fail".
 export function listStatus(): Array<ByokProvider & { hasKey: boolean }> {
   const s = readStore()
-  return providerCatalog().map((p) => ({ ...p, hasKey: Boolean(s[p.id]) }))
+  return providerCatalog().map((p) => ({ ...p, hasKey: Boolean(s[p.id]) && decrypt(s[p.id]) !== null }))
 }
 
 // MAIN-PROCESS ONLY: decrypt everything into the non-standard env vars that
@@ -144,10 +149,16 @@ export function envForOpencode(): Record<string, string> {
   const s = readStore()
   const out: Record<string, string> = {}
   for (const p of providerCatalog()) {
-    if (s[p.id]) {
-      const k = decrypt(s[p.id])
-      if (k) out[p.envVar] = k
-    }
+    const b64 = s[p.id]
+    if (!b64) continue
+    const k = decrypt(b64)
+    if (k) out[p.envVar] = k
+    else
+      console.warn(
+        `[byok] stored key for "${p.id}" is present but could not be decrypted ` +
+          "(OS keychain changed?) — skipping injection; re-enter the key to restore it. " +
+          "listStatus() reports it as absent so it stays consistent with this.",
+      )
   }
   return out
 }
