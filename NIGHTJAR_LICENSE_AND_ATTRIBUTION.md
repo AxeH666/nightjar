@@ -93,7 +93,8 @@ auto-detecting `gpt-image-1.5` / `gpt-image-1` / `dall-e-3` when unconfigured. N
 `opencode.json` sets **no** `image_model` or local image endpoint, so out of the box image
 generation would call **OpenAI's cloud** (needs a BYOK OpenAI key). There is currently **no
 local image model wired**, and therefore **no restrictive local checkpoint on the
-active/shipped path**.
+active/shipped path**. (Image generation is also **non-functional as shipped** for a second,
+non-license reason — no agent mode is granted the `generate_image` tool; see NJ-6.)
 
 **Latent local path.** `research/odysseus/scripts/diffusion_server.py` is a local,
 `diffusers`-backed OpenAI-compatible image server, but it is **launched/referenced nowhere
