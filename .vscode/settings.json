@@ -1,0 +1,15 @@
+{
+  // The research/ upstream clones (opencode, row-bot, open-webui, orb-ui,
+  // gemma-chat) are git-IGNORED development references, each carrying its own
+  // .git. Without this, VS Code auto-detects them as separate source-control
+  // repositories and clutters the SCM view + file-explorer decorations ("dots")
+  // with their internal status. Ignore them here so only the Nightjar repo shows.
+  // (research/odysseus is a real SUBMODULE of this repo — intentionally NOT listed.)
+  "git.ignoredRepositories": [
+    "research/gemma-chat",
+    "research/opencode",
+    "research/open-webui",
+    "research/orb-ui",
+    "research/row-bot"
+  ]
+}

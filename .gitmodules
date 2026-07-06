@@ -1,3 +1,8 @@
 [submodule "research/odysseus"]
 	path = research/odysseus
 	url = https://github.com/pewdiepie-archdaemon/odysseus.git
+	# The Odysseus integration patch (phase2-odysseus/odysseus-patches/) is applied
+	# on top of the pinned commit, so the submodule working tree is intentionally
+	# "dirty". ignore=dirty keeps `git status` / editors from flagging that as a
+	# change (the gitlink COMMIT is still tracked normally).
+	ignore = dirty
