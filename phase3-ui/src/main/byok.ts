@@ -83,8 +83,18 @@ function writeStore(s: Record<string, string>): void {
   writeFileSync(p, JSON.stringify(s, null, 2), { mode: 0o600 })
 }
 
-export function secureAvailable(): boolean {
-  return safeStorage.isEncryptionAvailable()
+// How keys can be stored on THIS machine — drives the settings UI (enable/disable
+// + honest messaging), so it must not overstate safety:
+//  • "encrypted"   — real OS-keychain encryption is available.
+//  • "insecure"    — no keychain, but the NIGHTJAR_BYOK_ALLOW_INSECURE test hatch
+//                    is on, so setKey() will store via safeStorage's basic_text
+//                    obfuscation. NOT real encryption — test only.
+//  • "unavailable" — no keychain and no hatch → saving is refused (never plaintext).
+export type KeyStorageMode = "encrypted" | "insecure" | "unavailable"
+
+export function keyStorageMode(): KeyStorageMode {
+  if (safeStorage.isEncryptionAvailable()) return "encrypted"
+  return ALLOW_INSECURE ? "insecure" : "unavailable"
 }
 
 export function setKey(providerId: string, key: string): void {

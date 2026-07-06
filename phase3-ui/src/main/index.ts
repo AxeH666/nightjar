@@ -76,7 +76,7 @@ ipcMain.handle("nightjar:restart", async (_e, _name: string) => {
 // ── BYOK (bring-your-own-key) IPC ─────────────────────────────────────────────
 // The renderer only ever gets provider catalog + masked status; raw keys stay in
 // the main process (encrypted at rest, decrypted only to inject into the engine).
-ipcMain.handle("byok:secureAvailable", () => byok.secureAvailable())
+ipcMain.handle("byok:keyStorageMode", () => byok.keyStorageMode())
 ipcMain.handle("byok:list", () =>
   byok.listStatus().map((p) => ({ id: p.id, name: p.name, defaultModel: p.defaultModel, keyHint: p.keyHint, hasKey: p.hasKey })),
 )

@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react"
-import { byok, type ByokProviderStatus } from "../lib/byok"
+import { byok, type ByokProviderStatus, type KeyStorageMode } from "../lib/byok"
 
 // Modal to manage cloud provider API keys. Keys are stored encrypted-at-rest by
 // the main process (OS keychain); this panel only ever sees masked status.
 // Adding/removing a key restarts the engine so it picks up the new provider.
 export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const [providers, setProviders] = useState<ByokProviderStatus[]>([])
-  const [secure, setSecure] = useState<boolean | null>(null)
+  const [mode, setMode] = useState<KeyStorageMode | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Saving is only refused outright when there's no keychain AND no test hatch.
+  const savingDisabled = mode === "unavailable"
+
   async function refresh() {
     setProviders(await byok.list())
-    setSecure(await byok.secureAvailable())
+    setMode(await byok.keyStorageMode())
   }
   useEffect(() => {
     refresh()
@@ -68,13 +71,19 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
             regardless of which keys are set.
           </p>
 
-          {/* secure storage status */}
-          {secure === true && (
+          {/* storage mode — must be honest about whether keys are truly encrypted */}
+          {mode === "encrypted" && (
             <p className="text-xs text-nightjar-text/60">
               🔒 Keys are encrypted at rest via your OS keychain (Keychain / DPAPI / libsecret).
             </p>
           )}
-          {secure === false && (
+          {mode === "insecure" && (
+            <p className="rounded-md border border-nightjar-alert/60 bg-nightjar-alert/10 p-2 text-xs text-nightjar-alert">
+              ⚠️ <b>TEST MODE (NIGHTJAR_BYOK_ALLOW_INSECURE)</b> — no OS keychain on this machine, so keys are stored with
+              weak obfuscation, <b>not real encryption</b>. Fine for local testing; do <b>not</b> store real production keys.
+            </p>
+          )}
+          {mode === "unavailable" && (
             <p className="rounded-md border border-nightjar-alert/60 bg-nightjar-alert/10 p-2 text-xs text-nightjar-alert">
               ⚠️ Your OS secure storage (keychain) is unavailable, so saving keys is <b>disabled</b> on this machine —
               Nightjar will never write a key in plaintext. Enable a system keyring, or use macOS/Windows.
@@ -117,12 +126,12 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
                     placeholder={p.hasKey ? "replace key…" : p.keyHint}
                     value={drafts[p.id] ?? ""}
                     onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                    disabled={secure === false || busy === p.id}
+                    disabled={savingDisabled || busy === p.id}
                     className="flex-1 rounded-md bg-nightjar-surface px-2 py-1 font-mono text-xs text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent disabled:opacity-50"
                   />
                   <button
                     onClick={() => save(p.id)}
-                    disabled={secure === false || busy === p.id || !(drafts[p.id] ?? "").trim()}
+                    disabled={savingDisabled || busy === p.id || !(drafts[p.id] ?? "").trim()}
                     className="rounded-md bg-nightjar-accent px-3 py-1 text-xs font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
                   >
                     {busy === p.id ? "saving…" : "save"}

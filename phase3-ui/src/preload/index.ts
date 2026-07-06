@@ -30,7 +30,7 @@ contextBridge.exposeInMainWorld("nightjar", {
   },
   // BYOK — raw keys never cross this bridge; only masked status in, key text out.
   byok: {
-    secureAvailable: (): Promise<boolean> => ipcRenderer.invoke("byok:secureAvailable"),
+    keyStorageMode: (): Promise<string> => ipcRenderer.invoke("byok:keyStorageMode"),
     list: (): Promise<ByokProviderStatus[]> => ipcRenderer.invoke("byok:list"),
     set: (providerId: string, key: string): Promise<void> => ipcRenderer.invoke("byok:set", providerId, key),
     remove: (providerId: string): Promise<void> => ipcRenderer.invoke("byok:remove", providerId),
