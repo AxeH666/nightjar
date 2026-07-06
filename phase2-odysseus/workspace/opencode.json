@@ -52,6 +52,7 @@
         "odysseus-pim_calendar_create_event": "allow", "odysseus-pim_calendar_list_events": "allow",
         "odysseus-docs_document_search": "allow",
         "nightjar_save_memory": "allow", "nightjar_search_memory": "allow",
+        "nightjar_analyze_image": "allow",
         "odysseus-email_list_emails": "allow",
         "odysseus-email_send_email": "ask",
         "odysseus-image_generate_image": "ask"

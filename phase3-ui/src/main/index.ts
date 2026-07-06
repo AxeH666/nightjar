@@ -2,11 +2,12 @@
 // Phase 3: window + supervise the local sidecar stack (llama-server, inference
 // proxy, `opencode serve`, side-channel). The window shows immediately with a
 // health strip; the renderer connects to OpenCode once it reports healthy.
-import { app, BrowserWindow, ipcMain } from "electron"
-import { join, resolve, sep } from "path"
+import { app, BrowserWindow, ipcMain, dialog } from "electron"
+import { join, resolve, sep, basename, extname } from "path"
 import { homedir, tmpdir } from "os"
-import { readFile } from "fs/promises"
+import { readFile, writeFile, mkdir } from "fs/promises"
 import { spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
 import { nightjarServices, REPO } from "./services"
 import * as byok from "./byok"
@@ -100,6 +101,76 @@ ipcMain.handle("nightjar:readAudio", async (_e, filePath: string): Promise<Array
 })
 ipcMain.handle("nightjar:restart", async (_e, _name: string) => {
   /* per-service restart hook (future); supervisor already auto-restarts on crash */
+})
+
+// ── Chat attachments IPC ──────────────────────────────────────────────────────
+// Native file picker + read/save so the composer can attach files (paste/drag/
+// browse). Attachments become base64 data URLs (what OpenCode's file parts require);
+// images are also saved to disk so the local vision tool (nightjar_analyze_image,
+// which takes a path) can reach them. Generated images are read back for inline display.
+const ATTACHMENTS_DIR = join(homedir(), ".nightjar", "attachments")
+const GENERATED_IMAGES_DIR = join(ODYSSEUS_DATA_DIR, "generated_images")
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+  ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml",
+  ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
+  ".json": "application/json", ".csv": "text/csv", ".log": "text/plain",
+}
+const mimeForPath = (p: string): string => MIME_BY_EXT[extname(p).toLowerCase()] || "application/octet-stream"
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024 // 25 MB
+
+// Open the native file dialog; returns absolute paths ([] if cancelled).
+ipcMain.handle("nightjar:pickFiles", async (): Promise<string[]> => {
+  const opts: Electron.OpenDialogOptions = {
+    title: "Attach files",
+    properties: ["openFile", "multiSelections"],
+    filters: [
+      { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] },
+      { name: "Documents", extensions: ["pdf", "txt", "md", "json", "csv", "log"] },
+      { name: "All files", extensions: ["*"] },
+    ],
+  }
+  const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+  return r.canceled ? [] : r.filePaths
+})
+
+// Read a user-picked file (from the dialog) → base64 data URL + metadata. The user
+// explicitly chose it, so no root-guard (unlike readAudio); a size cap applies.
+ipcMain.handle(
+  "nightjar:readAttachment",
+  async (_e, filePath: string): Promise<{ name: string; mime: string; dataUrl: string; size: number; path: string }> => {
+    const abs = resolve(String(filePath))
+    const buf = await readFile(abs)
+    if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error(`attachment too large (max ${MAX_ATTACHMENT_BYTES} bytes)`)
+    const mime = mimeForPath(abs)
+    return { name: basename(abs), mime, size: buf.byteLength, path: abs, dataUrl: `data:${mime};base64,${buf.toString("base64")}` }
+  },
+)
+
+// Save a pasted/dragged attachment's bytes (a base64 data URL) to the attachments
+// dir so a disk path exists for the local vision tool. Returns the absolute path.
+ipcMain.handle("nightjar:saveAttachment", async (_e, dataUrl: string, name: string): Promise<string> => {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(String(dataUrl))
+  if (!m) throw new Error("saveAttachment: expected a base64 data URL")
+  const buf = Buffer.from(m[2], "base64")
+  if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error("attachment too large")
+  await mkdir(ATTACHMENTS_DIR, { recursive: true })
+  const ext = extname(String(name)) || "." + ((m[1].split("/")[1] || "bin").replace("jpeg", "jpg"))
+  const abs = join(ATTACHMENTS_DIR, `${randomUUID().slice(0, 12)}${ext}`)
+  await writeFile(abs, buf, { mode: 0o600 })
+  return abs
+})
+
+// Read a generated image (by filename) from Odysseus's generated_images dir → data
+// URL, so chat can render it inline (the tool returns a web path not served here).
+ipcMain.handle("nightjar:readGeneratedImage", async (_e, filename: string): Promise<string | null> => {
+  const abs = join(GENERATED_IMAGES_DIR, basename(String(filename))) // basename → no traversal
+  try {
+    const buf = await readFile(abs)
+    return `data:${mimeForPath(abs) || "image/png"};base64,${buf.toString("base64")}`
+  } catch {
+    return null
+  }
 })
 
 // ── BYOK (bring-your-own-key) IPC ─────────────────────────────────────────────
