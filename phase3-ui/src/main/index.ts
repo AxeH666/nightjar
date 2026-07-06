@@ -199,21 +199,48 @@ ipcMain.handle("byok:remove", async (_e, providerId: string) => {
 // OLLAMA_HOST). Detect readiness, auto-pull the model if Ollama is running but the
 // model is missing, and surface status to the renderer. Cloud vision (BYOK) stays
 // available as the alternative; this is the offline default.
-let visionState: VisionStatus = { ollama: "absent", model: "unknown" }
+// `model: "unknown"` (not "absent") is the honest pre-probe state: we haven't
+// checked Ollama yet, so the banner must not assert "Install Ollama". The status
+// IPC live-probes on demand so a slow supervisor start can't leave the renderer
+// staring at a stale default for the whole boot window.
+let visionState: VisionStatus = { ollama: "installed", model: "unknown", detail: "checking local vision…" }
 function pushVision(s: VisionStatus): void {
   visionState = s
   win?.webContents.send("nightjar:visionStatus", s)
 }
-async function ensureVision(autoPull = process.env.NIGHTJAR_VISION_AUTOPULL !== "0"): Promise<void> {
-  pushVision(await visionStatus())
-  if (visionState.ollama === "running" && visionState.model === "missing" && autoPull) {
-    pushVision({ ollama: "running", model: "pulling", pct: 0, detail: "starting download…" })
-    const ok = await pullVisionModel((pct, status) => pushVision({ ollama: "running", model: "pulling", pct, detail: status }))
+// Single-flight guard: startup auto-pull, a "Download gemma3:4b" click, and a
+// double-click can all land here at once. Without this, each would re-probe and
+// kick off an overlapping pullVisionModel(), resetting the UI from "pulling" back
+// to "missing" and firing concurrent /api/pull streams. Concurrent callers share
+// the one in-flight run; `pulling` lets the status IPC avoid clobbering its UI.
+let visionInFlight: Promise<void> | null = null
+let visionPulling = false
+function ensureVision(autoPull = process.env.NIGHTJAR_VISION_AUTOPULL !== "0"): Promise<void> {
+  if (visionInFlight) return visionInFlight
+  visionInFlight = (async () => {
     pushVision(await visionStatus())
-    console.log("[vision] gemma3:4b pull", ok ? "complete" : "failed/aborted")
-  }
+    if (visionState.ollama === "running" && visionState.model === "missing" && autoPull) {
+      visionPulling = true
+      pushVision({ ollama: "running", model: "pulling", pct: 0, detail: "starting download…" })
+      const ok = await pullVisionModel((pct, status) => pushVision({ ollama: "running", model: "pulling", pct, detail: status }))
+      pushVision(await visionStatus())
+      console.log("[vision] gemma3:4b pull", ok ? "complete" : "failed/aborted")
+    }
+  })().finally(() => {
+    visionInFlight = null
+    visionPulling = false
+  })
+  return visionInFlight
 }
-ipcMain.handle("nightjar:visionStatus", () => visionState)
+// Live-probe when idle so the banner is accurate from first paint; while a pull is
+// streaming, return the cached "pulling" state instead of stomping it with "missing".
+ipcMain.handle("nightjar:visionStatus", async () => {
+  if (!visionPulling && !visionInFlight) {
+    const s = await visionStatus()
+    if (!visionPulling && !visionInFlight) pushVision(s) // re-check: a pull may have begun during the probe
+  }
+  return visionState
+})
 ipcMain.handle("nightjar:visionInstallModel", async () => {
   await ensureVision(true)
   return visionState
