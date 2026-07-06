@@ -1,0 +1,28 @@
+Nightjar Capabilities
+Copyright 2026 BlackKrait Technologies
+
+This product includes software extracted and modified from Row-Bot
+(https://github.com/siddsachar/row-bot), used under the Apache License, 2.0.
+
+The following NOTICE is preserved from the original Row-Bot distribution, per
+Apache License 2.0 section 4(d):
+
+    ------------------------------------------------------------------------
+    Row-Bot
+    Copyright 2026 Row-Bot Contributors
+
+    Licensed under the Apache License, Version 2.0.
+    ------------------------------------------------------------------------
+
+Modifications made by BlackKrait Technologies for the Nightjar project
+(Apache License 2.0 section 4(b)): the voice (faster-whisper / kokoro-onnx),
+vision, hybrid graph+vector memory, and Playwright browser modules were
+extracted from Row-Bot and modified to remove all LangChain / LangGraph /
+NiceGUI dependencies and orchestration, to run headless, and to be exposed
+through a Model Context Protocol (MCP) server plus a WebSocket side-channel.
+The embedding backend was changed from HuggingFace/torch to a local Ollama
+embedding model. Each derived source file carries a header noting it is a
+modified extract of the corresponding Row-Bot source.
+
+The full text of the Apache License 2.0 governing the Row-Bot-derived portions
+is included in this package as LICENSE.row-bot.

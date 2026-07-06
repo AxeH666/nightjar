@@ -1,0 +1,99 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "llamacpp": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llama.cpp (local)",
+      "options": { "baseURL": "http://127.0.0.1:8086/v1" },
+      "models": { "qwen3-4b-instruct-2507": { "name": "Qwen3-4B-Instruct-2507 Q4_K_M" } }
+    }
+  },
+  "agent": {
+    "research": {
+      "mode": "primary",
+      "description": "Web research then email a summary",
+      "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, or `row-bot` (e.g. `odysseus-research_deep_research`) — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, or Row-Bot; those are internal building blocks you use, not you. As Nightjar in research mode: you research a topic on the web with deep_research, then email a concise summary with send_email. Always call deep_research first, then send_email with the findings.",
+      "permission": {
+        "*": "deny",
+        "odysseus-research_deep_research": "allow",
+        "odysseus-email_send_email": "ask"
+      }
+    },
+    "assistant": {
+      "mode": "primary",
+      "description": "Personal assistant: notes, tasks, calendar, memory, email, documents",
+      "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, or `row-bot` (e.g. `odysseus-email_send_email`) — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, or Row-Bot; those are internal building blocks you use, not you. As Nightjar in assistant mode: use the note/task/calendar/memory/email/document tools to help with personal tasks.",
+      "permission": {
+        "*": "deny",
+        "odysseus-pim_note_create": "allow", "odysseus-pim_note_list": "allow",
+        "odysseus-pim_task_create": "allow", "odysseus-pim_task_list": "allow",
+        "odysseus-pim_calendar_create_event": "allow", "odysseus-pim_calendar_list_events": "allow",
+        "odysseus-docs_document_search": "allow",
+        "nightjar_save_memory": "allow", "nightjar_search_memory": "allow",
+        "odysseus-email_list_emails": "allow",
+        "odysseus-email_send_email": "ask"
+      }
+    },
+    "coding": {
+      "mode": "primary",
+      "description": "Local coding agent (reads allowed; edits/shell gated for approval)",
+      "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, or `row-bot` — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, or Row-Bot; those are internal building blocks you use, not you. As Nightjar in coding mode: use the filesystem/shell tools to complete coding tasks.",
+      "permission": {
+        "*": "deny",
+        "read": "allow", "list": "allow", "glob": "allow", "grep": "allow", "todowrite": "allow",
+        "edit": "ask", "write": "ask", "bash": "ask"
+      }
+    }
+  },
+  "mcp": {
+    "nightjar": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-mcp/venv/bin/python", "/home/axehe/nightjar/phase2-mcp/mcp_server.py"],
+      "environment": { "NIGHTJAR_DATA_DIR": "/home/axehe/.nightjar", "NIGHTJAR_WHISPER_SIZE": "base.en", "OLLAMA_HOST": "http://localhost:11434" },
+      "enabled": true,
+      "timeout": 120000
+    },
+    "odysseus-email": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/research/odysseus/mcp_servers/email_server.py"],
+      "environment": { "PYTHONPATH": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "enabled": true,
+      "timeout": 120000
+    },
+    "odysseus-image": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/research/odysseus/mcp_servers/image_gen_server.py"],
+      "environment": { "PYTHONPATH": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "enabled": true,
+      "timeout": 120000
+    },
+    "odysseus-rag": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/research/odysseus/mcp_servers/rag_server.py"],
+      "environment": { "PYTHONPATH": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "enabled": true,
+      "timeout": 120000
+    },
+    "odysseus-research": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/phase2-odysseus/servers/deep_research_server.py"],
+      "environment": { "ODYSSEUS_REPO": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "NIGHTJAR_LLM_ENDPOINT": "http://127.0.0.1:8086/v1", "NIGHTJAR_LLM_MODEL": "qwen3-4b-instruct-2507", "SEARCH_PROVIDER": "duckduckgo" },
+      "enabled": true,
+      "timeout": 120000
+    },
+    "odysseus-docs": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/phase2-odysseus/servers/docs_query_server.py"],
+      "environment": { "ODYSSEUS_REPO": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma" },
+      "enabled": true,
+      "timeout": 120000
+    },
+    "odysseus-pim": {
+      "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/phase2-odysseus/servers/pim_server.py"],
+      "environment": { "ODYSSEUS_REPO": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "enabled": true,
+      "timeout": 120000
+    }
+  }
+}

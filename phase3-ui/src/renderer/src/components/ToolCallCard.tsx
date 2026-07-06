@@ -1,0 +1,37 @@
+import type { ToolCall } from "../lib/opencode"
+
+// A tool call rendered from message.part.updated events, keyed by callID. The
+// same card advances pending → running → completed/error as events arrive.
+const STATUS: Record<ToolCall["status"], { label: string; dot: string; ring: string }> = {
+  pending: { label: "queued", dot: "bg-nightjar-text/40", ring: "border-nightjar-surface" },
+  running: { label: "running", dot: "bg-nightjar-accent animate-pulse", ring: "border-nightjar-accent/60" },
+  completed: { label: "done", dot: "bg-emerald-500", ring: "border-nightjar-surface" },
+  error: { label: "error", dot: "bg-nightjar-alert", ring: "border-nightjar-alert/70" },
+}
+
+export function ToolCallCard({ call }: { call: ToolCall }) {
+  const s = STATUS[call.status]
+  const argStr = call.input ? JSON.stringify(call.input) : ""
+  return (
+    <div className={`my-2 rounded-lg border ${s.ring} bg-nightjar-surface/60 px-3 py-2 font-mono text-sm`}>
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${s.dot}`} />
+        <span className="text-nightjar-accent">{call.tool}</span>
+        <span className="text-nightjar-text/50 text-xs uppercase tracking-wide">{s.label}</span>
+      </div>
+      {argStr && (
+        <div className="mt-1 truncate text-nightjar-text/60 text-xs" title={argStr}>
+          {argStr.length > 160 ? argStr.slice(0, 160) + "…" : argStr}
+        </div>
+      )}
+      {call.status === "completed" && call.output && (
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-nightjar-text/80 text-xs">
+          {call.output.length > 800 ? call.output.slice(0, 800) + "\n…(truncated)" : call.output}
+        </pre>
+      )}
+      {call.status === "error" && call.error && (
+        <div className="mt-2 text-nightjar-alert text-xs">{call.error}</div>
+      )}
+    </div>
+  )
+}
