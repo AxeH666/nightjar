@@ -24,10 +24,19 @@ PATCH="$ROOT/phase2-odysseus/odysseus-patches/nightjar-odysseus.patch"
 if git -C research/odysseus apply --reverse --check "$PATCH" 2>/dev/null; then
   echo "   already applied — skipping"
 elif git -C research/odysseus apply --check "$PATCH" 2>/dev/null; then
-  git -C research/odysseus apply "$PATCH"
+  # HARD-FAIL if the apply itself fails — a missing patch means the Odysseus tier
+  # runs WITHOUT embedded ChromaDB (no-docker) + the docs RAG fix, which breaks at
+  # runtime. Better to stop setup here than to "succeed" into a broken install.
+  if ! git -C research/odysseus apply "$PATCH"; then
+    echo "   ERROR: Odysseus patch failed to apply (after passing --check)." >&2
+    exit 1
+  fi
   echo "   applied ($PATCH)"
 else
-  echo "   WARNING: patch neither applies cleanly nor is already applied — check $PATCH"
+  echo "   ERROR: Odysseus patch does not apply cleanly and is not already applied." >&2
+  echo "          The Odysseus tier would be MISSING embedded ChromaDB (no-docker)." >&2
+  echo "          Inspect the submodule commit vs the patch: $PATCH" >&2
+  exit 1
 fi
 
 # 3) Python venvs + deps --------------------------------------------------------
