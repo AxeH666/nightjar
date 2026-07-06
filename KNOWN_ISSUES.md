@@ -8,6 +8,23 @@ kept for the historical record with their root cause + fix + verification.
 
 ## 🔧 OPEN
 
+## NJ-6 — image_gen isn't local-first: no local image backend wired (defaults to cloud) — OPEN 2026-07-06
+- **Severity:** medium — a capability positioned as local-first isn't: image generation
+  silently requires a cloud OpenAI (BYOK) key and sends prompts off-machine.
+- **Symptom:** the `odysseus-image` MCP (`research/odysseus/mcp_servers/image_gen_server.py`)
+  is API-based, and Nightjar's `opencode.json` configures no local image endpoint — so it
+  auto-detects cloud OpenAI models (`gpt-image-1`/`dall-e-3`), or errors "No image model
+  found" when no key is set. No offline image path out of the box.
+- **Root cause:** the local `diffusers` server (`research/odysseus/scripts/diffusion_server.py`)
+  exists but is launched/wired nowhere, and no `image_model` is configured.
+- **Fix idea (Step-3 audit recommendation):** run `diffusion_server.py --model
+  Tongyi-MAI/Z-Image-Turbo` (Apache-2.0, ~6 GB VRAM) as a managed sidecar and point
+  `odysseus-image` at it; pull the model in the installer's model-download step. **Never**
+  default to FLUX.1-dev / SD 3.5 (non-commercial / community-licensed). Full audit + license
+  table: `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md` → "Image-generation model licenses".
+- **Scheduled:** wiring is a small implementation task — natural home is the **one-command
+  installer** (Step 11, model download). The license audit itself (Step 3) is ✅ done.
+
 ## NJ-5 — BYOK key change can't be applied to an *adopted* opencode-serve — OPEN 2026-07-06
 - **Severity:** low — only affects the adopt path (a `opencode serve` already on
   :4096 when Nightjar starts, e.g. a leftover/dev instance); the normal path
