@@ -9,6 +9,10 @@ export interface ByokProviderStatus {
   hasKey: boolean // a key is configured (encrypted) for this provider
 }
 
+// How keys can be stored on this machine (mirrors the main-process type). Drives
+// the settings UI's enable/disable + honest "encrypted vs test-only" messaging.
+export type KeyStorageMode = "encrypted" | "insecure" | "unavailable"
+
 // A model the user can pick. `local` marks the offline default.
 export interface ModelChoice {
   id: string // "providerID/modelID" — the value sent to opencode per prompt
@@ -24,7 +28,7 @@ export const LOCAL_MODEL: ModelChoice = {
 }
 
 interface NightjarByokBridge {
-  secureAvailable(): Promise<boolean>
+  keyStorageMode(): Promise<KeyStorageMode>
   list(): Promise<ByokProviderStatus[]>
   set(providerId: string, key: string): Promise<void>
   remove(providerId: string): Promise<void>
@@ -35,8 +39,8 @@ function bridge(): NightjarByokBridge | null {
 }
 
 export const byok = {
-  async secureAvailable(): Promise<boolean> {
-    return (await bridge()?.secureAvailable()) ?? false
+  async keyStorageMode(): Promise<KeyStorageMode> {
+    return (await bridge()?.keyStorageMode()) ?? "unavailable"
   },
   async list(): Promise<ByokProviderStatus[]> {
     return (await bridge()?.list()) ?? []

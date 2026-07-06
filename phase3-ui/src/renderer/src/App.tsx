@@ -21,7 +21,7 @@ declare global {
       onStatus?(cb: (s: ServiceStatus[]) => void): () => void
       readAudio?(path: string): Promise<ArrayBuffer>
       byok?: {
-        secureAvailable(): Promise<boolean>
+        keyStorageMode(): Promise<string>
         list(): Promise<unknown[]>
         set(providerId: string, key: string): Promise<void>
         remove(providerId: string): Promise<void>
