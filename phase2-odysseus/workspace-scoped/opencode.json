@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "llamacpp": { "npm": "@ai-sdk/openai-compatible", "name": "llama.cpp",
+      "options": { "baseURL": "http://127.0.0.1:8086/v1" },
+      "models": { "qwen3-4b-instruct-2507": { "name": "Qwen3-4B" } } }
+  },
+  "mcp": {
+    "odysseus-docs": { "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/phase2-odysseus/servers/docs_query_server.py"],
+      "environment": { "ODYSSEUS_REPO": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma" },
+      "enabled": true, "timeout": 120000 },
+    "odysseus-email": { "type": "local",
+      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/research/odysseus/mcp_servers/email_server.py"],
+      "environment": { "PYTHONPATH": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "enabled": true, "timeout": 120000 }
+  }
+}

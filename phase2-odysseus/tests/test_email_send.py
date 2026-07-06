@@ -1,0 +1,30 @@
+"""Drive the odysseus-email MCP server over stdio and call send_email; the local
+SMTP catcher (:2525) should receive the message. Proves the email send path
+works offline through MCP."""
+import asyncio, os, json
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+REPO = "/home/axehe/nightjar/research/odysseus"
+PY = "/home/axehe/nightjar/phase2-odysseus/venv/bin/python"
+
+async def main():
+    env = dict(os.environ)
+    env.update({"PYTHONPATH": REPO, "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus",
+                "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma",
+                "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar"})
+    params = StdioServerParameters(command=PY, args=[f"{REPO}/mcp_servers/email_server.py"], env=env)
+    async with stdio_client(params) as (r, w):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            tools = await s.list_tools()
+            print("email tools:", len(tools.tools))
+            res = await s.call_tool("send_email", {
+                "_odysseus_owner": "nightjar",
+                "to": "boss@example.com",
+                "subject": "Nightjar test summary",
+                "body": "This is a Phase 2b end-to-end email send test.",
+            })
+            print("send result:", (res.content[0].text if res.content else "")[:300])
+
+asyncio.run(main())
