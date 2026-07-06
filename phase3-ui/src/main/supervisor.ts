@@ -167,6 +167,39 @@ export class Supervisor {
     }, 5000)
   }
 
+  // Replace a service's env overlay (used before start to inject BYOK keys).
+  setEnv(name: string, env: Record<string, string>): void {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (m) m.def.env = env
+  }
+
+  // Cleanly restart one service, optionally with a fresh env overlay (BYOK key
+  // add/remove). Removes the old child's exit listener first so the crash-restart
+  // path can't race our respawn, then waits for the port to free.
+  async restartService(name: string, env?: Record<string, string>): Promise<void> {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (!m) return
+    if (env) m.def.env = env
+    if (m.healthTimer) {
+      clearInterval(m.healthTimer)
+      m.healthTimer = undefined
+    }
+    const c = m.child
+    if (c) {
+      m.intentionalStop = true
+      c.removeAllListeners("exit")
+      if (c.pid) {
+        try {
+          process.kill(-c.pid, "SIGKILL")
+        } catch {}
+      }
+      m.child = undefined
+    }
+    await sleep(1000) // let the port free before re-binding
+    m.status.restarts = 0
+    await this.spawn(m)
+  }
+
   async stop(): Promise<void> {
     for (const m of this.managed) {
       m.intentionalStop = true

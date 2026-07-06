@@ -9,6 +9,14 @@ export interface ServiceStatus {
   detail?: string
 }
 
+export interface ByokProviderStatus {
+  id: string
+  name: string
+  defaultModel: string
+  keyHint: string
+  hasKey: boolean
+}
+
 contextBridge.exposeInMainWorld("nightjar", {
   getConfig: (): Promise<{ opencodeUrl: string; sideChannelUrl: string }> =>
     ipcRenderer.invoke("nightjar:config"),
@@ -19,5 +27,12 @@ contextBridge.exposeInMainWorld("nightjar", {
     const handler = (_e: unknown, s: ServiceStatus[]) => cb(s)
     ipcRenderer.on("nightjar:status", handler)
     return () => ipcRenderer.removeListener("nightjar:status", handler)
+  },
+  // BYOK — raw keys never cross this bridge; only masked status in, key text out.
+  byok: {
+    secureAvailable: (): Promise<boolean> => ipcRenderer.invoke("byok:secureAvailable"),
+    list: (): Promise<ByokProviderStatus[]> => ipcRenderer.invoke("byok:list"),
+    set: (providerId: string, key: string): Promise<void> => ipcRenderer.invoke("byok:set", providerId, key),
+    remove: (providerId: string): Promise<void> => ipcRenderer.invoke("byok:remove", providerId),
   },
 })
