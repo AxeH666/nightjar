@@ -14,7 +14,7 @@ const BUN = process.env.NIGHTJAR_BUN || join(HOME, ".bun/bin/bun")
 // project is cloned anywhere else). This file sits at <repo>/phase3-ui/src/main/
 // under bun and <repo>/phase3-ui/out/main/ in the Electron build — both are three
 // levels below the repo root, so the same "../../.." resolves correctly in either.
-const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
+export const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 const OPENCODE_ENTRY = join(REPO, "research/opencode/packages/opencode/src/index.ts")
 const LLAMA_BIN = process.env.NIGHTJAR_LLAMA_BIN || join(HOME, "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")

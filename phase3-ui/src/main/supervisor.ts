@@ -167,6 +167,63 @@ export class Supervisor {
     }, 5000)
   }
 
+  // Replace a service's env overlay (used before start to inject BYOK keys).
+  setEnv(name: string, env: Record<string, string>): void {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (m) m.def.env = env
+  }
+
+  // Cleanly restart one service, optionally with a fresh env overlay (BYOK key
+  // add/remove). Removes the old child's exit listener first so the crash-restart
+  // path can't race our respawn, then waits for the port to free before rebinding.
+  //
+  // ADOPTED services are the tricky case: `bring()` adopts a process already
+  // answering the port WITHOUT spawning it, so we hold no `m.child`/PID and CANNOT
+  // stop it. Blindly spawning here would bind-conflict with (and be shadowed by)
+  // that still-running stale process, so the new env (e.g. a BYOK key) would never
+  // take effect — silently. We detect that and surface it instead of colliding.
+  async restartService(name: string, env?: Record<string, string>): Promise<void> {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (!m) return
+    if (env) m.def.env = env
+    if (m.healthTimer) {
+      clearInterval(m.healthTimer)
+      m.healthTimer = undefined
+    }
+    const c = m.child
+    const owned = Boolean(c) // did WE spawn it? (adopted processes have no child)
+    if (c) {
+      m.intentionalStop = true
+      c.removeAllListeners("exit")
+      if (c.pid) {
+        try {
+          process.kill(-c.pid, "SIGKILL")
+        } catch {}
+      }
+      m.child = undefined
+    }
+    if (owned) {
+      // We killed our own child — wait for its port to actually release before
+      // rebinding (poll rather than a fixed sleep; exits as soon as it's free).
+      const freeBy = Date.now() + 6000
+      while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+    } else if (await m.def.ready()) {
+      // Adopted/unmanaged process still holds the port and we have no PID to stop
+      // it. Respawning would only collide and let the stale process shadow the new
+      // env, so bail loudly and keep watching the process that is actually running.
+      this.set(
+        m,
+        "adopted",
+        "cannot apply change: opencode-serve is running unmanaged (adopted) and still holds its port — " +
+          "restart Nightjar (or stop that process) to pick up the API-key change",
+      )
+      this.beginHealthWatch(m)
+      return
+    }
+    m.status.restarts = 0
+    await this.spawn(m)
+  }
+
   async stop(): Promise<void> {
     for (const m of this.managed) {
       m.intentionalStop = true

@@ -8,8 +8,10 @@ import { SuggestionBanner } from "./components/SuggestionBanner"
 import { PermissionPanel } from "./components/PermissionPanel"
 import { NightjarOrb } from "./components/orb/NightjarOrb"
 import { HealthStrip, type ServiceStatus } from "./components/HealthStrip"
-
-const DEFAULT_MODEL = "llamacpp/qwen3-4b-instruct-2507"
+import { ModelSwitcher } from "./components/ModelSwitcher"
+import { CloudBanner } from "./components/CloudBanner"
+import { BYOKSettings } from "./components/BYOKSettings"
+import { byok, modelChoices, isLocalModel, LOCAL_MODEL, type ModelChoice } from "./lib/byok"
 
 declare global {
   interface Window {
@@ -18,6 +20,12 @@ declare global {
       getStatus?(): Promise<ServiceStatus[]>
       onStatus?(cb: (s: ServiceStatus[]) => void): () => void
       readAudio?(path: string): Promise<ArrayBuffer>
+      byok?: {
+        secureAvailable(): Promise<boolean>
+        list(): Promise<unknown[]>
+        set(providerId: string, key: string): Promise<void>
+        remove(providerId: string): Promise<void>
+      }
     }
   }
 }
@@ -33,6 +41,39 @@ export default function App() {
   const [status, setStatus] = useState<string>("connecting…")
   const [services, setServices] = useState<ServiceStatus[]>([])
   const [wsUrl, setWsUrl] = useState<string>("ws://127.0.0.1:8765")
+  // BYOK: active model is GLOBAL (applies to whatever mode is active). Chosen over
+  // per-mode for simplicity — the per-prompt `model` arg already supports per-mode
+  // later; this keeps one piece of state. Default = local offline model.
+  const [choices, setChoices] = useState<ModelChoice[]>([LOCAL_MODEL])
+  const [activeModel, setActiveModel] = useState<string>(LOCAL_MODEL.id)
+  const [showKeys, setShowKeys] = useState(false)
+  const [fallbackOffer, setFallbackOffer] = useState<string | null>(null) // last prompt text, if a cloud send failed
+  // Bump to force the connect effect to re-run. A BYOK key change restarts
+  // opencode-serve, which kills our SSE stream and invalidates the session id;
+  // without a reconnect, chat stays broken (dead stream, stale session) until a
+  // full reload. byok.set/remove await the restart, so by the time we bump this
+  // the fresh engine is already healthy and the reconnect lands on it.
+  const [reconnectTick, setReconnectTick] = useState(0)
+  const lastSentRef = useRef<string>("")
+  // mirror activeModel into a ref so the SSE handler can read it without being a
+  // dependency (which would tear down + resubscribe the stream on every switch).
+  const activeModelRef = useRef<string>(LOCAL_MODEL.id)
+
+  const loadModels = useCallback(async () => {
+    const providers = (await byok.list()) as Awaited<ReturnType<typeof byok.list>>
+    const next = modelChoices(providers)
+    setChoices(next)
+    // if the active model's provider key was removed, fall back to local
+    setActiveModel((cur) => (next.some((c) => c.id === cur) ? cur : LOCAL_MODEL.id))
+  }, [])
+  useEffect(() => {
+    loadModels()
+  }, [loadModels])
+
+  const activeChoice = choices.find((c) => c.id === activeModel) ?? LOCAL_MODEL
+  useEffect(() => {
+    activeModelRef.current = activeModel
+  }, [activeModel])
 
   const clientRef = useRef<OpenCodeClient | null>(null)
   const sessionRef = useRef<string>("")
@@ -165,7 +206,17 @@ export default function App() {
         case "session.error":
           if (mine) {
             setBusy(false)
-            setStatus(`error: ${p.error?.name ?? p.error ?? "unknown"}`)
+            const name: string | undefined = p.error?.name
+            setStatus(`error: ${name ?? p.error ?? "unknown"}`)
+            // Graceful cloud fallback: a cloud model failing (bad/expired key,
+            // rate limit, provider down) should offer local, not silently die.
+            // But NOT every session.error is the cloud provider's fault — a user
+            // abort or a local tool/MCP failure isn't, and offering "the cloud
+            // model failed, retry on local" for those is misleading. Skip those.
+            const notProviderFailure = name === "MessageAbortedError" || name === "MCPFailed"
+            if (!isLocalModel(activeModelRef.current) && lastSentRef.current && !notProviderFailure) {
+              setFallbackOffer(lastSentRef.current)
+            }
           }
           break
       }
@@ -209,22 +260,34 @@ export default function App() {
       }
     })()
     return () => ac.abort()
-  }, [handleEvent])
+  }, [handleEvent, reconnectTick])
 
   // ---- actions ----
-  function send(text: string) {
+  function send(text: string, modelOverride?: string) {
     const client = clientRef.current
     if (!client || !sessionRef.current || !mode) return
     setSuggestion(null)
+    setFallbackOffer(null)
     const sug = suggestMode(text, mode, agents.map((a) => a.name))
     if (sug) setSuggestion(sug)
     const uid = `local-${Date.now()}`
     setMessages((prev) => [...prev, { id: uid, role: "user", blocks: [{ kind: "text", text }] }])
     setBusy(true)
-    client.promptAsync(sessionRef.current, text, mode, DEFAULT_MODEL).catch((err) => {
+    lastSentRef.current = text
+    const model = modelOverride ?? activeModel
+    client.promptAsync(sessionRef.current, text, mode, model).catch((err) => {
       setBusy(false)
       setStatus(`send failed: ${err?.message ?? err}`)
+      if (!isLocalModel(model)) setFallbackOffer(text)
     })
+  }
+
+  // Retry the last prompt on the local model after a cloud failure.
+  function fallbackToLocal() {
+    const text = fallbackOffer
+    setFallbackOffer(null)
+    setActiveModel(LOCAL_MODEL.id)
+    if (text) send(text, LOCAL_MODEL.id)
   }
 
   async function reply(kind: ReplyKind) {
@@ -247,13 +310,37 @@ export default function App() {
       <header className="flex items-center gap-3 border-b border-nightjar-surface px-4 py-2">
         <span className="font-semibold text-nightjar-accent">Nightjar</span>
         {agents.length > 0 && <ModeSelector agents={agents} active={mode} onChange={setMode} />}
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex items-center gap-3">
+          <ModelSwitcher
+            choices={choices}
+            activeId={activeModel}
+            onSelect={setActiveModel}
+            onManageKeys={() => setShowKeys(true)}
+          />
           <span className="text-xs text-nightjar-text/40">{status}</span>
           <NightjarOrb wsUrl={wsUrl} />
         </div>
       </header>
 
+      {/* Unmissable cloud-active indicator (privacy). Renders nothing when local. */}
+      <CloudBanner model={activeChoice} onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)} />
+
       <HealthStrip services={services} />
+
+      {fallbackOffer && (
+        <div className="flex items-center gap-3 border-b border-nightjar-alert/50 bg-nightjar-alert/10 px-4 py-2 text-sm text-nightjar-text/90">
+          <span>The cloud model failed (bad/expired key, rate limit, or provider down).</span>
+          <button
+            onClick={fallbackToLocal}
+            className="rounded-md bg-nightjar-accent px-3 py-1 text-xs font-medium text-nightjar-base hover:brightness-110"
+          >
+            Retry on local model
+          </button>
+          <button onClick={() => setFallbackOffer(null)} className="text-xs text-nightjar-text/50 hover:underline">
+            dismiss
+          </button>
+        </div>
+      )}
 
       {suggestion && (
         <SuggestionBanner
@@ -271,6 +358,19 @@ export default function App() {
       </main>
 
       {ask && <PermissionPanel ask={ask} onReply={reply} onAbort={abort} />}
+      {showKeys && (
+        <BYOKSettings
+          onClose={() => setShowKeys(false)}
+          onChanged={() => {
+            // key added/removed → engine was restarted; refresh model choices and
+            // re-establish the session + SSE stream against the fresh engine (the
+            // old session id and stream are dead after the restart).
+            setStatus("applying key — reconnecting…")
+            loadModels()
+            setReconnectTick((t) => t + 1)
+          }}
+        />
+      )}
     </div>
   )
 }
