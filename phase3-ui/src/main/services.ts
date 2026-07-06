@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ServiceDef } from "./supervisor"
 import { httpOk } from "./supervisor"
+import { findOllama, OLLAMA_HOST } from "./vision"
 
 const HOME = os.homedir()
 const BUN = process.env.NIGHTJAR_BUN || join(HOME, ".bun/bin/bun")
@@ -36,7 +37,8 @@ function tcpOpen(host: string, port: number, timeoutMs = 1500): Promise<boolean>
 }
 
 export function nightjarServices(): ServiceDef[] {
-  return [
+  const ollamaBin = findOllama()
+  const services: ServiceDef[] = [
     {
       name: "llama-server",
       command: LLAMA_BIN,
@@ -89,4 +91,19 @@ export function nightjarServices(): ServiceDef[] {
       readyTimeoutMs: 20000,
     },
   ]
+  // Ollama hosts the local VISION model (gemma3:4b) for nightjar_analyze_image — add
+  // it only if installed. A system daemon already on :11434 is ADOPTED (not double-
+  // spawned); otherwise we run `ollama serve`. Placed LAST + best-effort: its absence
+  // just means local image analysis is unavailable (cloud vision/BYOK still works),
+  // and it never delays the core stack.
+  if (ollamaBin) {
+    services.push({
+      name: "ollama",
+      command: ollamaBin,
+      args: ["serve"],
+      ready: () => httpOk(`${OLLAMA_HOST}/api/tags`),
+      readyTimeoutMs: 20000,
+    })
+  }
+  return services
 }

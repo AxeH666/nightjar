@@ -2,7 +2,7 @@
 // Phase 3: window + supervise the local sidecar stack (llama-server, inference
 // proxy, `opencode serve`, side-channel). The window shows immediately with a
 // health strip; the renderer connects to OpenCode once it reports healthy.
-import { app, BrowserWindow, ipcMain, dialog } from "electron"
+import { app, BrowserWindow, ipcMain, dialog, shell } from "electron"
 import { join, resolve, sep, basename, extname } from "path"
 import { homedir, tmpdir } from "os"
 import { readFile, writeFile, mkdir } from "fs/promises"
@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
 import { nightjarServices, REPO } from "./services"
 import * as byok from "./byok"
+import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -193,6 +194,59 @@ ipcMain.handle("byok:remove", async (_e, providerId: string) => {
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 
+// ── Local vision (Ollama gemma3:4b) — status + auto-pull ──────────────────────
+// nightjar_analyze_image routes to Ollama's vision model (NIGHTJAR_VISION_MODEL @
+// OLLAMA_HOST). Detect readiness, auto-pull the model if Ollama is running but the
+// model is missing, and surface status to the renderer. Cloud vision (BYOK) stays
+// available as the alternative; this is the offline default.
+// `model: "unknown"` (not "absent") is the honest pre-probe state: we haven't
+// checked Ollama yet, so the banner must not assert "Install Ollama". The status
+// IPC live-probes on demand so a slow supervisor start can't leave the renderer
+// staring at a stale default for the whole boot window.
+let visionState: VisionStatus = { ollama: "installed", model: "unknown", detail: "checking local vision…" }
+function pushVision(s: VisionStatus): void {
+  visionState = s
+  win?.webContents.send("nightjar:visionStatus", s)
+}
+// Single-flight guard: startup auto-pull, a "Download gemma3:4b" click, and a
+// double-click can all land here at once. Without this, each would re-probe and
+// kick off an overlapping pullVisionModel(), resetting the UI from "pulling" back
+// to "missing" and firing concurrent /api/pull streams. Concurrent callers share
+// the one in-flight run; `pulling` lets the status IPC avoid clobbering its UI.
+let visionInFlight: Promise<void> | null = null
+let visionPulling = false
+function ensureVision(autoPull = process.env.NIGHTJAR_VISION_AUTOPULL !== "0"): Promise<void> {
+  if (visionInFlight) return visionInFlight
+  visionInFlight = (async () => {
+    pushVision(await visionStatus())
+    if (visionState.ollama === "running" && visionState.model === "missing" && autoPull) {
+      visionPulling = true
+      pushVision({ ollama: "running", model: "pulling", pct: 0, detail: "starting download…" })
+      const ok = await pullVisionModel((pct, status) => pushVision({ ollama: "running", model: "pulling", pct, detail: status }))
+      pushVision(await visionStatus())
+      console.log("[vision] gemma3:4b pull", ok ? "complete" : "failed/aborted")
+    }
+  })().finally(() => {
+    visionInFlight = null
+    visionPulling = false
+  })
+  return visionInFlight
+}
+// Live-probe when idle so the banner is accurate from first paint; while a pull is
+// streaming, return the cached "pulling" state instead of stomping it with "missing".
+ipcMain.handle("nightjar:visionStatus", async () => {
+  if (!visionPulling && !visionInFlight) {
+    const s = await visionStatus()
+    if (!visionPulling && !visionInFlight) pushVision(s) // re-check: a pull may have begun during the probe
+  }
+  return visionState
+})
+ipcMain.handle("nightjar:visionInstallModel", async () => {
+  await ensureVision(true)
+  return visionState
+})
+ipcMain.handle("nightjar:openOllamaDownload", () => shell.openExternal("https://ollama.com/download"))
+
 app.whenReady().then(() => {
   createWindow()
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
@@ -201,8 +255,16 @@ app.whenReady().then(() => {
   // (so keys entered before this feature — or on a fresh launch — just work).
   const storedOpenAI = byok.getKey("openai")
   if (storedOpenAI) seedImageEndpoint(storedOpenAI)
-  // fire-and-forget: bring up the stack; the health strip reflects progress
-  if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") supervisor.start().catch((e) => console.error("supervisor:", e))
+  // fire-and-forget: bring up the stack; the health strip reflects progress. Once
+  // the stack (incl. the ollama service) is up, ensure the local vision model.
+  if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") {
+    supervisor
+      .start()
+      .then(() => ensureVision())
+      .catch((e) => console.error("supervisor:", e))
+  } else {
+    ensureVision().catch(() => {})
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
