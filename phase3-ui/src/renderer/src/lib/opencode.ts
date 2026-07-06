@@ -47,6 +47,14 @@ export interface OpenCodeEvent {
   properties: any
 }
 
+// An attachment sent alongside a prompt. `url` is a base64 data URL
+// (`data:<mime>;base64,…`) — OpenCode requires that for remote image/file parts.
+export interface FilePart {
+  mime: string
+  url: string
+  filename?: string
+}
+
 export class OpenCodeClient {
   constructor(
     private baseUrl: string,
@@ -87,20 +95,29 @@ export class OpenCodeClient {
 
   // Fire-and-forget: run a prompt under `agent` (our mode). Events arrive via subscribe().
   // `model` is a "providerID/modelID" string; OpenCode expects a ModelRef object.
-  async promptAsync(sessionID: string, text: string, agent: string, model?: string): Promise<void> {
+  // `files` are attachments: OpenCode's `file` part type where `url` MUST be a base64
+  // data URL (`data:<mime>;base64,…`) for a remote client — there is no separate
+  // "image" part type (images are `file` with an image/* mime) and no path field.
+  async promptAsync(
+    sessionID: string,
+    text: string,
+    agent: string,
+    model?: string,
+    files?: FilePart[],
+  ): Promise<void> {
     let modelRef: { providerID: string; modelID: string } | undefined
     if (model) {
       const slash = model.indexOf("/")
       if (slash > 0) modelRef = { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) }
     }
+    const parts: Array<Record<string, unknown>> = [{ type: "text", text }]
+    for (const f of files ?? []) {
+      parts.push({ type: "file", mime: f.mime, url: f.url, ...(f.filename ? { filename: f.filename } : {}) })
+    }
     const res = await fetch(this.url(`/session/${sessionID}/prompt_async`), {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({
-        agent,
-        ...(modelRef ? { model: modelRef } : {}),
-        parts: [{ type: "text", text }],
-      }),
+      body: JSON.stringify({ agent, ...(modelRef ? { model: modelRef } : {}), parts }),
     })
     if (!res.ok && res.status !== 204) {
       throw new Error(`POST prompt_async → ${res.status}: ${await res.text()}`)

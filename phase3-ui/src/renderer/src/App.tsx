@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { OpenCodeClient, toolCallFromPart } from "./lib/opencode"
-import type { AgentInfo, PermissionAsk, ReplyKind, OpenCodeEvent } from "./lib/opencode"
+import type { AgentInfo, PermissionAsk, ReplyKind, OpenCodeEvent, FilePart } from "./lib/opencode"
 import { suggestMode } from "./lib/suggestMode"
-import { ChatSurface, type UiMessage } from "./components/ChatSurface"
+import { ChatSurface, type UiMessage, type UiBlock } from "./components/ChatSurface"
+import { type Attachment, loadGeneratedImage } from "./lib/attachments"
 import { ModeSelector } from "./components/ModeSelector"
 import { SuggestionBanner } from "./components/SuggestionBanner"
 import { PermissionPanel } from "./components/PermissionPanel"
@@ -108,6 +109,8 @@ export default function App() {
   // not assume "assistant" — a user echo's part would then render as a second
   // assistant bubble. Stash here and flush once the role is known.
   const pendingParts = useRef<Map<string, any[]>>(new Map())
+  // callIDs whose generated image we've already loaded inline (avoid re-appending).
+  const loadedImages = useRef<Set<string>>(new Set())
 
   // ---- upsert helpers over UiMessage[] ----
   const ensureMessage = useCallback((id: string, role: "user" | "assistant") => {
@@ -140,6 +143,20 @@ export default function App() {
         return { ...m, blocks }
       }),
     )
+    // When an image-generation tool completes, load the PNG from disk and append it
+    // as an inline image (the tool returns a web link that isn't served in the app).
+    if (call.status === "completed" && call.output && /generate_image/i.test(call.tool) && !loadedImages.current.has(call.callID)) {
+      const m = /generated-image\/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))/i.exec(call.output)
+      if (m) {
+        loadedImages.current.add(call.callID)
+        loadGeneratedImage(m[1]).then((src) => {
+          if (!src) return
+          setMessages((prev) =>
+            prev.map((mm) => (mm.id === messageID ? { ...mm, blocks: [...mm.blocks, { kind: "image", src, name: m[1] }] } : mm)),
+          )
+        })
+      }
+    }
   }, [])
 
   // Render one assistant message part (text or tool). Used both for live parts
@@ -293,23 +310,65 @@ export default function App() {
   }, [handleEvent, reconnectTick])
 
   // ---- actions ----
-  function send(text: string, modelOverride?: string) {
+  function send(text: string, attachments?: Attachment[], modelOverride?: string) {
     const client = clientRef.current
     if (!client || !sessionRef.current || !mode) return
+    const atts = attachments ?? []
     setSuggestion(null)
     setFallbackOffer(null)
     setRateLimitOffer(null)
     const sug = suggestMode(text, mode, agents.map((a) => a.name))
     if (sug) setSuggestion(sug)
     const uid = `local-${Date.now()}`
-    setMessages((prev) => [...prev, { id: uid, role: "user", blocks: [{ kind: "text", text }] }])
+    // Optimistic render: the text + attachment previews (image thumbnails / file chips).
+    const blocks: UiBlock[] = []
+    if (text) blocks.push({ kind: "text", text })
+    for (const a of atts) {
+      if (a.isImage) blocks.push({ kind: "image", src: a.dataUrl, name: a.name })
+      else blocks.push({ kind: "file", name: a.name, mime: a.mime, size: a.size })
+    }
+    if (blocks.length === 0) blocks.push({ kind: "text", text: "" })
+    setMessages((prev) => [...prev, { id: uid, role: "user", blocks }])
     setBusy(true)
     lastSentRef.current = text
     const model = modelOverride ?? activeModel
-    client.promptAsync(sessionRef.current, text, mode, model).catch((err) => {
+    // Attachments as OpenCode `file` parts (base64 data URLs). A vision-capable cloud
+    // model sees images directly; a text-only model gets an auto-inserted "can't read"
+    // note — so for images with a saved path we ALSO steer the local model to the
+    // path-taking vision tool. The original text stays in the bubble; the hint only
+    // rides to the agent (not shown).
+    const files: FilePart[] = atts.map((a) => ({ mime: a.mime, url: a.dataUrl, filename: a.name }))
+    const imgPaths = atts.filter((a) => a.isImage && a.path).map((a) => a.path as string)
+    const promptText = imgPaths.length
+      ? `${text ? text + "\n\n" : ""}[The user attached ${imgPaths.length} image${imgPaths.length > 1 ? "s" : ""} at: ${imgPaths.join(", ")}. If you can see the image(s) directly, use them; otherwise call the analyze_image tool with the path to describe each.]`
+      : text
+    client.promptAsync(sessionRef.current, promptText, mode, model, files).catch((err) => {
       setBusy(false)
       setStatus(`send failed: ${err?.message ?? err}`)
       if (!isLocalModel(model)) setFallbackOffer(text)
+    })
+  }
+
+  // Create Image button: steer the agent to call the image-generation tool directly.
+  // OpenCode has no client-side tool_choice, so this is a strong directive; the tool
+  // is granted in ASSISTANT mode, so we run there.
+  function createImage(prompt: string) {
+    const client = clientRef.current
+    if (!client || !sessionRef.current) return
+    const imgAgent = agents.some((a) => a.name === "assistant") ? "assistant" : mode
+    if (!imgAgent) return
+    if (imgAgent !== mode) setMode(imgAgent)
+    setSuggestion(null)
+    setFallbackOffer(null)
+    setRateLimitOffer(null)
+    const uid = `local-${Date.now()}`
+    setMessages((prev) => [...prev, { id: uid, role: "user", blocks: [{ kind: "text", text: `🎨 Create image: ${prompt}` }] }])
+    setBusy(true)
+    lastSentRef.current = prompt
+    const directive = `Use the generate_image tool to create an image now. Image description: "${prompt}". Call the tool immediately; do not ask follow-up questions.`
+    client.promptAsync(sessionRef.current, directive, imgAgent, activeModel).catch((err) => {
+      setBusy(false)
+      setStatus(`create image failed: ${err?.message ?? err}`)
     })
   }
 
@@ -318,7 +377,7 @@ export default function App() {
     const text = fallbackOffer
     setFallbackOffer(null)
     setActiveModel(LOCAL_MODEL.id)
-    if (text) send(text, LOCAL_MODEL.id)
+    if (text) send(text, undefined, LOCAL_MODEL.id)
   }
 
   // Accept the rate-limit switch: move to the free OpenRouter model and resend the
@@ -328,7 +387,7 @@ export default function App() {
     const text = rateLimitOffer?.text
     setRateLimitOffer(null)
     setActiveModel(OPENROUTER_FREE_CHOICE.id)
-    if (text) send(text, OPENROUTER_FREE_CHOICE.id)
+    if (text) send(text, undefined, OPENROUTER_FREE_CHOICE.id)
   }
 
   async function reply(kind: ReplyKind) {
@@ -419,7 +478,7 @@ export default function App() {
       )}
 
       <main className="min-h-0 flex-1">
-        <ChatSurface messages={messages} busy={busy} onSend={send} />
+        <ChatSurface messages={messages} busy={busy} onSend={send} onCreateImage={createImage} />
       </main>
 
       {ask && <PermissionPanel ask={ask} onReply={reply} onAbort={abort} />}
