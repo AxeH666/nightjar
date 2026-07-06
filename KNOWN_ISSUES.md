@@ -8,6 +8,13 @@ kept for the historical record with their root cause + fix + verification.
 
 ## 🔧 OPEN
 
+## NJ-7 — attached-image analysis is model-dependent (local needs Ollama gemma3; Create-Image reliability) — OPEN 2026-07-06
+- **Severity:** low — the attach-and-send *mechanism* (paste/drag/browse → file part → agent) works; only the downstream image *analysis* is conditional.
+- **Detail:** the local Qwen3-4B is **text-only**, so an attached image is only *seen* directly by a **cloud vision model** (BYOK OpenAI/Anthropic/Google). For the **local** route the composer saves the image to disk + hints the path, and `nightjar_analyze_image` is now permission-granted (assistant mode) — but that tool needs **Ollama + `gemma3:4b`** installed/running; without it the call errors. Text docs (`.txt`/`.md`/…) are read server-side and injected as text, so they work on **any** model.
+- **Also:** the **Create Image** button uses a strong directive (OpenCode exposes no client-side `tool_choice`), so a small local model may occasionally not call `generate_image` on the first try.
+- **Fix idea:** bundle/guide the `gemma3:4b` install in the installer (Step 11); optionally ship a vision-capable local model (mmproj); if OpenCode adds forced tool-choice, wire Create-Image to it directly.
+- **Scheduled:** the gemma3 dependency → installer (Step 11); otherwise documented behavior of the chat-attachments feature (`feat/chat-attachments`).
+
 ## NJ-6 — image_gen: cloud path enabled (permission + endpoint); local-first backend still pending — PARTIAL 2026-07-06
 - **Severity:** medium (was: does not work at all). Chat→image now works via a **cloud**
   OpenAI-compatible endpoint once seeded; the **local-first/offline** backend is still pending.
