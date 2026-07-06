@@ -42,6 +42,10 @@ export default function App() {
   // echo of the USER message — send() already renders the user's message
   // optimistically, so rendering the echo too would duplicate it (NJ-3).
   const roleById = useRef<Map<string, "user" | "assistant">>(new Map())
+  // parts that arrive BEFORE their message.updated (role still unknown). We must
+  // not assume "assistant" — a user echo's part would then render as a second
+  // assistant bubble. Stash here and flush once the role is known.
+  const pendingParts = useRef<Map<string, any[]>>(new Map())
 
   // ---- upsert helpers over UiMessage[] ----
   const ensureMessage = useCallback((id: string, role: "user" | "assistant") => {
@@ -76,6 +80,21 @@ export default function App() {
     )
   }, [])
 
+  // Render one assistant message part (text or tool). Used both for live parts
+  // and for parts replayed from the pending buffer once the role is known.
+  const applyAssistantPart = useCallback(
+    (part: any) => {
+      ensureMessage(part.messageID, "assistant")
+      if (part.type === "text") {
+        textParts.current.set(part.id, { messageID: part.messageID, text: part.text ?? "" })
+        setTextBlock(part.messageID, part.id, part.text ?? "")
+      } else if (part.type === "tool") {
+        upsertTool(part.messageID, toolCallFromPart(part))
+      }
+    },
+    [ensureMessage, setTextBlock, upsertTool],
+  )
+
   // ---- event handling (filtered by our sessionID — the stream is instance-wide) ----
   const handleEvent = useCallback(
     (e: OpenCodeEvent) => {
@@ -86,28 +105,40 @@ export default function App() {
       switch (e.type) {
         case "message.updated":
           if (mine && p.info) {
-            roleById.current.set(p.info.id, p.info.role)
-            // Only render assistant messages from the server; the user's own
-            // message is already shown optimistically by send(), so skip its
-            // server echo to avoid a duplicate (NJ-3).
-            if (p.info.role === "assistant") ensureMessage(p.info.id, "assistant")
+            const role: "user" | "assistant" = p.info.role
+            roleById.current.set(p.info.id, role)
+            const stashed = pendingParts.current.get(p.info.id)
+            pendingParts.current.delete(p.info.id)
+            if (role === "assistant") {
+              // Only render assistant messages from the server; the user's own
+              // message is already shown optimistically by send() (NJ-3).
+              ensureMessage(p.info.id, "assistant")
+              // Flush any parts that arrived before this role was known.
+              stashed?.forEach((part) => applyAssistantPart(part))
+            }
+            // role === "user": discard stashed parts (rendered optimistically).
           }
           break
         case "message.part.updated": {
           if (!mine) break
           const part = p.part
           if (!part) break
-          // Skip parts belonging to the user's echoed message (rendered
-          // optimistically already) — processing them would re-add the user
-          // message under the server id, i.e. render it twice (NJ-3).
-          if (roleById.current.get(part.messageID) === "user") break
-          ensureMessage(part.messageID, "assistant")
-          if (part.type === "text") {
-            textParts.current.set(part.id, { messageID: part.messageID, text: part.text ?? "" })
-            setTextBlock(part.messageID, part.id, part.text ?? "")
-          } else if (part.type === "tool") {
-            upsertTool(part.messageID, toolCallFromPart(part))
+          const role = roleById.current.get(part.messageID)
+          // Known user echo → drop (rendered optimistically already, NJ-3).
+          if (role === "user") break
+          // Role not known yet → stash; do NOT assume assistant, or a user echo
+          // whose part precedes its message.updated would render as a second
+          // assistant bubble.
+          if (role === undefined) {
+            const arr = pendingParts.current.get(part.messageID) ?? []
+            // de-dupe by part id so a re-updated part replaces its earlier copy
+            const i = arr.findIndex((q) => q.id === part.id)
+            if (i >= 0) arr[i] = part
+            else arr.push(part)
+            pendingParts.current.set(part.messageID, arr)
+            break
           }
+          applyAssistantPart(part)
           break
         }
         case "message.part.delta": {
@@ -139,7 +170,7 @@ export default function App() {
           break
       }
     },
-    [ensureMessage, setTextBlock, upsertTool],
+    [ensureMessage, setTextBlock, upsertTool, applyAssistantPart],
   )
 
   // ---- sidecar status strip (from the Electron supervisor) ----

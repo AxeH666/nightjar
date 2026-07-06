@@ -124,6 +124,77 @@ async function testB() {
   rmSync(dir, { recursive: true, force: true })
 }
 
+// B2) per-CALL scoping (Bugbot #6): a LATER call that corrupts an EARLIER call's
+// (already-committed) target must still be rolled back — the earlier target is
+// not in scope for the later call.
+async function testB_perCall() {
+  console.log("\n== Plugin B2: git-gate per-call scoping ==")
+  const dir = mkdtempSync(join(tmpdir(), "njB2-"))
+  await $`git -C ${dir} init -q`.quiet()
+  await $`git -C ${dir} config user.email t@t.local`.quiet()
+  await $`git -C ${dir} config user.name t`.quiet()
+  writeFileSync(join(dir, "a.py"), "print('a v1')\n")
+  writeFileSync(join(dir, "b.py"), "print('b v1')\n")
+  await $`git -C ${dir} add -A`.quiet()
+  await $`git -C ${dir} commit -q -m base`.quiet()
+
+  const hooks = await NightjarGitGate(pluginInput(dir))
+  const before = hooks["tool.execute.before"]!
+  const after = hooks["tool.execute.after"]!
+
+  // call 1: legitimately edit a.py, then COMMIT it (a.py is clean again).
+  await before({ tool: "edit", sessionID: "s", callID: "c1" }, { args: { filePath: "a.py" } })
+  writeFileSync(join(dir, "a.py"), "print('a v2 intended')\n")
+  await after({ tool: "edit", sessionID: "s", callID: "c1", args: { filePath: "a.py" } }, { output: "ok" })
+  await $`git -C ${dir} commit -q -am c1`.quiet()
+
+  // call 2: edit b.py (intended) but ALSO corrupt a.py (side effect). a.py is NOT
+  // this call's target and was clean (committed) → must be rolled back.
+  await before({ tool: "edit", sessionID: "s", callID: "c2" }, { args: { filePath: "b.py" } })
+  writeFileSync(join(dir, "b.py"), "print('b v2 intended')\n")
+  writeFileSync(join(dir, "a.py"), "print('a CORRUPTED by later call')\n")
+  await after({ tool: "edit", sessionID: "s", callID: "c2", args: { filePath: "b.py" } }, { output: "ok" })
+
+  check("later call's intended file kept (b.py = v2)", readFileSync(join(dir, "b.py"), "utf8").includes("v2 intended"))
+  check(
+    "earlier target corrupted by a later call is rolled back (a.py = v2, not CORRUPTED)",
+    readFileSync(join(dir, "a.py"), "utf8").includes("v2 intended") &&
+      !readFileSync(join(dir, "a.py"), "utf8").includes("CORRUPTED"),
+  )
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// B3) patch tools (Bugbot #7): apply_patch uses `patchText`, not `filePath`. The
+// gate must extract intended paths from the patch and NOT roll back the patch's
+// own legitimate edits.
+async function testB_patch() {
+  console.log("\n== Plugin B3: git-gate apply_patch path extraction ==")
+  const dir = mkdtempSync(join(tmpdir(), "njB3-"))
+  await $`git -C ${dir} init -q`.quiet()
+  await $`git -C ${dir} config user.email t@t.local`.quiet()
+  await $`git -C ${dir} config user.name t`.quiet()
+  writeFileSync(join(dir, "patched.py"), "print('p v1')\n")
+  writeFileSync(join(dir, "bystander.py"), "print('bystander v1')\n")
+  await $`git -C ${dir} add -A`.quiet()
+  await $`git -C ${dir} commit -q -m base`.quiet()
+
+  const hooks = await NightjarGitGate(pluginInput(dir))
+  const before = hooks["tool.execute.before"]!
+  const after = hooks["tool.execute.after"]!
+
+  const patchText = "*** Begin Patch\n*** Update File: patched.py\n@@\n-print('p v1')\n+print('p v2 intended')\n*** End Patch\n"
+  await before({ tool: "apply_patch", sessionID: "s", callID: "p1" }, { args: { patchText } })
+  writeFileSync(join(dir, "patched.py"), "print('p v2 intended')\n") // the patch's legit effect
+  await after({ tool: "apply_patch", sessionID: "s", callID: "p1", args: { patchText } }, { output: "ok" })
+
+  check(
+    "apply_patch's own edit is KEPT (patched.py = v2, not rolled back)",
+    readFileSync(join(dir, "patched.py"), "utf8").includes("v2 intended"),
+  )
+  check("untouched bystander stays clean", readFileSync(join(dir, "bystander.py"), "utf8").includes("bystander v1"))
+  rmSync(dir, { recursive: true, force: true })
+}
+
 // ---------- C) doom-loop ----------
 async function testC() {
   console.log("\n== Plugin C: doom-loop ==")
@@ -174,6 +245,8 @@ async function testD() {
 
 await testA()
 await testB()
+await testB_perCall()
+await testB_patch()
 await testC()
 await testD()
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)

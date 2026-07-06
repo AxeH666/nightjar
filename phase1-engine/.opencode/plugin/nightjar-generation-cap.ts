@@ -13,7 +13,12 @@
 
 import type { Plugin } from "@opencode-ai/plugin"
 
-const CAP = Number(process.env.NIGHTJAR_MAX_OUTPUT_TOKENS || 2048)
+const DEFAULT_CAP = 2048
+// Validate the env override: a non-numeric / non-positive value (e.g. "2k", "",
+// "-1") must NOT silently produce NaN — that would make `current > CAP` always
+// false and defeat the cap. Fall back to the default in that case.
+const _capEnv = Number(process.env.NIGHTJAR_MAX_OUTPUT_TOKENS)
+const CAP = Number.isFinite(_capEnv) && _capEnv > 0 ? Math.floor(_capEnv) : DEFAULT_CAP
 
 export const NightjarGenerationCap: Plugin = async () => {
   return {

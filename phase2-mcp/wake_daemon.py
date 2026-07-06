@@ -241,6 +241,21 @@ class OpenCodeVoice:
                 if pid not in parts:
                     part_order.append(pid)
                 parts[pid] = parts.get(pid, "") + (p.get("delta") or "")
+            elif et in ("permission.asked", "permission.v2.asked"):
+                # A voice turn has no approval UI (the desktop PermissionPanel only
+                # handles the chat session, not this daemon's session), so a gated
+                # tool (e.g. send_email) would otherwise BLOCK the turn until the
+                # timeout. Auto-REJECT — never auto-approve, which would defeat the
+                # safety gate (CLAUDE.md rule 1). The model gets the rejection and
+                # can tell the user to approve it in the desktop app.
+                req_id = p.get("id") or p.get("requestID")
+                if req_id:
+                    self._reply_permission(
+                        req_id, "reject",
+                        "Auto-rejected: this action needs approval in the Nightjar "
+                        "desktop UI; a voice session can't approve it.")
+                    log(f"auto-rejected permission ask {req_id} "
+                        f"(permission={p.get('permission','?')}) in voice session")
             elif et in ("session.idle", "turn.idle"):
                 break
             elif et == "session.error":
@@ -250,6 +265,17 @@ class OpenCodeVoice:
             parts[pid] for pid in part_order
             if message_role.get(part_owner.get(pid, "")) == "assistant"
         )
+
+    def _reply_permission(self, request_id: str, reply: str, message: str = "") -> None:
+        """Reply to a permission.asked in this daemon's session (see prompt_and_wait)."""
+        try:
+            requests.post(
+                f"{self.base_url}/permission/{request_id}/reply",
+                json={"reply": reply, **({"message": message} if message else {})},
+                timeout=10,
+            )
+        except requests.RequestException as e:
+            log(f"permission reply failed: {e}")
 
     def close(self) -> None:
         self._stop.set()

@@ -22,9 +22,37 @@ import { isAbsolute, join, relative } from "node:path"
 
 const GATED_TOOLS = new Set(["edit", "write", "apply_patch", "patch"])
 
-// per-session state
-const intendedBySession = new Map<string, Set<string>>() // absolute paths
+// per-CALL state (NOT per-session). Scoping intent to the whole session let a
+// later call that accidentally corrupts an earlier target off the hook (the
+// target was still "intended" from before), so the rollback never ran. The
+// preexisting-dirty snapshot below is what legitimately protects earlier edits
+// — so per-call intent is both correct and tighter.
+const intendedByCall = new Map<string, Set<string>>() // callID -> absolute paths this call targets
 const preexistingByCall = new Map<string, Set<string>>() // callID -> dirty-before set (repo-relative)
+
+// Extract the file path(s) a gated tool call intends to touch, across arg shapes:
+//   edit / write            → args.filePath (single file)
+//   apply_patch / patch     → args.patchText (multi-file) — parse paths out of it
+// Returns absolute paths. If this returns empty for a gated call, the gate MUST
+// fail open (never roll back edits it can't attribute — over-broad rollback is
+// itself data loss, the exact failure this plugin exists to prevent).
+function intendedPaths(args: Record<string, unknown> | undefined, root: string): string[] {
+  const toAbs = (p: string) => (isAbsolute(p) ? p : join(root, p))
+  const out: string[] = []
+  for (const k of ["filePath", "path"]) {
+    const v = args?.[k]
+    if (typeof v === "string" && v.trim()) out.push(toAbs(v.trim()))
+  }
+  const patch = args?.["patchText"] ?? args?.["patch"] ?? args?.["diff"]
+  if (typeof patch === "string") {
+    // OpenAI apply_patch envelope: "*** Add|Update|Delete File: <path>" / "*** Move to: <path>"
+    for (const m of patch.matchAll(/^\*\*\*\s+(?:Add|Update|Delete)\s+File:\s+(.+?)\s*$/gm)) out.push(toAbs(m[1]))
+    for (const m of patch.matchAll(/^\*\*\*\s+Move\s+to:\s+(.+?)\s*$/gm)) out.push(toAbs(m[1]))
+    // unified-diff fallback: "+++ b/<path>"
+    for (const m of patch.matchAll(/^\+\+\+\s+b\/(.+?)\s*$/gm)) out.push(toAbs(m[1]))
+  }
+  return out
+}
 
 export const NightjarGitGate: Plugin = async ({ directory, worktree, $ }) => {
   const root = worktree || directory || process.cwd()
@@ -58,17 +86,9 @@ export const NightjarGitGate: Plugin = async ({ directory, worktree, $ }) => {
   return {
     "tool.execute.before": async (input, output) => {
       if (!gitReady || !GATED_TOOLS.has(input.tool)) return
-      const args = output.args as { filePath?: string }
-      // record intended target
-      if (args?.filePath) {
-        const abs = isAbsolute(args.filePath) ? args.filePath : join(root, args.filePath)
-        let set = intendedBySession.get(input.sessionID)
-        if (!set) {
-          set = new Set()
-          intendedBySession.set(input.sessionID, set)
-        }
-        set.add(abs)
-      }
+      // record THIS call's intended target(s), across tool arg shapes
+      const paths = intendedPaths(output.args as Record<string, unknown> | undefined, root)
+      intendedByCall.set(input.callID, new Set(paths))
       // snapshot what was ALREADY dirty before this call — never our responsibility
       try {
         const before = new Set((await dirtyFiles()).map((f) => f.path))
@@ -80,10 +100,23 @@ export const NightjarGitGate: Plugin = async ({ directory, worktree, $ }) => {
 
     "tool.execute.after": async (input, output) => {
       if (!gitReady || !GATED_TOOLS.has(input.tool)) return
-      const intended = intendedBySession.get(input.sessionID) ?? new Set<string>()
-      const intendedRel = new Set(Array.from(intended).map((p) => relative(root, p)))
+      const intended = intendedByCall.get(input.callID) ?? new Set<string>()
+      intendedByCall.delete(input.callID)
       const preexisting = preexistingByCall.get(input.callID) ?? new Set<string>()
       preexistingByCall.delete(input.callID)
+
+      // FAIL OPEN: if we couldn't attribute any intended path to this gated call
+      // (e.g. a patch tool whose arg shape we didn't parse), do NOT roll anything
+      // back — rolling back the agent's own edits because we can't classify them
+      // is worse than not gating. Log and skip enforcement for this call.
+      if (intended.size === 0) {
+        console.error(
+          `[nightjar-git-gate] no intended path resolved for ${input.tool} (callID ${input.callID}); ` +
+            `scope check skipped (no rollback).`,
+        )
+        return
+      }
+      const intendedRel = new Set(Array.from(intended).map((p) => relative(root, p)))
 
       let changed: Array<{ path: string; untracked: boolean }>
       try {

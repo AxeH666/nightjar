@@ -1,5 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "../../phase1-engine/.opencode/plugin/nightjar-no-destructive-write.ts",
+    "../../phase1-engine/.opencode/plugin/nightjar-generation-cap.ts",
+    "../../phase1-engine/.opencode/plugin/nightjar-doom-loop.ts",
+    "../../phase1-engine/.opencode/plugin/nightjar-git-gate.ts",
+    "../../phase1-engine/.opencode/plugin/nightjar-hwcheck.ts",
+    "../../phase2-mcp/workspace/.opencode/plugin/nightjar-auto-recall.ts"
+  ],
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",

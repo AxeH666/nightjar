@@ -94,8 +94,17 @@ async function attempt(n) {
   }
 
   if (done) {
-    // Exited before reaching the model.
-    if (exitCode === 0) return { outcome: "done", code: 0 } // trivial/fast success
+    // Exited before reaching the model. A clean (code 0) exit is NOT a freeze —
+    // the process is gone, so restarting it deterministically would just re-run a
+    // no-op — but it also never reached the model, so surface that explicitly
+    // rather than reporting it as an ordinary success (a misconfigured/no-op run
+    // otherwise looks identical to a real completion). `noProgress` lets the
+    // caller distinguish "done, but never called the model" from "done + worked".
+    if (exitCode === 0) {
+      log(`engine exited cleanly (code 0) WITHOUT reaching the model — treating as done ` +
+        `(not a freeze), but no generation request was made; check the run if you expected model output`)
+      return { outcome: "done", code: 0, noProgress: true }
+    }
     log(`engine exited early (code ${exitCode}) without reaching the model — will retry`)
     return { outcome: "retry" }
   }

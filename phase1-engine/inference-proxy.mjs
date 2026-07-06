@@ -43,10 +43,11 @@ Bun.serve({
       return Response.json({ genRequests, lastRequestAtMs, uptimeMs: Date.now() - startedAtMs })
     }
 
-    if (isGenerationPath(url.pathname)) {
-      genRequests++
-      lastRequestAtMs = Date.now()
-    }
+    // Whether this is a generation request; we only count it as *progress* once
+    // the upstream actually responds (below), not on arrival — a request that
+    // hits the proxy but fails/times-out upstream never reached a working model,
+    // so it must not advance the watchdog's "reached the model" counter.
+    const isGen = isGenerationPath(url.pathname)
 
     const target = UPSTREAM + url.pathname + url.search
 
@@ -75,6 +76,14 @@ Bun.serve({
       }
       console.error(`[nightjar-proxy] upstream error on ${url.pathname}: ${e}`)
       return json(502, `nightjar proxy upstream error: ${String(e)}`)
+    }
+
+    // Upstream responded with headers → the model server was actually reached.
+    // THIS is the "progress" signal the run-supervisor watchdog polls (not mere
+    // request arrival), so a failed/hung-before-headers request doesn't fool it.
+    if (isGen) {
+      genRequests++
+      lastRequestAtMs = Date.now()
     }
 
     // Non-streaming or bodyless: return as-is, clearing the timer.
