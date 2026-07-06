@@ -55,3 +55,30 @@ verbatim and must ship with any Nightjar distribution.
 Nightjar's integration code (MCP wrappers, side-channel, safety plugins, the
 embedded-ChromaDB patch, the llmfit CLI, config tooling) is original work,
 released under AGPL-3.0-or-later as part of the combined project.
+
+## Forward roadmap — pending license touchpoints (per `research/AUDIT_REPORT.md` §10)
+Each remaining roadmap step that adds, swaps, or removes a component must **read the
+actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming touchpoints:
+- **Step 2 — OpenRouter (rate-limit switch).** BYOK cloud provider used via the user's
+  own key over a network API — **no bundled-code license obligation** (nothing new
+  vendored). Same posture as the other BYOK providers already shipped.
+- **Step 3 — image_gen model swap.** Audit the currently-wired image model's real
+  license; if it's a restrictive checkpoint (e.g. FLUX.1-dev, SD 3.5), swap to
+  **Z-Image-Turbo** or **Wan2.2-TI2V-5B** (Apache-2.0/MIT) and add the chosen model here.
+- **Step 4 — live-preview panel.** Reuses the OpenCode coding agent + gemma-chat's
+  Canvas pattern (MIT). **Must NOT use bolt.diy's WebContainers** (commercial license) —
+  recorded here so the constraint isn't lost.
+- **Step 5 — Phase 5 (computer-use).** License-audit before vendoring: **OmniParser**,
+  **nut.js**, and any local grounding models (Holo-1.5, UI-TARS). Add each here.
+- **Step 6 — Phase 6 (CAD).** License-audit the Text2CAD/Text-to-CadQuery checkpoint,
+  **CadQuery** (Apache-2.0), and the 3D render libs; add here.
+- **Step 7 — custom orb + JUNE rebrand.** The custom Three.js swirling-vortex orb
+  **replaces orb-ui**, so the **orb-ui (MIT) row above is retired** (drop the dependency;
+  keep the historical credit if any forked code remains). Three.js is MIT. This document
+  and the rest of the docs are **renamed Nightjar → JUNE** at this step; the AGPL license
+  of the combined work is unchanged by the rename.
+- **Step 10 — Odysseus fork.** Attribution is **unchanged by re-hosting** — the fork keeps
+  Odysseus's `LICENSE` / `ACKNOWLEDGMENTS.md` / `licenses/` intact; AGPL travels with the
+  code regardless of host (see §10 fork subsection).
+- **Step 12 — wake word ("Hey June").** local-wake (MIT) / openWakeWord (Apache-2.0) +
+  verifier — add whichever ships.

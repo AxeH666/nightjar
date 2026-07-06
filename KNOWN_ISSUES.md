@@ -23,6 +23,9 @@ kept for the historical record with their root cause + fix + verification.
   telling the user to restart Nightjar. So the failure is honest, not silent.
 - **Fix idea:** capture the PID at adoption (port→PID lookup) so adopted services
   can be cleanly restarted, or offer to take over the port.
+- **Scheduled:** **Step 15 (real-hardware QA)** in the `AUDIT_REPORT.md` §10 confirmed
+  order — the adopted/leftover-engine scenario is exercised during multi-process
+  real-hardware testing, and the supervisor lifecycle fix lands with it.
 
 ## NJ-4 — Renderer SSE stream does not auto-reconnect after an engine restart — OPEN 2026-07-06
 - **Severity:** medium — chat silently stops working (dead stream + stale session
@@ -39,6 +42,9 @@ kept for the historical record with their root cause + fix + verification.
   **crash-restart** path is still uncovered.
 - **Fix idea:** on SSE close, re-enter the bounded connect/retry loop (the same one
   used at startup) instead of parking on a status string.
+- **Scheduled:** **Step 7 (full UI redesign)** in the `AUDIT_REPORT.md` §10 confirmed
+  order — the renderer's connection layer is reworked there, the natural place to
+  generalize the shipped `reconnectTick` to auto-reconnect after *any* engine restart.
 
 ---
 
