@@ -22,12 +22,15 @@
 //                                   space-separated; run args are appended.
 
 import { spawn } from "node:child_process"
+import { join } from "node:path"
+import { homedir } from "node:os"
 
 const PROXY = process.env.NIGHTJAR_PROXY_URL || "http://127.0.0.1:8086"
 const DEADLINE_MS = Number(process.env.NIGHTJAR_FIRST_TOKEN_TIMEOUT_MS || 45000)
 const MAX_ATTEMPTS = Number(process.env.NIGHTJAR_RUN_MAX_ATTEMPTS || 3)
-const DEFAULT_ENGINE =
-  "bun run --conditions=browser /home/axehe/nightjar/research/opencode/packages/opencode/src/index.ts"
+// repo-relative, not a hardcoded machine path (NIGHTJAR_ROOT set by supervisor/setup)
+const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
+const DEFAULT_ENGINE = `bun run --conditions=browser ${join(ROOT, "research/opencode/packages/opencode/src/index.ts")}`
 const ENGINE_CMD = (process.env.NIGHTJAR_ENGINE_CMD || DEFAULT_ENGINE).split(/\s+/).filter(Boolean)
 const RUN_ARGS = process.argv.slice(2)
 

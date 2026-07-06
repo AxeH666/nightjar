@@ -2,16 +2,21 @@
 SMTP catcher (:2525) should receive the message. Proves the email send path
 works offline through MCP."""
 import asyncio, os, json
+from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-REPO = "/home/axehe/nightjar/research/odysseus"
-PY = "/home/axehe/nightjar/phase2-odysseus/venv/bin/python"
+# Repo-relative (no hardcoded machine path): NIGHTJAR_ROOT if set, else derive
+# the repo root from this file's location (…/phase2-odysseus/tests/).
+NIGHTJAR_ROOT = Path(os.environ.get("NIGHTJAR_ROOT") or Path(__file__).resolve().parents[2])
+DATA_DIR = os.environ.get("NIGHTJAR_DATA_DIR") or str(Path.home() / ".nightjar")
+REPO = str(NIGHTJAR_ROOT / "research" / "odysseus")
+PY = str(NIGHTJAR_ROOT / "phase2-odysseus" / "venv" / "bin" / "python")
 
 async def main():
     env = dict(os.environ)
-    env.update({"PYTHONPATH": REPO, "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus",
-                "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma",
+    env.update({"PYTHONPATH": REPO, "ODYSSEUS_DATA_DIR": f"{DATA_DIR}/odysseus",
+                "CHROMADB_PERSIST_DIR": f"{DATA_DIR}/odysseus/chroma",
                 "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar"})
     params = StdioServerParameters(command=PY, args=[f"{REPO}/mcp_servers/email_server.py"], env=env)
     async with stdio_client(params) as (r, w):

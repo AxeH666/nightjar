@@ -85,19 +85,16 @@ tts_out.wav
 .cache/
 
 # ── Vendored / cloned UPSTREAM reference repos (each is its own huge git repo) ─
-# NOTE (read before committing): research/ holds full clones of OpenCode,
-# Row-Bot, Odysseus, Open WebUI, orb-ui, gemma-chat (~3 GB, each with its own
-# .git). They are ignored here because they are re-clonable upstream references
-# and bloat/complicate this repo. TWO consequences to handle deliberately:
-#   1. research/odysseus is a RUNTIME dependency (the Odysseus MCP sidecar runs
-#      python from research/odysseus/...). A fresh clone of Nightjar will NOT run
-#      the Odysseus tier without it — provide it via a submodule or a setup step.
-#   2. The Odysseus AGPL attribution (research/odysseus/{LICENSE,ACKNOWLEDGMENTS.md,
-#      licenses/}) is required to ship — since research/ is ignored, ensure those
-#      files ship another way (submodule, or copy into a committed location).
-#   (Row-Bot attribution is already self-contained: vendored under
-#    phase2-mcp/nightjar_capabilities/_vendor/ + phase2-mcp/NOTICE + LICENSE.row-bot.)
-research/
+# research/ holds full clones of OpenCode, Row-Bot, Open WebUI, orb-ui, gemma-chat
+# (~3 GB, each with its own .git) — re-clonable development references, ignored.
+# EXCEPTION: research/odysseus is a git SUBMODULE (see .gitmodules) — it's a
+# runtime dependency AND the AGPL source-availability obligation, so it's tracked
+# (as a gitlink) and fetched via `git submodule update --init`. Nightjar's changes
+# to it live as a patch in phase2-odysseus/odysseus-patches/ (submodule stays a
+# clean upstream mirror). Row-Bot's shipped code is vendored under
+# phase2-mcp/nightjar_capabilities/_vendor/ (+ NOTICE + LICENSE.row-bot).
+research/*
+!research/odysseus
 
 # ── OS / editor cruft ─────────────────────────────────────────────────────────
 .DS_Store

@@ -10,9 +10,14 @@ import os
 import sys
 from pathlib import Path
 
-ODYSSEUS_REPO = os.environ.get(
-    "ODYSSEUS_REPO", "/home/axehe/nightjar/research/odysseus"
+# Repo-relative default (no hardcoded machine path): NIGHTJAR_ROOT if set, else
+# derive the repo root from this file's location (…/phase2-odysseus/servers/).
+_REPO_ROOT = (
+    Path(os.environ["NIGHTJAR_ROOT"])
+    if os.environ.get("NIGHTJAR_ROOT")
+    else Path(__file__).resolve().parents[2]
 )
+ODYSSEUS_REPO = os.environ.get("ODYSSEUS_REPO", str(_REPO_ROOT / "research" / "odysseus"))
 DATA_DIR = os.environ.get(
     "ODYSSEUS_DATA_DIR", str(Path.home() / ".nightjar" / "odysseus")
 )

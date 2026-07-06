@@ -56,6 +56,10 @@ export function nightjarServices(): ServiceDef[] {
       command: BUN,
       args: ["run", "--conditions=browser", OPENCODE_ENTRY, "serve", "--port", "4096", "--hostname", "127.0.0.1"],
       cwd: WORKSPACE,
+      // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
+      // config is portable (no hardcoded /home/<user>/...). Pass NIGHTJAR_ROOT
+      // through so those substitutions resolve — the app needs no manual setup.
+      env: { NIGHTJAR_ROOT: REPO },
       ready: () => httpOk("http://127.0.0.1:4096/agent"),
       readyTimeoutMs: 60000, // also spawns the MCP servers per opencode.json
     },

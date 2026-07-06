@@ -41,25 +41,67 @@ live in [`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md); open issues in
 [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md); the build rules Nightjar follows in
 [`CLAUDE.md`](CLAUDE.md).
 
+## Setup (fresh clone)
+
+Nightjar depends on the **Odysseus** source as a git **submodule** (it's both a
+runtime dependency and the AGPL source-availability obligation). Clone with
+submodules, then run the setup script:
+
+```bash
+git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
+cd nightjar
+./scripts/setup.sh
+```
+
+Already cloned without `--recurse-submodules`? Fetch it after the fact:
+
+```bash
+git submodule update --init research/odysseus
+```
+
+`scripts/setup.sh` fetches the Odysseus submodule, applies Nightjar's small
+integration patch to it (embedded ChromaDB, etc. — see
+`phase2-odysseus/odysseus-patches/`), creates the Python venvs + installs
+`requirements.txt`, and runs `npm install` for the UI. It's idempotent.
+
+**Paths are not hardcoded.** Config and code resolve repo-relative paths from
+`NIGHTJAR_ROOT` (the desktop app sets it automatically via
+`phase3-ui/src/main/services.ts`; the `opencode.json` files use OpenCode's
+`{env:NIGHTJAR_ROOT}` / `{env:HOME}` substitution). For manual `opencode serve` /
+CLI runs, export it once:
+
+```bash
+export NIGHTJAR_ROOT="$(pwd)"
+```
+
+(Local model weights, llama.cpp, and Ollama are a separate install — see the
+phase reports.)
+
 ## Repository layout
 
 ```
 phase1-engine/     local model + inference proxy + safety plugins
 phase2-mcp/        Row-Bot-derived capabilities (MCP) + wake-word daemon + side-channel
-phase2-odysseus/   Odysseus MCP wrappers + config + workspace (opencode.json)
+phase2-odysseus/   Odysseus MCP wrappers + config + workspace + Odysseus patch
 phase3-ui/         Electron + React desktop UI (chat, modes, permissions, voice orb)
-research/          upstream reference clones — NOT committed (see below)
+research/odysseus/ Odysseus source — git SUBMODULE (AGPL; runtime dependency)
+research/*         other upstream reference clones — git-ignored (re-clonable)
 ```
 
 ### Note on `research/` and the Odysseus tier
 
-The `research/` directory holds full upstream clones used during development and is
-**git-ignored** (large, re-clonable, each with its own history). **`research/odysseus`
-is a runtime dependency** — the Odysseus MCP sidecar runs Python from it — so a fresh
-clone must obtain it separately (submodule or a setup step) to enable the
-email/RAG/research/PIM tier. Its AGPL attribution
-(`research/odysseus/{LICENSE,ACKNOWLEDGMENTS.md,licenses/}`) must ship with any
-distribution that includes it.
+`research/odysseus` is a **git submodule** pinned to an exact upstream commit of
+[Odysseus](https://github.com/pewdiepie-archdaemon/odysseus) — so its **AGPL source
+is available** alongside Nightjar and a fresh clone can fetch it with
+`git submodule update --init`. The Odysseus MCP sidecar runs Python from it (the
+email/RAG/research/PIM tier). Its attribution
+(`research/odysseus/{LICENSE,ACKNOWLEDGMENTS.md,licenses/}`) rides along with the
+submodule. The submodule is kept a faithful mirror of upstream; Nightjar's two
+integration changes are applied on top as a reviewable patch
+(`phase2-odysseus/odysseus-patches/`). The **other** `research/` clones (OpenCode,
+Row-Bot, orb-ui, …) remain git-ignored — they're development references, and the
+code Nightjar actually ships from them is vendored (e.g. Row-Bot under
+`phase2-mcp/nightjar_capabilities/_vendor/`).
 
 ## Hardware / QA notes
 
