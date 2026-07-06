@@ -36,10 +36,17 @@ Phases 1–4 are built and reported:
 - **Phase 3 — UI shell** ([report](phase3-ui/PHASE3_REPORT.md)): chat + tool-call cards + explicit mode selector + permission/approval panel + a multi-sidecar supervisor.
 - **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): orb-ui integrated as a voice-reactive orb + a Siri-style overlay, wired to the live pipeline.
 
-The master plan, findings, and forward roadmap (Phase 5 OS-computer-use → Phase 6
-CAD-by-voice → Odysseus fork + one-command installer → name + wake-word → UI
-polish → real-hardware QA → launch) live in
-[`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md) §10; open issues in
+**Since Phase 4:** BYOK cloud-key slots shipped (encrypted key storage + model
+switcher + unmissable cloud indicator; PRs #6/#8) and the desktop app is verified
+running end-to-end. **The final product name is JUNE** — the rename lands with the
+UI redesign (Step 7); current strings still say "Nightjar" until then.
+
+The master plan, findings, and the confirmed forward roadmap — **OpenRouter
+(rate-limit auto-switch) → image_gen license audit → live-preview panel → Phase 5
+OS-computer-use → Phase 6 CAD-by-voice → full UI redesign (final theme + custom orb
++ JUNE rebrand) → form-filling → CLI → Odysseus fork + one-command installer →
+"Hey June" wake-word → onboarding → fresh-clone + real-hardware QA → launch** — live
+in [`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md) §10; open issues in
 [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md); the build rules Nightjar follows in
 [`CLAUDE.md`](CLAUDE.md).
 
@@ -108,6 +115,6 @@ code Nightjar actually ships from them is vendored (e.g. Row-Bot under
 ## Hardware / QA notes
 
 Developed on a WSL2 + WSLg box (working display + PulseAudio). The core loops
-(engine, capabilities, wake-word, orb) are verified on-box; a trained custom
-"Hey Nightjar" wake model and QA on native (non-WSL) hardware remain open — see the
-phase reports and `KNOWN_ISSUES.md`.
+(engine, capabilities, wake-word, orb) are verified on-box; the trained custom
+**"Hey June"** wake model (Step 12) and QA on native (non-WSL) hardware (Step 15,
+the last pre-launch step) remain open — see the phase reports and `KNOWN_ISSUES.md`.
