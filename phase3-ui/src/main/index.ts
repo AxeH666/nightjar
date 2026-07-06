@@ -6,6 +6,7 @@ import { app, BrowserWindow, ipcMain } from "electron"
 import { join, resolve, sep } from "path"
 import { homedir, tmpdir } from "os"
 import { readFile } from "fs/promises"
+import { spawn } from "node:child_process"
 import { Supervisor, type ServiceStatus } from "./supervisor"
 import { nightjarServices, REPO } from "./services"
 import * as byok from "./byok"
@@ -30,6 +31,34 @@ const AUDIO_ROOTS = [
   process.env.NIGHTJAR_DATA_DIR || join(homedir(), ".nightjar"),
   tmpdir(),
 ].map((r) => resolve(r) + sep)
+
+// Odysseus's data dir (DB + settings) — must match the image MCP's ODYSSEUS_DATA_DIR
+// in opencode.json ({env:HOME}/.nightjar/odysseus).
+const ODYSSEUS_DATA_DIR = join(homedir(), ".nightjar", "odysseus")
+
+// Auto-wire the user's OpenAI BYOK key into Odysseus's image endpoint so image
+// generation works from the single key entry — no separate seed step. Runs the same
+// phase2-odysseus/seed_image_endpoint.py the CLI uses, passing the decrypted key via
+// env. Best-effort: a failure never blocks storing the key or the engine restart.
+function runImageSeed(extraEnv: Record<string, string>): Promise<void> {
+  return new Promise((done) => {
+    const py = join(REPO, "phase2-odysseus", "venv", "bin", "python")
+    const script = join(REPO, "phase2-odysseus", "seed_image_endpoint.py")
+    const child = spawn(py, [script], {
+      env: { ...process.env, NIGHTJAR_ROOT: REPO, ODYSSEUS_DATA_DIR, ...extraEnv },
+      stdio: "ignore",
+    })
+    child.on("error", (e) => {
+      console.warn("[byok] image-endpoint seed failed:", e)
+      done()
+    })
+    child.on("exit", () => done())
+  })
+}
+// dall-e-3 works with any paid key (gpt-image-1 needs OpenAI org verification).
+const seedImageEndpoint = (key: string): Promise<void> =>
+  runImageSeed({ OPENAI_API_KEY: key, NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_MODEL || "dall-e-3" })
+const unseedImageEndpoint = (): Promise<void> => runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1" })
 
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
@@ -82,10 +111,14 @@ ipcMain.handle("byok:list", () =>
 )
 ipcMain.handle("byok:set", async (_e, providerId: string, key: string) => {
   byok.setKey(providerId, key) // throws (→ rejects to renderer) if no OS keychain
+  // OpenAI also powers image generation — auto-wire the Odysseus image endpoint from
+  // the same key so the user never runs a separate seed step (single-key setup).
+  if (providerId === "openai") await seedImageEndpoint(key)
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 ipcMain.handle("byok:remove", async (_e, providerId: string) => {
   byok.removeKey(providerId)
+  if (providerId === "openai") await unseedImageEndpoint()
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 
@@ -93,6 +126,10 @@ app.whenReady().then(() => {
   createWindow()
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
   supervisor.setEnv("opencode-serve", opencodeServeEnv())
+  // If an OpenAI key is already stored, wire the image endpoint at startup too
+  // (so keys entered before this feature — or on a fresh launch — just work).
+  const storedOpenAI = byok.getKey("openai")
+  if (storedOpenAI) seedImageEndpoint(storedOpenAI)
   // fire-and-forget: bring up the stack; the health strip reflects progress
   if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") supervisor.start().catch((e) => console.error("supervisor:", e))
   app.on("activate", () => {

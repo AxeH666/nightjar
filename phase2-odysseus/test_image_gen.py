@@ -72,8 +72,23 @@ try:
     ok_link = "Direct link:" in text and "Error" not in text
     new = after - before
     ok_file = bool(new) and next(iter(new)).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-    print(f"\nRESULT: link-ok={ok_link}  png-written={ok_file}  ->  "
-          + ("PASS ✅" if (ok_link and ok_file) else "FAIL ❌"))
-    sys.exit(0 if (ok_link and ok_file) else 1)
+
+    # --- auto-wire contract: the row the main process's byok:set writes, and remove ---
+    from src.database import SessionLocal, ModelEndpoint
+    import src.secret_storage as ss
+    db = SessionLocal()
+    row = db.query(ModelEndpoint).filter(ModelEndpoint.model_type == "image").first()
+    ok_row = bool(row) and row.is_enabled and ss.decrypt(row.api_key) == "test-mock-key"
+    # remove path (byok:remove openai -> NIGHTJAR_IMAGE_UNSEED=1)
+    subprocess.run([sys.executable, f"{REPO}/phase2-odysseus/seed_image_endpoint.py"],
+                   env={**env, "NIGHTJAR_IMAGE_UNSEED": "1"}, capture_output=True, text=True)
+    db.expire_all()
+    ok_unseed = db.query(ModelEndpoint).filter(ModelEndpoint.model_type == "image").first() is None
+    db.close()
+
+    all_ok = ok_link and ok_file and ok_row and ok_unseed
+    print(f"\nRESULT: link-ok={ok_link}  png-written={ok_file}  endpoint-row+key={ok_row}  "
+          f"unseed-removed={ok_unseed}  ->  " + ("PASS ✅" if all_ok else "FAIL ❌"))
+    sys.exit(0 if all_ok else 1)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

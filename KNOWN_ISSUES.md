@@ -20,11 +20,16 @@ kept for the historical record with their root cause + fix + verification.
     end-to-end** by `phase2-odysseus/test_image_gen.py` against a **mock** OpenAI endpoint: the
     real `image_gen_server.py` path resolved the endpoint → POST `/images/generations` → b64
     decode → **wrote a real PNG** → returned a link (PASS).
-  - **To activate the real cloud path:** run the seed with a real key
-    (`OPENAI_API_KEY=sk-… … python phase2-odysseus/seed_image_endpoint.py`). ⚠️ **Not yet
-    verified against real OpenAI** (no key in this environment; `gpt-image-1` needs OpenAI org
-    verification — `dall-e-3` works without). The full **chat→approval→image** flow also still
-    needs a live-app run.
+  - **Gap 2b — auto-wired from the single BYOK key (no separate script).** The main process
+    (`phase3-ui/src/main/index.ts`) now runs the seed automatically whenever an **OpenAI**
+    key is set/removed in the BYOK panel (`byok:set`/`byok:remove`, passing the decrypted key
+    via env → `NIGHTJAR_IMAGE_MODEL=dall-e-3` by default), and re-seeds any stored key at
+    startup. So pasting the OpenAI key is the only step — image gen, chat, etc. all work from
+    it. Verified end-to-end (mock OpenAI): set→endpoint row (encrypted key decrypts) + image
+    generated; remove→endpoint deleted. (`test_image_gen.py`, 4/4.)
+  - ⚠️ **Not yet verified against real OpenAI** (no key in this environment; `gpt-image-1`
+    needs OpenAI org verification — `dall-e-3`, the auto-wire default, works without). The full
+    live **paste-key → chat → approval → image** flow needs a running-app + real-key check.
   - **Still OPEN:** the **local-first/offline** backend (Z-Image-Turbo via `diffusion_server.py`)
     is deferred to **Step 11** (installer model-download) as planned — the cloud path above is
     an interim opt-in that sends prompts off-machine.
