@@ -11,7 +11,17 @@ import { HealthStrip, type ServiceStatus } from "./components/HealthStrip"
 import { ModelSwitcher } from "./components/ModelSwitcher"
 import { CloudBanner } from "./components/CloudBanner"
 import { BYOKSettings } from "./components/BYOKSettings"
-import { byok, modelChoices, isLocalModel, LOCAL_MODEL, type ModelChoice } from "./lib/byok"
+import {
+  byok,
+  modelChoices,
+  isLocalModel,
+  LOCAL_MODEL,
+  openRouterConfigured,
+  isRateLimitError,
+  providerNameOf,
+  OPENROUTER_FREE_CHOICE,
+  type ModelChoice,
+} from "./lib/byok"
 
 declare global {
   interface Window {
@@ -48,6 +58,8 @@ export default function App() {
   const [activeModel, setActiveModel] = useState<string>(LOCAL_MODEL.id)
   const [showKeys, setShowKeys] = useState(false)
   const [fallbackOffer, setFallbackOffer] = useState<string | null>(null) // last prompt text, if a cloud send failed
+  // OpenRouter rate-limit (429) switch offer: last prompt + the provider that 429'd.
+  const [rateLimitOffer, setRateLimitOffer] = useState<{ text: string; provider: string } | null>(null)
   // Bump to force the connect effect to re-run. A BYOK key change restarts
   // opencode-serve, which kills our SSE stream and invalidates the session id;
   // without a reconnect, chat stays broken (dead stream, stale session) until a
@@ -58,9 +70,15 @@ export default function App() {
   // mirror activeModel into a ref so the SSE handler can read it without being a
   // dependency (which would tear down + resubscribe the stream on every switch).
   const activeModelRef = useRef<string>(LOCAL_MODEL.id)
+  // Mirrors for the SSE handler (refs so it needn't depend on — and resubscribe on
+  // — these): the current choice list (for the 429 banner's provider name) and
+  // whether OpenRouter is configured (so a free-model fallback is even possible).
+  const choicesRef = useRef<ModelChoice[]>([LOCAL_MODEL])
+  const openRouterReadyRef = useRef<boolean>(false)
 
   const loadModels = useCallback(async () => {
     const providers = (await byok.list()) as Awaited<ReturnType<typeof byok.list>>
+    openRouterReadyRef.current = openRouterConfigured(providers)
     const next = modelChoices(providers)
     setChoices(next)
     // if the active model's provider key was removed, fall back to local
@@ -74,6 +92,9 @@ export default function App() {
   useEffect(() => {
     activeModelRef.current = activeModel
   }, [activeModel])
+  useEffect(() => {
+    choicesRef.current = choices
+  }, [choices])
 
   const clientRef = useRef<OpenCodeClient | null>(null)
   const sessionRef = useRef<string>("")
@@ -214,8 +235,17 @@ export default function App() {
             // abort or a local tool/MCP failure isn't, and offering "the cloud
             // model failed, retry on local" for those is misleading. Skip those.
             const notProviderFailure = name === "MessageAbortedError" || name === "MCPFailed"
-            if (!isLocalModel(activeModelRef.current) && lastSentRef.current && !notProviderFailure) {
-              setFallbackOffer(lastSentRef.current)
+            const activeM = activeModelRef.current
+            const lastText = lastSentRef.current
+            if (!isLocalModel(activeM) && lastText && !notProviderFailure) {
+              // Rate-limit (429) on a paid cloud provider + OpenRouter configured →
+              // offer a switch to a free OpenRouter model (never silent). Otherwise
+              // fall back to the local-retry offer.
+              if (isRateLimitError(p.error) && openRouterReadyRef.current && activeM !== OPENROUTER_FREE_CHOICE.id) {
+                setRateLimitOffer({ text: lastText, provider: providerNameOf(activeM, choicesRef.current) })
+              } else {
+                setFallbackOffer(lastText)
+              }
             }
           }
           break
@@ -268,6 +298,7 @@ export default function App() {
     if (!client || !sessionRef.current || !mode) return
     setSuggestion(null)
     setFallbackOffer(null)
+    setRateLimitOffer(null)
     const sug = suggestMode(text, mode, agents.map((a) => a.name))
     if (sug) setSuggestion(sug)
     const uid = `local-${Date.now()}`
@@ -288,6 +319,16 @@ export default function App() {
     setFallbackOffer(null)
     setActiveModel(LOCAL_MODEL.id)
     if (text) send(text, LOCAL_MODEL.id)
+  }
+
+  // Accept the rate-limit switch: move to the free OpenRouter model and resend the
+  // last prompt. The choice **persists for the session** — OpenRouter stays the
+  // active model, so the paid provider isn't hit again unless the user switches back.
+  function acceptOpenRouterSwitch() {
+    const text = rateLimitOffer?.text
+    setRateLimitOffer(null)
+    setActiveModel(OPENROUTER_FREE_CHOICE.id)
+    if (text) send(text, OPENROUTER_FREE_CHOICE.id)
   }
 
   async function reply(kind: ReplyKind) {
@@ -326,6 +367,30 @@ export default function App() {
       <CloudBanner model={activeChoice} onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)} />
 
       <HealthStrip services={services} />
+
+      {rateLimitOffer && (
+        <div className="flex items-center gap-3 border-b border-nightjar-alert/50 bg-nightjar-alert/10 px-4 py-2 text-sm text-nightjar-text/90">
+          <span>
+            You've hit your usage limit on {rateLimitOffer.provider}. Switch to a free OpenRouter model to continue?
+          </span>
+          <button
+            onClick={acceptOpenRouterSwitch}
+            className="rounded-md bg-nightjar-accent px-3 py-1 text-xs font-medium text-nightjar-base hover:brightness-110"
+          >
+            Switch to free OpenRouter
+          </button>
+          <button
+            onClick={() => {
+              const t = rateLimitOffer.text
+              setRateLimitOffer(null)
+              setFallbackOffer(t) // still offer the local offline escape hatch
+            }}
+            className="text-xs text-nightjar-text/50 hover:underline"
+          >
+            dismiss
+          </button>
+        </div>
+      )}
 
       {fallbackOffer && (
         <div className="flex items-center gap-3 border-b border-nightjar-alert/50 bg-nightjar-alert/10 px-4 py-2 text-sm text-nightjar-text/90">
