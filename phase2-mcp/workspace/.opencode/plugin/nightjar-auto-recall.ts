@@ -8,9 +8,14 @@
 // text. The "when to recall" decision lives in recall.py (score threshold + cap).
 
 import type { Plugin } from "@opencode-ai/plugin"
+import { join } from "node:path"
+import { homedir } from "node:os"
 
-const PY = "/home/axehe/nightjar/phase2-mcp/venv/bin/python"
-const RECALL = "/home/axehe/nightjar/phase2-mcp/recall.py"
+// Repo-relative, not hardcoded to one machine. NIGHTJAR_ROOT is set by the
+// Electron supervisor (services.ts) and the setup script; falls back to ~/nightjar.
+const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
+const PY = join(ROOT, "phase2-mcp/venv/bin/python")
+const RECALL = join(ROOT, "phase2-mcp/recall.py")
 
 export const NightjarAutoRecall: Plugin = async ({ $ }) => {
   return {

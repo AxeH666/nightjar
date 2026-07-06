@@ -3,7 +3,9 @@
 // readiness gating, kill→auto-restart, and clean shutdown. Run: bun test-supervisor.ts
 // Uses the light phase3-ui/test-workspace for opencode-serve (fast; the full-MCP
 // workspace was already validated in Phase 2b).
-process.env.NIGHTJAR_WORKSPACE = "/home/axehe/nightjar/phase3-ui/test-workspace"
+import { join } from "node:path"
+// repo-relative (this file lives in phase3-ui/), not a hardcoded machine path
+process.env.NIGHTJAR_WORKSPACE = join(import.meta.dir, "test-workspace")
 
 import { Supervisor } from "./src/main/supervisor"
 import { nightjarServices } from "./src/main/services"

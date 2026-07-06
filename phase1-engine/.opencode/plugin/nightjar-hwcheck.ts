@@ -9,8 +9,12 @@
 // quant/context/run-mode/speed fit). Detection + logging only; no auto-switch yet.
 
 import type { Plugin } from "@opencode-ai/plugin"
+import { join } from "node:path"
+import { homedir } from "node:os"
 
-const HWFIT_CLI = "/home/axehe/nightjar/phase2-odysseus/hwfit_vendor/hwfit_cli.py"
+// repo-relative, not a hardcoded machine path (NIGHTJAR_ROOT set by supervisor/setup)
+const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
+const HWFIT_CLI = join(ROOT, "phase2-odysseus/hwfit_vendor/hwfit_cli.py")
 
 export const NightjarHwCheck: Plugin = async ({ $ }) => {
   try {

@@ -5,8 +5,12 @@
 // shim that delegates to the vendored llmfit CLI, so the old entry point still
 // works. See phase2-odysseus/hwfit_vendor/hwfit_cli.py.
 import { execFileSync } from "node:child_process"
+import { join } from "node:path"
+import { homedir } from "node:os"
 
-const CLI = "/home/axehe/nightjar/phase2-odysseus/hwfit_vendor/hwfit_cli.py"
+// repo-relative, not a hardcoded machine path (NIGHTJAR_ROOT set by supervisor/setup)
+const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
+const CLI = join(ROOT, "phase2-odysseus/hwfit_vendor/hwfit_cli.py")
 try {
   const out = execFileSync("python3", [CLI, ...process.argv.slice(2)], { encoding: "utf8" })
   process.stdout.write(out)

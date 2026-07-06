@@ -4,10 +4,12 @@
 import { OpenCodeClient, toolCallFromPart } from "./src/renderer/src/lib/opencode"
 import type { ToolCall } from "./src/renderer/src/lib/opencode"
 import { existsSync, rmSync } from "node:fs"
+import { join } from "node:path"
 
 const BASE = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const MODEL = "llamacpp/qwen3-4b-instruct-2507"
-const NOTE = "/home/axehe/nightjar/phase3-ui/test-workspace/proj/note.txt"
+// repo-relative (this file lives in phase3-ui/), not a hardcoded machine path
+const NOTE = join(import.meta.dir, "test-workspace/proj/note.txt")
 
 const log = (...a: any[]) => console.log(...a)
 let pass = 0, fail = 0

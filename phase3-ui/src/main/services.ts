@@ -2,13 +2,19 @@
 // Paths are absolute (Electron main won't inherit a dev PATH) and overridable via env.
 import net from "node:net"
 import os from "node:os"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import type { ServiceDef } from "./supervisor"
 import { httpOk } from "./supervisor"
 
 const HOME = os.homedir()
 const BUN = process.env.NIGHTJAR_BUN || join(HOME, ".bun/bin/bun")
-const REPO = process.env.NIGHTJAR_ROOT || join(HOME, "nightjar")
+// Repo root: an explicit NIGHTJAR_ROOT wins; otherwise DERIVE it from this
+// module's own location rather than assuming ~/nightjar (which breaks when the
+// project is cloned anywhere else). This file sits at <repo>/phase3-ui/src/main/
+// under bun and <repo>/phase3-ui/out/main/ in the Electron build — both are three
+// levels below the repo root, so the same "../../.." resolves correctly in either.
+const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 const OPENCODE_ENTRY = join(REPO, "research/opencode/packages/opencode/src/index.ts")
 const LLAMA_BIN = process.env.NIGHTJAR_LLAMA_BIN || join(HOME, "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
@@ -56,6 +62,10 @@ export function nightjarServices(): ServiceDef[] {
       command: BUN,
       args: ["run", "--conditions=browser", OPENCODE_ENTRY, "serve", "--port", "4096", "--hostname", "127.0.0.1"],
       cwd: WORKSPACE,
+      // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
+      // config is portable (no hardcoded /home/<user>/...). Pass NIGHTJAR_ROOT
+      // through so those substitutions resolve — the app needs no manual setup.
+      env: { NIGHTJAR_ROOT: REPO },
       ready: () => httpOk("http://127.0.0.1:4096/agent"),
       readyTimeoutMs: 60000, // also spawns the MCP servers per opencode.json
     },

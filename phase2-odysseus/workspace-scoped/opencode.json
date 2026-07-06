@@ -7,12 +7,12 @@
   },
   "mcp": {
     "odysseus-docs": { "type": "local",
-      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/phase2-odysseus/servers/docs_query_server.py"],
-      "environment": { "ODYSSEUS_REPO": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma" },
+      "command": ["{env:NIGHTJAR_ROOT}/phase2-odysseus/venv/bin/python", "{env:NIGHTJAR_ROOT}/phase2-odysseus/servers/docs_query_server.py"],
+      "environment": { "ODYSSEUS_REPO": "{env:NIGHTJAR_ROOT}/research/odysseus", "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "{env:HOME}/.nightjar/odysseus/chroma" },
       "enabled": true, "timeout": 120000 },
     "odysseus-email": { "type": "local",
-      "command": ["/home/axehe/nightjar/phase2-odysseus/venv/bin/python", "/home/axehe/nightjar/research/odysseus/mcp_servers/email_server.py"],
-      "environment": { "PYTHONPATH": "/home/axehe/nightjar/research/odysseus", "ODYSSEUS_DATA_DIR": "/home/axehe/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "/home/axehe/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "command": ["{env:NIGHTJAR_ROOT}/phase2-odysseus/venv/bin/python", "{env:NIGHTJAR_ROOT}/research/odysseus/mcp_servers/email_server.py"],
+      "environment": { "PYTHONPATH": "{env:NIGHTJAR_ROOT}/research/odysseus", "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "{env:HOME}/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
       "enabled": true, "timeout": 120000 }
   }
 }

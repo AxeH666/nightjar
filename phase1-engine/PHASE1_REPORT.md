@@ -1,7 +1,7 @@
 # Nightjar Phase 1 Report — Engine Bring-Up
 
 Bare-loop validation: OpenCode + local Ollama models, no Row-Bot, no custom UI, no orb-ui.
-Workspace: `/home/axehe/nightjar/phase1-engine/` (config + a throwaway `sample/greet.py` used as the tool-calling test target).
+Workspace: `$NIGHTJAR_ROOT/phase1-engine/` (config + a throwaway `sample/greet.py` used as the tool-calling test target).
 
 ## Result: bare loop works end-to-end
 

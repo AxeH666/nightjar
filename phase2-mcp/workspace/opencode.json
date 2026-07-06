@@ -18,11 +18,11 @@
     "nightjar": {
       "type": "local",
       "command": [
-        "/home/axehe/nightjar/phase2-mcp/venv/bin/python",
-        "/home/axehe/nightjar/phase2-mcp/mcp_server.py"
+        "{env:NIGHTJAR_ROOT}/phase2-mcp/venv/bin/python",
+        "{env:NIGHTJAR_ROOT}/phase2-mcp/mcp_server.py"
       ],
       "environment": {
-        "NIGHTJAR_DATA_DIR": "/home/axehe/.nightjar",
+        "NIGHTJAR_DATA_DIR": "{env:HOME}/.nightjar",
         "NIGHTJAR_WHISPER_SIZE": "base.en",
         "OLLAMA_HOST": "http://localhost:11434"
       },

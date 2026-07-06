@@ -1,0 +1,38 @@
+diff --git a/services/docs/service.py b/services/docs/service.py
+index 5242aa5..11f2724 100644
+--- a/services/docs/service.py
++++ b/services/docs/service.py
+@@ -52,7 +52,7 @@ class DocsService:
+         results = self.rag.search(query, k=top_k)
+         return [
+             DocChunk(
+-                text=r.get("text", r.get("content", "")),
++                text=r.get("text", r.get("content", r.get("document", ""))),  # NIGHTJAR: RAG search returns chunk under "document"
+                 source=r.get("source", r.get("metadata", {}).get("source", "unknown")),
+                 score=r.get("score", 0.0),
+                 metadata=r.get("metadata"),
+diff --git a/src/chroma_client.py b/src/chroma_client.py
+index 3a0a80c..1db0e24 100644
+--- a/src/chroma_client.py
++++ b/src/chroma_client.py
+@@ -46,6 +46,20 @@ def get_chroma_client():
+             "dependency with: pip install chromadb-client"
+         ) from e
+ 
++    # NIGHTJAR PATCH (AGPL integration): embedded / local-only ChromaDB.
++    # When CHROMADB_PERSIST_DIR is set, use an on-disk PersistentClient instead
++    # of the client-server HttpClient — no docker service, "runs on any laptop,
++    # nothing extra to install". Upstream HttpClient behavior is unchanged when
++    # the env var is absent.
++    persist_dir = os.getenv("CHROMADB_PERSIST_DIR", "").strip()
++    if persist_dir:
++        os.makedirs(persist_dir, exist_ok=True)
++        client = chromadb.PersistentClient(path=persist_dir)
++        client.heartbeat()
++        _client = client
++        logger.info(f"ChromaDB embedded (PersistentClient): {persist_dir}")
++        return _client
++
+     host = os.getenv("CHROMADB_HOST", "localhost")
+     port = int(os.getenv("CHROMADB_PORT", "8100"))
+ 
