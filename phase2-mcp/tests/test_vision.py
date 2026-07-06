@@ -2,7 +2,7 @@
 # Integration test: nightjar_capabilities.vision.analyze_image (Ollama gemma3:4b) on a
 # solid-red image — proves offline image analysis works end-to-end. Skips cleanly if
 # Ollama or the vision model aren't available. Run with the phase2-mcp venv:
-#   phase2-mcp/venv/bin/python phase2-mcp/test_vision.py
+#   phase2-mcp/venv/bin/python phase2-mcp/tests/test_vision.py
 import json
 import os
 import struct
@@ -12,7 +12,7 @@ import urllib.request
 import zlib
 from pathlib import Path
 
-REPO = os.environ.get("NIGHTJAR_ROOT") or str(Path(__file__).resolve().parents[1])
+REPO = os.environ.get("NIGHTJAR_ROOT") or str(Path(__file__).resolve().parents[2])
 sys.path.insert(0, os.path.join(REPO, "phase2-mcp"))
 
 HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
