@@ -8,9 +8,28 @@ kept for the historical record with their root cause + fix + verification.
 
 ## 🔧 OPEN
 
-## NJ-6 — image_gen is unreachable: not granted to any mode + no local backend wired — OPEN 2026-07-06
-- **Severity:** medium — image generation **does not work at all today** (two independent
-  gaps), and the intended backend isn't local-first either.
+## NJ-6 — image_gen: cloud path enabled (permission + endpoint); local-first backend still pending — PARTIAL 2026-07-06
+- **Severity:** medium (was: does not work at all). Chat→image now works via a **cloud**
+  OpenAI-compatible endpoint once seeded; the **local-first/offline** backend is still pending.
+- **✅ Progress (2026-07-06):**
+  - **Gap 1 FIXED** — `odysseus-image_generate_image` granted (`"ask"`) in **assistant** mode
+    (`opencode.json`), so the agent can call it (still approval-gated, per rule 1).
+  - **Gap 2 — cloud endpoint mechanism added + verified.** `phase2-odysseus/seed_image_endpoint.py`
+    registers an OpenAI-compatible image endpoint in Odysseus's `model_endpoints` DB (key
+    Fernet-encrypted at rest), enables `image_gen_enabled`, and sets `image_model`. **Verified
+    end-to-end** by `phase2-odysseus/test_image_gen.py` against a **mock** OpenAI endpoint: the
+    real `image_gen_server.py` path resolved the endpoint → POST `/images/generations` → b64
+    decode → **wrote a real PNG** → returned a link (PASS).
+  - **To activate the real cloud path:** run the seed with a real key
+    (`OPENAI_API_KEY=sk-… … python phase2-odysseus/seed_image_endpoint.py`). ⚠️ **Not yet
+    verified against real OpenAI** (no key in this environment; `gpt-image-1` needs OpenAI org
+    verification — `dall-e-3` works without). The full **chat→approval→image** flow also still
+    needs a live-app run.
+  - **Still OPEN:** the **local-first/offline** backend (Z-Image-Turbo via `diffusion_server.py`)
+    is deferred to **Step 11** (installer model-download) as planned — the cloud path above is
+    an interim opt-in that sends prompts off-machine.
+- **Severity note (original, for history):** image generation **did not work at all** — two
+  independent gaps below.
 - **Gap 1 — no mode can call the tool.** All three agent modes in `opencode.json`
   (assistant/coding/research) are deny-by-default (`"*": "deny"`) and none whitelists
   `odysseus-image_generate_image`, so the agent is **not permitted to invoke it even when the

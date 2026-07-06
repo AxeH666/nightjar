@@ -53,7 +53,8 @@
         "odysseus-docs_document_search": "allow",
         "nightjar_save_memory": "allow", "nightjar_search_memory": "allow",
         "odysseus-email_list_emails": "allow",
-        "odysseus-email_send_email": "ask"
+        "odysseus-email_send_email": "ask",
+        "odysseus-image_generate_image": "ask"
       }
     },
     "coding": {
