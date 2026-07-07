@@ -7,15 +7,25 @@ Nightjar is headless (no Odysseus admin UI), so image endpoints are seeded here
 instead of clicked in a browser. Idempotent: re-running upserts the same endpoint.
 The `api_key` column is `EncryptedText`, so the key is encrypted at rest on commit.
 
+Works for any OpenAI-compatible or OpenRouter image backend — the caller picks the
+base_url/model/name via env. OpenRouter's Unified Image API is wired identically:
+    NIGHTJAR_IMAGE_BASE_URL=https://openrouter.ai/api/v1
+    NIGHTJAR_IMAGE_MODEL=openai/gpt-image-1   (or black-forest-labs/flux.2-pro, etc.)
+    NIGHTJAR_IMAGE_ENDPOINT_NAME="OpenRouter (image)"
+    NIGHTJAR_IMAGE_API_KEY=sk-or-...
+(image_gen_server resolves /images vs /images/generations from the endpoint host.)
+
 Run with the Odysseus venv + the Nightjar data dir, e.g.:
 
-    OPENAI_API_KEY=sk-...                         # your real key (cloud path)
+    NIGHTJAR_IMAGE_API_KEY=sk-...                 # your real key (cloud path)
     NIGHTJAR_ROOT=$(pwd)
     ODYSSEUS_DATA_DIR=$HOME/.nightjar/odysseus
     phase2-odysseus/venv/bin/python phase2-odysseus/seed_image_endpoint.py
 
 Env knobs:
-    OPENAI_API_KEY               required for the real cloud path (blank = mock/testing)
+    NIGHTJAR_IMAGE_API_KEY       the endpoint key (provider-neutral, preferred). Falls
+                                 back to OPENAI_API_KEY. Blank = mock/testing
+    OPENAI_API_KEY               legacy alias for NIGHTJAR_IMAGE_API_KEY
     NIGHTJAR_IMAGE_BASE_URL      default https://api.openai.com/v1
     NIGHTJAR_IMAGE_MODEL         default gpt-image-1  (note: dall-e-3 needs no OpenAI
                                  org verification, gpt-image-1 does)
@@ -35,7 +45,7 @@ sys.path.insert(0, os.path.join(REPO, "research", "odysseus"))
 from src.database import SessionLocal, ModelEndpoint  # noqa: E402
 from src.settings import load_settings, save_settings  # noqa: E402
 
-api_key = os.environ.get("OPENAI_API_KEY", "")
+api_key = os.environ.get("NIGHTJAR_IMAGE_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
 base_url = os.environ.get("NIGHTJAR_IMAGE_BASE_URL", "https://api.openai.com/v1")
 model = os.environ.get("NIGHTJAR_IMAGE_MODEL", "gpt-image-1")
 name = os.environ.get("NIGHTJAR_IMAGE_ENDPOINT_NAME", "OpenAI (image)")

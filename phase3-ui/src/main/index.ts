@@ -57,10 +57,46 @@ function runImageSeed(extraEnv: Record<string, string>): Promise<void> {
     child.on("exit", () => done())
   })
 }
-// dall-e-3 works with any paid key (gpt-image-1 needs OpenAI org verification).
-const seedImageEndpoint = (key: string): Promise<void> =>
-  runImageSeed({ OPENAI_API_KEY: key, NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_MODEL || "dall-e-3" })
-const unseedImageEndpoint = (): Promise<void> => runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1" })
+// Image generation resolves ONE active image endpoint. We keep exactly one seeded,
+// honoring precedence: a direct OpenAI key wins; OpenRouter is the fallback when no
+// OpenAI key is present. Distinct endpoint names let us seed one and remove the other
+// without collision. dall-e-3 works with any paid OpenAI key (gpt-image-1 needs OpenAI
+// org verification); OpenRouter defaults to openai/gpt-image-1 via its Unified Image API.
+const IMAGE_OPENAI_NAME = "OpenAI (image)"
+const IMAGE_OPENROUTER_NAME = "OpenRouter (image)"
+const seedOpenAIImage = (key: string): Promise<void> =>
+  runImageSeed({
+    NIGHTJAR_IMAGE_API_KEY: key,
+    NIGHTJAR_IMAGE_BASE_URL: "https://api.openai.com/v1",
+    NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_MODEL || "dall-e-3",
+    NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_OPENAI_NAME,
+  })
+const seedOpenRouterImage = (key: string): Promise<void> =>
+  runImageSeed({
+    NIGHTJAR_IMAGE_API_KEY: key,
+    NIGHTJAR_IMAGE_BASE_URL: "https://openrouter.ai/api/v1",
+    NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_OPENROUTER_MODEL || "openai/gpt-image-1",
+    NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_OPENROUTER_NAME,
+  })
+const unseedImage = (name: string): Promise<void> =>
+  runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1", NIGHTJAR_IMAGE_ENDPOINT_NAME: name })
+
+// Reconcile the one active image endpoint to the current BYOK keys + precedence.
+// Idempotent — safe to call on every key change and at startup.
+async function reconcileImageEndpoint(): Promise<void> {
+  const openai = byok.getKey("openai")
+  const openrouter = byok.getKey("openrouter")
+  if (openai) {
+    await seedOpenAIImage(openai)
+    await unseedImage(IMAGE_OPENROUTER_NAME)
+  } else if (openrouter) {
+    await seedOpenRouterImage(openrouter)
+    await unseedImage(IMAGE_OPENAI_NAME)
+  } else {
+    await unseedImage(IMAGE_OPENAI_NAME)
+    await unseedImage(IMAGE_OPENROUTER_NAME)
+  }
+}
 
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
@@ -183,14 +219,17 @@ ipcMain.handle("byok:list", () =>
 )
 ipcMain.handle("byok:set", async (_e, providerId: string, key: string) => {
   byok.setKey(providerId, key) // throws (→ rejects to renderer) if no OS keychain
-  // OpenAI also powers image generation — auto-wire the Odysseus image endpoint from
-  // the same key so the user never runs a separate seed step (single-key setup).
-  if (providerId === "openai") await seedImageEndpoint(key)
+  // OpenAI/OpenRouter also power image generation — auto-wire the Odysseus image
+  // endpoint from the stored key(s) so the user never runs a separate seed step
+  // (single-key setup). Reconcile honors precedence: OpenAI wins, OpenRouter falls back.
+  if (providerId === "openai" || providerId === "openrouter") await reconcileImageEndpoint()
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 ipcMain.handle("byok:remove", async (_e, providerId: string) => {
   byok.removeKey(providerId)
-  if (providerId === "openai") await unseedImageEndpoint()
+  // Re-reconcile: removing OpenAI falls back to OpenRouter (if present); removing
+  // OpenRouter tears down its image endpoint (unless OpenAI still owns it).
+  if (providerId === "openai" || providerId === "openrouter") await reconcileImageEndpoint()
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 
@@ -251,10 +290,10 @@ app.whenReady().then(() => {
   createWindow()
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
   supervisor.setEnv("opencode-serve", opencodeServeEnv())
-  // If an OpenAI key is already stored, wire the image endpoint at startup too
-  // (so keys entered before this feature — or on a fresh launch — just work).
-  const storedOpenAI = byok.getKey("openai")
-  if (storedOpenAI) seedImageEndpoint(storedOpenAI)
+  // Wire the image endpoint from whichever stored key is present (OpenAI wins,
+  // OpenRouter falls back), so keys entered before this feature — or on a fresh
+  // launch — just work. Fire-and-forget: never blocks the window/stack coming up.
+  reconcileImageEndpoint().catch((e) => console.warn("[byok] image endpoint reconcile:", e))
   // fire-and-forget: bring up the stack; the health strip reflects progress. Once
   // the stack (incl. the ollama service) is up, ensure the local vision model.
   if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") {

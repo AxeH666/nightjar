@@ -1,3 +1,64 @@
+diff --git a/mcp_servers/image_gen_server.py b/mcp_servers/image_gen_server.py
+index 6cb77f7..17e9777 100644
+--- a/mcp_servers/image_gen_server.py
++++ b/mcp_servers/image_gen_server.py
+@@ -21,6 +21,29 @@ from src.constants import GENERATED_IMAGES_DIR
+ server = Server("image_gen")
+ 
+ 
++def _image_api_style(base_url: str) -> str:
++    """Return the image-API dialect for a resolved endpoint base: "openrouter" or "openai".
++
++    OpenRouter's Unified Image API lives at ``<base>/images`` (base already ends in
++    ``/api/v1``), whereas OpenAI-compatible servers expose ``<base>/images/generations``.
++    Both return ``{data: [{b64_json|url}]}``, so only the path (and size flexibility)
++    differ. Auto-detected from the host via Odysseus's provider detection; overridable
++    with ``NIGHTJAR_IMAGE_API_STYLE=openrouter|openai`` (used by the mock e2e test, where
++    the fake server runs on localhost and can't match the real openrouter.ai host).
++    """
++    import os
++
++    style = os.environ.get("NIGHTJAR_IMAGE_API_STYLE", "").strip().lower()
++    if style in ("openrouter", "openai"):
++        return style
++    try:
++        from src.llm_core import _detect_provider
++
++        return "openrouter" if _detect_provider(base_url) == "openrouter" else "openai"
++    except Exception:
++        return "openai"
++
++
+ @server.list_tools()
+ async def list_tools() -> list[Tool]:
+     return [
+@@ -85,13 +108,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+ 
+         is_gpt_image = "gpt-image" in model_id.lower()
+         base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
+-        images_url = base_url + "/images/generations"
++        api_style = _image_api_style(base_url)
++        is_openrouter = api_style == "openrouter"
++        # OpenRouter: POST <base>/images ; OpenAI-compatible: POST <base>/images/generations
++        images_url = base_url + ("/images" if is_openrouter else "/images/generations")
+ 
+         valid_gpt_sizes = {"1024x1024", "1024x1536", "1536x1024", "auto"}
+         valid_dalle3_sizes = {"1024x1024", "1024x1792", "1792x1024"}
+-        if is_gpt_image and size not in valid_gpt_sizes:
+-            size = "1024x1024"
+-        elif not is_gpt_image and size not in valid_dalle3_sizes:
++        if is_gpt_image:
++            if size not in valid_gpt_sizes:
++                size = "1024x1024"
++        elif is_openrouter:
++            # OpenRouter's image API accepts flexible sizes/aspect ratios per model
++            # (e.g. FLUX, Seedream). Don't force OpenAI's DALL·E-3 size set onto them;
++            # pass the caller's size through (default 1024x1024) untouched.
++            pass
++        elif size not in valid_dalle3_sizes:
+             size = "1024x1024"
+ 
+         payload = {"model": model_id, "prompt": prompt, "n": 1, "size": size}
 diff --git a/services/docs/service.py b/services/docs/service.py
 index 5242aa5..11f2724 100644
 --- a/services/docs/service.py

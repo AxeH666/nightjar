@@ -15,9 +15,10 @@ kept for the historical record with their root cause + fix + verification.
 - **Fix idea:** bundle/guide the `gemma3:4b` install in the installer (Step 11); optionally ship a vision-capable local model (mmproj); if OpenCode adds forced tool-choice, wire Create-Image to it directly.
 - **Scheduled:** the gemma3 dependency → installer (Step 11); otherwise documented behavior of the chat-attachments feature (`feat/chat-attachments`).
 
-## NJ-6 — image_gen: cloud path enabled (permission + endpoint); local-first backend still pending — PARTIAL 2026-07-06
+## NJ-6 — image_gen: cloud path enabled (OpenAI + OpenRouter); local-first backend still pending — PARTIAL 2026-07-07
 - **Severity:** medium (was: does not work at all). Chat→image now works via a **cloud**
-  OpenAI-compatible endpoint once seeded; the **local-first/offline** backend is still pending.
+  endpoint once seeded — either **OpenAI** or **OpenRouter** (auto-wired from the BYOK key,
+  OpenAI takes precedence); the **local-first/offline** backend is still pending.
 - **✅ Progress (2026-07-06):**
   - **Gap 1 FIXED** — `odysseus-image_generate_image` granted (`"ask"`) in **assistant** mode
     (`opencode.json`), so the agent can call it (still approval-gated, per rule 1).
@@ -34,9 +35,24 @@ kept for the historical record with their root cause + fix + verification.
     startup. So pasting the OpenAI key is the only step — image gen, chat, etc. all work from
     it. Verified end-to-end (mock OpenAI): set→endpoint row (encrypted key decrypts) + image
     generated; remove→endpoint deleted. (`test_image_gen.py`, 4/4.)
-  - ⚠️ **Not yet verified against real OpenAI** (no key in this environment; `gpt-image-1`
+  - **Gap 2c — OpenRouter added as a second cloud backend (2026-07-07).** Image gen can now
+    also run through **OpenRouter's Unified Image API** (`POST https://openrouter.ai/api/v1/images`,
+    request `{model, prompt, …}` → response `{data:[{b64_json}]}` — same shape OpenAI uses, only
+    the path differs: `/images` vs `/images/generations`). `image_gen_server.py` picks the dialect
+    from the endpoint host (`_image_api_style()`; override `NIGHTJAR_IMAGE_API_STYLE` for tests) and
+    relaxes the DALL·E-3 size clamp for non-OpenAI models (FLUX/Seedream/etc). `index.ts` now
+    reconciles **one** active image endpoint from the stored BYOK keys with **OpenAI taking
+    precedence** — an OpenRouter key wires image gen only when **no OpenAI key** is present
+    (default model `openai/gpt-image-1`; override `NIGHTJAR_IMAGE_OPENROUTER_MODEL`). `seed_image_endpoint.py`
+    is now provider-neutral (`NIGHTJAR_IMAGE_API_KEY`, back-compat `OPENAI_API_KEY`). **Verified
+    end-to-end** against a **mock OpenRouter** endpoint: seed→`/images` POST (never `/images/generations`)
+    →b64→PNG→link, host-dialect detection (openrouter.ai→openrouter, api.openai.com→openai),
+    encrypted-key row + unseed. (`test_image_gen_openrouter.py`, 7/7; `test_image_gen.py` still 4/4.)
+  - ⚠️ **Not yet verified against real OpenAI / real OpenRouter** (no key in this environment; `gpt-image-1`
     needs OpenAI org verification — `dall-e-3`, the auto-wire default, works without). The full
-    live **paste-key → chat → approval → image** flow needs a running-app + real-key check.
+    live **paste-key → chat → approval → image** flow needs a running-app + real-key check, for
+    both a real OpenAI key and a real OpenRouter `sk-or-…` key (the Electron `reconcileImageEndpoint`
+    precedence + subprocess seed wasn't driven headless here — mock-verified only).
   - **Still OPEN:** the **local-first/offline** backend (Z-Image-Turbo via `diffusion_server.py`)
     is deferred to **Step 11** (installer model-download) as planned — the cloud path above is
     an interim opt-in that sends prompts off-machine.
