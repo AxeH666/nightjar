@@ -81,9 +81,9 @@ const seedOpenRouterImage = (key: string): Promise<void> =>
 const unseedImage = (name: string): Promise<void> =>
   runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1", NIGHTJAR_IMAGE_ENDPOINT_NAME: name })
 
-// Reconcile the one active image endpoint to the current BYOK keys + precedence.
-// Idempotent — safe to call on every key change and at startup.
-async function reconcileImageEndpoint(): Promise<void> {
+// One reconcile pass: read the current keys and seed/unseed so the single active
+// image endpoint matches precedence (OpenAI > OpenRouter). Reads keys at call time.
+async function applyImageEndpoint(): Promise<void> {
   const openai = byok.getKey("openai")
   const openrouter = byok.getKey("openrouter")
   if (openai) {
@@ -96,6 +96,33 @@ async function reconcileImageEndpoint(): Promise<void> {
     await unseedImage(IMAGE_OPENAI_NAME)
     await unseedImage(IMAGE_OPENROUTER_NAME)
   }
+}
+
+// Reconcile the one active image endpoint to the current BYOK keys + precedence.
+// Single-flight + coalesced: each pass runs the seed/unseed subprocesses to
+// completion before the next starts (they must not interleave), and if any newer
+// request lands mid-run we run ONE more pass afterward so the latest key state
+// always wins. Without this, a fire-and-forget startup reconcile could finish
+// AFTER a newer byok:set/remove and re-apply stale decisions (e.g. tear down the
+// OpenAI row and re-seed OpenRouter while an OpenAI key is stored).
+let reconcileInFlight: Promise<void> | null = null
+let reconcilePending = false
+function reconcileImageEndpoint(): Promise<void> {
+  if (reconcileInFlight) {
+    // A pass is running; its snapshot may predate this call — queue exactly one
+    // more pass (which re-reads keys) and share the in-flight chain.
+    reconcilePending = true
+    return reconcileInFlight
+  }
+  reconcileInFlight = (async () => {
+    do {
+      reconcilePending = false
+      await applyImageEndpoint()
+    } while (reconcilePending) // a request arrived mid-pass → reconcile again with fresh keys
+  })().finally(() => {
+    reconcileInFlight = null
+  })
+  return reconcileInFlight
 }
 
 let win: BrowserWindow | null = null
