@@ -4,6 +4,8 @@ import type { AgentInfo, PermissionAsk, ReplyKind, OpenCodeEvent, FilePart } fro
 import { suggestMode } from "./lib/suggestMode"
 import { ChatSurface, type UiMessage, type UiBlock } from "./components/ChatSurface"
 import { type Attachment, loadGeneratedImage } from "./lib/attachments"
+import { ArtifactPanel } from "./components/ArtifactPanel"
+import { artifactActionFromTool, previewBridge } from "./lib/preview"
 import { ModeSelector } from "./components/ModeSelector"
 import { SuggestionBanner } from "./components/SuggestionBanner"
 import { PermissionPanel } from "./components/PermissionPanel"
@@ -42,6 +44,9 @@ declare global {
   }
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+// Prefer the newest .html as the active preview entry; otherwise the latest file.
+const preferHtml = (prev: string, rel: string): string =>
+  /\.html?$/i.test(rel) ? rel : /\.html?$/i.test(prev) ? prev : rel
 
 export default function App() {
   const [agents, setAgents] = useState<AgentInfo[]>([])
@@ -68,6 +73,14 @@ export default function App() {
   // full reload. byok.set/remove await the restart, so by the time we bump this
   // the fresh engine is already healthy and the reconnect lands on it.
   const [reconnectTick, setReconnectTick] = useState(0)
+  // Live-preview / Artifacts panel (AUDIT §10 #4): opens when the coding agent writes
+  // a file; mirrors write/edit tool-call content into a per-session sandbox served to
+  // a sandboxed iframe. `liveCode` feeds the streaming Code tab; `previewNonce` cache-
+  // busts the iframe (debounced so rapid writes don't thrash it).
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [activeEntry, setActiveEntry] = useState<string>("")
+  const [previewNonce, setPreviewNonce] = useState(0)
+  const [liveCode, setLiveCode] = useState<{ rel: string; content: string; streaming: boolean } | null>(null)
   const lastSentRef = useRef<string>("")
   // mirror activeModel into a ref so the SSE handler can read it without being a
   // dependency (which would tear down + resubscribe the stream on every switch).
@@ -112,6 +125,14 @@ export default function App() {
   const pendingParts = useRef<Map<string, any[]>>(new Map())
   // callIDs whose generated image we've already loaded inline (avoid re-appending).
   const loadedImages = useRef<Set<string>>(new Set())
+  // callID → last mirrored content length, so we only re-mirror on growth/completion
+  // (a tool part arrives repeatedly as pending→running→completed snapshots).
+  const artifactSeen = useRef<Map<string, number>>(new Map())
+  const nonceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bumpNonce = useCallback(() => {
+    if (nonceTimer.current) clearTimeout(nonceTimer.current)
+    nonceTimer.current = setTimeout(() => setPreviewNonce(Date.now()), 300)
+  }, [])
 
   // ---- upsert helpers over UiMessage[] ----
   const ensureMessage = useCallback((id: string, role: "user" | "assistant") => {
@@ -158,7 +179,37 @@ export default function App() {
         })
       }
     }
-  }, [])
+    // Live-preview: mirror the coding agent's write/edit file content into the per-session
+    // sandbox and open the Artifacts panel. Re-mirror only when the content grows/completes
+    // (the same tool part arrives repeatedly as pending→running→completed snapshots).
+    const action = artifactActionFromTool(call)
+    const pv = previewBridge()
+    if (action && pv && sessionRef.current) {
+      const len = action.kind === "write" ? action.content.length : action.newString.length
+      if (artifactSeen.current.get(call.callID) !== len) {
+        artifactSeen.current.set(call.callID, len)
+        const streaming = call.status !== "completed"
+        setPanelOpen(true)
+        if (action.kind === "write") {
+          setLiveCode({ rel: action.filePath.split(/[\\/]/).pop() || action.filePath, content: action.content, streaming })
+          pv.write(sessionRef.current, action.filePath, action.content)
+            .then(({ rel }) => {
+              setActiveEntry((prev) => preferHtml(prev, rel))
+              setLiveCode((lc) => (lc ? { ...lc, rel } : lc))
+              bumpNonce()
+            })
+            .catch(() => {})
+        } else {
+          pv.edit(sessionRef.current, action.filePath, action.oldString, action.newString, action.replaceAll)
+            .then(({ rel }) => {
+              setActiveEntry((prev) => preferHtml(prev, rel))
+              bumpNonce()
+            })
+            .catch(() => {})
+        }
+      }
+    }
+  }, [bumpNonce])
 
   // Render one assistant message part (text or tool). Used both for live parts
   // and for parts replayed from the pending buffer once the role is known.
@@ -479,9 +530,22 @@ export default function App() {
         />
       )}
 
-      <main className="min-h-0 flex-1">
-        <ChatSurface messages={messages} busy={busy} onSend={send} onCreateImage={createImage} />
-      </main>
+      <div className="flex min-h-0 flex-1">
+        <main className="min-h-0 flex-1">
+          <ChatSurface messages={messages} busy={busy} onSend={send} onCreateImage={createImage} />
+        </main>
+        {panelOpen && (
+          <ArtifactPanel
+            sessionID={sessionRef.current}
+            entry={activeEntry}
+            nonce={previewNonce}
+            live={liveCode}
+            onSelectEntry={setActiveEntry}
+            onClose={() => setPanelOpen(false)}
+            className="min-h-0 w-[45%] border-l border-nightjar-surface"
+          />
+        )}
+      </div>
 
       {ask && <PermissionPanel ask={ask} onReply={reply} onAbort={abort} />}
       {showKeys && (

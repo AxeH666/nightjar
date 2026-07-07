@@ -33,6 +33,20 @@ contextBridge.exposeInMainWorld("nightjar", {
     ipcRenderer.invoke("nightjar:saveAttachment", dataUrl, name),
   readGeneratedImage: (filename: string): Promise<string | null> =>
     ipcRenderer.invoke("nightjar:readGeneratedImage", filename),
+  // Live-preview / Artifacts: mirror write/edit content into a per-session sandbox
+  // served by the loopback static server, list/read for the Files tab, save-as (any
+  // type) + reveal-in-folder for download.
+  preview: {
+    write: (sessionID: string, filePath: string, content: string): Promise<{ url: string; nonce: number; rel: string }> =>
+      ipcRenderer.invoke("nightjar:previewWrite", sessionID, filePath, content),
+    edit: (sessionID: string, filePath: string, oldString: string, newString: string, replaceAll: boolean): Promise<{ url: string; nonce: number; rel: string }> =>
+      ipcRenderer.invoke("nightjar:previewEdit", sessionID, filePath, oldString, newString, replaceAll),
+    url: (sessionID: string, entry?: string): Promise<string> => ipcRenderer.invoke("nightjar:previewUrl", sessionID, entry),
+    list: (sessionID: string): Promise<{ path: string; size: number }[]> => ipcRenderer.invoke("nightjar:previewList", sessionID),
+    read: (sessionID: string, relPath: string): Promise<{ mime: string; dataUrl: string }> => ipcRenderer.invoke("nightjar:previewRead", sessionID, relPath),
+    saveAs: (sessionID: string, relPath: string): Promise<boolean> => ipcRenderer.invoke("nightjar:saveFileAs", sessionID, relPath),
+    reveal: (sessionID: string, relPath?: string): Promise<void> => ipcRenderer.invoke("nightjar:previewReveal", sessionID, relPath),
+  },
   onStatus: (cb: (s: ServiceStatus[]) => void) => {
     const handler = (_e: unknown, s: ServiceStatus[]) => cb(s)
     ipcRenderer.on("nightjar:status", handler)

@@ -38,6 +38,8 @@ adding networked access.
 | Tongyi DeepResearch | deep-research pipeline (via Odysseus) | Apache-2.0 | `research/odysseus/licenses/DeepResearch-Apache-2.0.txt` |
 | orb-ui (© Alexander Chen) | voice-reactive UI orb (Phase 4) | MIT | `phase3-ui/node_modules/orb-ui/LICENSE`; forked circle theme credits upstream in `phase3-ui/src/renderer/src/components/orb/AmberCircleTheme.tsx` |
 | Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
+| marked | markdown→HTML in the live-preview panel | MIT | `phase3-ui/node_modules/marked/LICENSE.md` (npm dep) |
+| gemma-chat (© 2026 ammaar) | live-preview "Canvas" **pattern reference only** — reimplemented, **no code copied** (`phase3-ui/src/main/preview-server.ts` + `components/ArtifactPanel.tsx` are original AGPL) | MIT | pattern documented in `research/AUDIT_REPORT.md` §5; no gemma-chat files vendored |
 
 Odysseus's own `ACKNOWLEDGMENTS.md` and `licenses/` directory (opencode-MIT,
 llmfit-MIT, DeepResearch-Apache-2.0, OpenDyslexic-OFL) are carried forward
@@ -68,9 +70,11 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
   *cloud* OpenAI image models); no restrictive local checkpoint is on the shipped path.
   Recommended local default = **Z-Image-Turbo (Apache-2.0)**; **FLUX.1-dev**
   (non-commercial) and **SD 3.5** (Stability Community License) must never be defaults.
-- **Step 4 — live-preview panel.** Reuses the OpenCode coding agent + gemma-chat's
-  Canvas pattern (MIT). **Must NOT use bolt.diy's WebContainers** (commercial license) —
-  recorded here so the constraint isn't lost.
+- **Step 4 — live-preview panel. ✅ Implemented.** Reuses the OpenCode coding agent +
+  a **reimplementation** of gemma-chat's Canvas pattern (MIT; no code copied — see the table
+  above). Uses a loopback static server + sandboxed `<iframe>`; **does NOT use bolt.diy's
+  WebContainers** (commercial license — constraint honored). Added `marked` (MIT) for
+  markdown→HTML preview.
 - **Step 5 — Phase 5 (computer-use).** License-audit before vendoring: **OmniParser**,
   **nut.js**, and any local grounding models (Holo-1.5, UI-TARS). Add each here.
 - **Step 6 — Phase 6 (CAD).** License-audit the Text2CAD/Text-to-CadQuery checkpoint,
