@@ -37,6 +37,7 @@ adding networked access.
 | llmfit (© 2026 Alex Jones) | hardware model-fit (vendored) | MIT | `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS |
 | Tongyi DeepResearch | deep-research pipeline (via Odysseus) | Apache-2.0 | `research/odysseus/licenses/DeepResearch-Apache-2.0.txt` |
 | orb-ui (© Alexander Chen) | voice-reactive UI orb (Phase 4) | MIT | `phase3-ui/node_modules/orb-ui/LICENSE`; forked circle theme credits upstream in `phase3-ui/src/renderer/src/components/orb/AmberCircleTheme.tsx` |
+| Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
 
 Odysseus's own `ACKNOWLEDGMENTS.md` and `licenses/` directory (opencode-MIT,
 llmfit-MIT, DeepResearch-Apache-2.0, OpenDyslexic-OFL) are carried forward

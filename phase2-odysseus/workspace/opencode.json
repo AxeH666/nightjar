@@ -55,7 +55,8 @@
         "nightjar_analyze_image": "allow",
         "odysseus-email_list_emails": "allow",
         "odysseus-email_send_email": "ask",
-        "odysseus-image_generate_image": "ask"
+        "odysseus-image_generate_image": "ask",
+        "browser-use_run_browser_task": "ask"
       }
     },
     "coding": {
@@ -76,6 +77,13 @@
       "environment": { "NIGHTJAR_DATA_DIR": "{env:HOME}/.nightjar", "NIGHTJAR_WHISPER_SIZE": "base.en", "OLLAMA_HOST": "http://localhost:11434" },
       "enabled": true,
       "timeout": 120000
+    },
+    "browser-use": {
+      "type": "local",
+      "command": ["{env:NIGHTJAR_ROOT}/browser-use-mcp/venv/bin/python", "{env:NIGHTJAR_ROOT}/browser-use-mcp/server.py"],
+      "environment": { "NIGHTJAR_DATA_DIR": "{env:HOME}/.nightjar", "NIGHTJAR_LLM_ENDPOINT": "http://127.0.0.1:8086/v1", "NIGHTJAR_LLM_MODEL": "qwen3-4b-instruct-2507" },
+      "enabled": true,
+      "timeout": 300000
     },
     "odysseus-email": {
       "type": "local",
