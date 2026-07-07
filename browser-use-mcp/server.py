@@ -45,6 +45,19 @@ PROFILE_DIR = os.path.join(DATA_DIR, "browseruse_profile")
 DEFAULT_MAX_STEPS = int(os.environ.get("NIGHTJAR_BROWSERUSE_MAX_STEPS", "25"))
 DEFAULT_TIMEOUT_S = int(os.environ.get("NIGHTJAR_BROWSERUSE_TIMEOUT_S", "180"))
 
+# The MCP client (opencode.json) hard-kills this subprocess at its `timeout` (300000 ms).
+# If the host kills us mid-run, our teardown never runs and a headless Chromium orphans.
+# So keep total work UNDER that cap: clamp the run timeout AND bound teardown, leaving
+# headroom. Override via env if opencode.json's timeout changes.
+MCP_CLIENT_TIMEOUT_S = int(os.environ.get("NIGHTJAR_BROWSERUSE_MCP_TIMEOUT_S", "300"))
+CLOSE_TIMEOUT_S = int(os.environ.get("NIGHTJAR_BROWSERUSE_CLOSE_TIMEOUT_S", "20"))
+MAX_RUN_TIMEOUT_S = max(30, MCP_CLIENT_TIMEOUT_S - CLOSE_TIMEOUT_S - 15)
+
+# One live Chromium per persistent profile dir — concurrent runs would contend for the
+# profile lock and corrupt session state. Serialize browser tasks (callers queue) so
+# the persistent profile (logins/cookies) is preserved WITHOUT contention.
+_run_lock = asyncio.Lock()
+
 
 @dataclass
 class ModelSpec:
@@ -127,25 +140,42 @@ async def run_browser_task(task: str, max_steps: int = DEFAULT_MAX_STEPS, timeou
     except Exception as e:
         return f"Error: could not initialize model ({spec.provider}:{spec.model}): {e}"
 
+    # Clamp so run + teardown stay under the MCP client's kill timeout (finding: an
+    # over-long timeout_s lets the host kill us mid-run, skipping teardown).
+    eff_timeout = max(1, min(int(timeout_s), MAX_RUN_TIMEOUT_S))
+
     os.makedirs(PROFILE_DIR, exist_ok=True)
-    profile = BrowserProfile(headless=True, user_data_dir=PROFILE_DIR)
-    agent = Agent(task=task.strip(), llm=llm, browser_profile=profile)
+    # Serialize: one live Chromium per persistent profile dir; concurrent runs would
+    # collide on the profile lock. Callers queue here.
+    async with _run_lock:
+        profile = BrowserProfile(headless=True, user_data_dir=PROFILE_DIR)
+        agent = Agent(task=task.strip(), llm=llm, browser_profile=profile)
 
-    try:
-        history = await asyncio.wait_for(agent.run(max_steps=max_steps), timeout=timeout_s)
-    except asyncio.TimeoutError:
-        return f"Error: browser task timed out after {timeout_s}s (model={spec.provider}:{spec.model})"
-    except Exception as e:
-        return f"Error: browser task failed: {e}"
-    finally:
+        error = None
+        history = None
         try:
-            await agent.close()  # always tear down the browser (incl. the timeout path)
-        except Exception:
-            pass
+            history = await asyncio.wait_for(agent.run(max_steps=max_steps), timeout=eff_timeout)
+        except asyncio.TimeoutError:
+            error = f"Error: browser task timed out after {eff_timeout}s (model={spec.provider}:{spec.model})"
+        except Exception as e:
+            error = f"Error: browser task failed: {e}"
 
+        # Always tear down the browser — but BOUND it (a hung CDP/browser shutdown must
+        # not run past the MCP cap) and SURFACE failures rather than swallow them
+        # silently (a Chromium/profile lock may linger; the caller should know).
+        warn = ""
+        try:
+            await asyncio.wait_for(agent.close(), timeout=CLOSE_TIMEOUT_S)
+        except Exception as ce:
+            warn = (f"  [warning: browser did not shut down cleanly ({ce!r}); "
+                    f"a headless Chromium may still be running]")
+            print(f"[browser-use] teardown failed/timed out: {ce!r}", file=sys.stderr, flush=True)
+
+    if error is not None:
+        return error + warn
     result = history.final_result() if history is not None else None
     done = history.is_done() if history is not None else False
-    return f"{result or '(no final result returned)'}\n\n[model: {spec.provider}:{spec.model} · done={done}]"
+    return f"{result or '(no final result returned)'}\n\n[model: {spec.provider}:{spec.model} · done={done}]{warn}"
 
 
 if __name__ == "__main__":
