@@ -26,6 +26,7 @@
     "vite": "^5.4.11"
   },
   "dependencies": {
+    "marked": "^18.0.5",
     "orb-ui": "0.2.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

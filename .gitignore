@@ -118,3 +118,9 @@ desktop.ini
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .openforge/
+
+# ── Live-preview build output (AUDIT §10 #4) ─────────────────────────────────
+# The coding agent writes previewable web artifacts here. Keeping it untracked
+# means the git-gate safety plugin never sees it in `git status`, so multi-file
+# design builds are never rolled back mid-generation (agent re-reads stay valid).
+phase2-odysseus/workspace/preview/

@@ -19,7 +19,9 @@ export const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(i
 const OPENCODE_ENTRY = join(REPO, "research/opencode/packages/opencode/src/index.ts")
 const LLAMA_BIN = process.env.NIGHTJAR_LLAMA_BIN || join(HOME, "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
-const WORKSPACE = process.env.NIGHTJAR_WORKSPACE || join(REPO, "phase2-odysseus/workspace")
+// Exported so the preview/artifact layer can compute tidy relative mirror paths
+// (relative(WORKSPACE, filePath)) for files the coding agent writes.
+export const WORKSPACE = process.env.NIGHTJAR_WORKSPACE || join(REPO, "phase2-odysseus/workspace")
 
 function tcpOpen(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
   return new Promise((resolve) => {

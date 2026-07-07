@@ -9,9 +9,10 @@ import { readFile, writeFile, mkdir } from "fs/promises"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO } from "./services"
+import { nightjarServices, REPO, WORKSPACE } from "./services"
 import * as byok from "./byok"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
+import * as preview from "./preview-server"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -237,6 +238,57 @@ ipcMain.handle("nightjar:readGeneratedImage", async (_e, filename: string): Prom
   }
 })
 
+// ── Live-preview / Artifacts IPC ──────────────────────────────────────────────
+// The renderer mirrors each write/edit tool-call's content into a per-session
+// sandbox (~/.nightjar/preview/<sessionID>/) served by the in-process loopback
+// static server (preview-server.ts). See AUDIT §10 #4. All paths are sandbox-guarded
+// inside preview-server; sessionID is sanitized to one dir segment there.
+ipcMain.handle(
+  "nightjar:previewWrite",
+  async (_e, sessionID: string, filePath: string, content: string): Promise<{ url: string; nonce: number; rel: string }> => {
+    const rel = preview.normalizeRel(filePath, WORKSPACE)
+    await preview.writePreviewFile(sessionID, rel, content)
+    const url = await preview.previewUrl(sessionID)
+    return { url, nonce: Date.now(), rel }
+  },
+)
+// Apply an edit tool's find/replace to the mirrored copy. If we haven't mirrored the
+// file yet, seed from the agent's current on-disk copy (best-effort — git-gate may
+// have rolled it back) so the preview still reflects post-edit content.
+ipcMain.handle(
+  "nightjar:previewEdit",
+  async (_e, sessionID: string, filePath: string, oldString: string, newString: string, replaceAll: boolean): Promise<{ url: string; nonce: number; rel: string }> => {
+    const rel = preview.normalizeRel(filePath, WORKSPACE)
+    let base: string | undefined
+    try {
+      base = await readFile(join(WORKSPACE, rel), "utf8")
+    } catch {
+      /* not on disk — rely on the mirrored copy */
+    }
+    await preview.editPreviewFile(sessionID, rel, oldString, newString, !!replaceAll, base)
+    const url = await preview.previewUrl(sessionID)
+    return { url, nonce: Date.now(), rel }
+  },
+)
+ipcMain.handle("nightjar:previewUrl", (_e, sessionID: string, entry?: string): Promise<string> => preview.previewUrl(sessionID, entry))
+ipcMain.handle("nightjar:previewList", (_e, sessionID: string) => preview.listPreview(sessionID))
+ipcMain.handle("nightjar:previewRead", (_e, sessionID: string, relPath: string) => preview.readPreview(sessionID, relPath))
+
+// Save a generated artifact to a user-chosen location, native format, any type.
+ipcMain.handle("nightjar:saveFileAs", async (_e, sessionID: string, relPath: string): Promise<boolean> => {
+  const { abs, bytes } = await preview.readPreviewBytes(sessionID, relPath)
+  const opts: Electron.SaveDialogOptions = { title: "Save file", defaultPath: basename(abs) }
+  const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+  if (r.canceled || !r.filePath) return false
+  await writeFile(r.filePath, bytes)
+  return true
+})
+// Reveal the generated file (or the session sandbox) in the OS file manager.
+ipcMain.handle("nightjar:previewReveal", async (_e, sessionID: string, relPath?: string): Promise<void> => {
+  const target = relPath ? preview.readPreviewBytes(sessionID, relPath).then((r) => r.abs).catch(() => preview.sandboxRoot(sessionID)) : Promise.resolve(preview.sandboxRoot(sessionID))
+  shell.showItemInFolder(await target)
+})
+
 // ── BYOK (bring-your-own-key) IPC ─────────────────────────────────────────────
 // The renderer only ever gets provider catalog + masked status; raw keys stay in
 // the main process (encrypted at rest, decrypted only to inject into the engine).
@@ -341,6 +393,7 @@ app.on("before-quit", async (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
+  preview.stopServer()
   await supervisor.stop().catch(() => {})
   app.quit()
 })
