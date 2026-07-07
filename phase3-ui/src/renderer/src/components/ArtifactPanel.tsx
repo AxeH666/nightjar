@@ -20,12 +20,38 @@ type Tab = "preview" | "code" | "files"
 const TAB_BTN = (active: boolean): string =>
   `px-3 py-1 text-xs rounded ${active ? "bg-nightjar-accent text-nightjar-base" : "text-nightjar-text/60 hover:text-nightjar-text"}`
 
+// Decode a base64 data URL (from previewRead) to UTF-8 text for the source view.
+function dataUrlToText(dataUrl: string): string {
+  const b64 = dataUrl.split(",")[1] ?? ""
+  try {
+    const bin = atob(b64)
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))
+  } catch {
+    return ""
+  }
+}
+
 export function ArtifactPanel({ sessionID, entry, nonce, live, onSelectEntry, onClose, className }: Props) {
   const [tab, setTab] = useState<Tab>("preview")
   const [src, setSrc] = useState<string>("")
   const [files, setFiles] = useState<PreviewEntry[]>([])
+  const [selectedSource, setSelectedSource] = useState<string>("") // Code view of a non-streaming file
   const codeRef = useRef<HTMLPreElement | null>(null)
   const b = previewBridge()
+
+  // The Code tab shows the streaming buffer only while THAT file is the active entry;
+  // otherwise it shows the selected file's actual source (fetched), so picking another
+  // file or viewing an edited file no longer shows the last streamed write (Bugbot).
+  const showLive = !!live && live.rel === entry
+  const codeText = showLive ? live.content : selectedSource
+  useEffect(() => {
+    if (!b || !entry || showLive) return
+    let alive = true
+    b.read(sessionID, entry).then(({ dataUrl }) => alive && setSelectedSource(dataUrlToText(dataUrl))).catch(() => alive && setSelectedSource(""))
+    return () => {
+      alive = false
+    }
+  }, [b, sessionID, entry, showLive, nonce])
 
   // Resolve the preview URL for the active entry (async IPC), then cache-bust with nonce.
   useEffect(() => {
@@ -60,8 +86,8 @@ export function ArtifactPanel({ sessionID, entry, nonce, live, onSelectEntry, on
 
   // Follow the streaming code to the bottom.
   useEffect(() => {
-    if (tab === "code" && codeRef.current) codeRef.current.scrollTop = codeRef.current.scrollHeight
-  }, [live?.content, tab])
+    if (tab === "code" && showLive && codeRef.current) codeRef.current.scrollTop = codeRef.current.scrollHeight
+  }, [codeText, tab, showLive])
 
   const iframeSrc = src ? `${src}${src.includes("?") ? "&" : "?"}v=${nonce}` : ""
 
@@ -120,14 +146,14 @@ export function ArtifactPanel({ sessionID, entry, nonce, live, onSelectEntry, on
       {tab === "code" && (
         <div className="min-h-0 flex-1 overflow-hidden">
           <div className="border-b border-nightjar-surface px-3 py-1 font-mono text-[11px] text-nightjar-text/50">
-            {live?.rel ?? entry ?? "—"}
+            {entry || live?.rel || "—"}
           </div>
           <pre
             ref={codeRef}
             className="h-full overflow-auto px-3 py-2 font-mono text-[12px] leading-relaxed text-nightjar-text/90"
           >
-            {live?.content ?? ""}
-            {live?.streaming && <span className="animate-pulse text-nightjar-accent">▍</span>}
+            {codeText}
+            {showLive && live?.streaming && <span className="animate-pulse text-nightjar-accent">▍</span>}
           </pre>
         </div>
       )}

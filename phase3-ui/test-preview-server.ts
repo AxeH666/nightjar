@@ -29,10 +29,16 @@ try {
   const read = await readPreview(sid, "style.css")
   check("readPreview returns data URL", read.mime === "text/css" && read.dataUrl.startsWith("data:text/css;base64,"))
 
-  // 3. edit (find/replace on the mirrored copy)
+  // 3. edit (find/replace on OUR OWN mirrored copy)
   await editPreviewFile(sid, "index.html", "Coffee", "Espresso", false)
   const afterEdit = await readPreview(sid, "index.html")
-  check("editPreviewFile applied", Buffer.from(afterEdit.dataUrl.split(",")[1], "base64").toString().includes("Espresso"))
+  check("editPreviewFile applies to mirrored copy", Buffer.from(afterEdit.dataUrl.split(",")[1], "base64").toString().includes("Espresso"))
+
+  // 3b. edit with NO prior mirror → `base` is the agent's already-edited on-disk copy;
+  // it must be mirrored VERBATIM (re-applying old→new would double-apply — Bugbot).
+  await editPreviewFile(sid, "fresh.html", "OLD", "NEW", false, "<p>NEW and NEW</p>")
+  const fresh = Buffer.from((await readPreview(sid, "fresh.html")).dataUrl.split(",")[1], "base64").toString()
+  check("edit-no-mirror mirrors base verbatim (no double-apply)", fresh === "<p>NEW and NEW</p>", fresh)
 
   // 4. static server serves the file with no-store
   const port = await ensureServer()
@@ -63,6 +69,11 @@ try {
   // server-side traversal (encoded) → 403/placeholder, never escapes
   const evil = await fetch(`http://127.0.0.1:${port}/preview/${sid}/..%2f..%2fetc%2fpasswd`)
   check("server refuses traversal", evil.status === 403 || evil.status === 404 || !(await evil.text()).includes("root:"))
+
+  // 8. concurrent ensureServer → one listener, one shared port (in-flight guard, Bugbot)
+  stopServer()
+  const [pa, pb] = await Promise.all([ensureServer(), ensureServer()])
+  check("concurrent ensureServer shares one port", pa === pb && pa > 0, `${pa} vs ${pb}`)
 } finally {
   stopServer()
   await rm(sandboxRoot(sid), { recursive: true, force: true }).catch(() => {})

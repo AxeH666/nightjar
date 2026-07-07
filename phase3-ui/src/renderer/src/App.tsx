@@ -349,6 +349,14 @@ export default function App() {
           setAgents(list)
           setMode(list.find((a) => a.name === "assistant")?.name ?? list[0]?.name ?? "")
           sessionRef.current = await client.createSession("Nightjar session")
+          // New session (fresh connect or a BYOK-restart reconnect) → drop any
+          // artifacts from the previous session so the panel never shows stale paths
+          // against the new (empty) sandbox.
+          setPanelOpen(false)
+          setActiveEntry("")
+          setLiveCode(null)
+          setPreviewNonce(0)
+          artifactSeen.current.clear()
           setStatus(`connected · ${cfg.opencodeUrl}`)
           client.subscribe(handleEvent, ac.signal).catch((err) => setStatus(`stream closed: ${err}`))
           return

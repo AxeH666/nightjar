@@ -66,8 +66,11 @@ export async function writePreviewFile(sessionID: string, relPath: string, conte
   await rename(tmp, abs)
 }
 
-// Apply an `edit` tool's find/replace to the mirrored copy (reading `base` — the
-// current workspace/on-disk copy — first if we haven't mirrored this file yet).
+// Mirror an `edit` tool's result. If we already have our OWN mirrored copy (from a
+// prior write/edit this session), it's the pre-this-edit state → apply the
+// find/replace to it. If we DON'T, `base` is the agent's on-disk copy, which the
+// agent has ALREADY edited by the time this event arrives — so mirror it verbatim;
+// re-running the find/replace here would double-apply the change (Bugbot).
 export async function editPreviewFile(
   sessionID: string,
   relPath: string,
@@ -78,14 +81,18 @@ export async function editPreviewFile(
 ): Promise<void> {
   const root = sandboxRoot(sessionID)
   const abs = safeResolve(root, relPath)
-  let cur = base ?? ""
+  let mirrored: string | null = null
   try {
-    cur = await readFile(abs, "utf8")
+    mirrored = await readFile(abs, "utf8")
   } catch {
-    /* not mirrored yet → use provided base (may be empty) */
+    mirrored = null
   }
-  const next = replaceAll ? cur.split(oldString).join(newString) : cur.replace(oldString, newString)
-  await writePreviewFile(sessionID, relPath, next)
+  if (mirrored !== null) {
+    const next = replaceAll ? mirrored.split(oldString).join(newString) : mirrored.replace(oldString, newString)
+    await writePreviewFile(sessionID, relPath, next)
+  } else if (base !== undefined) {
+    await writePreviewFile(sessionID, relPath, base) // already post-edit on disk — do NOT re-apply
+  }
 }
 
 export interface PreviewEntry {
@@ -135,6 +142,7 @@ export async function readPreviewBytes(sessionID: string, relPath: string): Prom
 // ── static server ─────────────────────────────────────────────────────────────
 let server: Server | null = null
 let port = 0
+let starting: Promise<number> | null = null // in-flight guard: concurrent first calls must not bind two listeners
 
 const noStore = (res: import("node:http").ServerResponse, mime: string): void => {
   res.setHeader("Content-Type", mime)
@@ -189,7 +197,10 @@ async function serveFile(res: import("node:http").ServerResponse, abs: string): 
 
 export function ensureServer(): Promise<number> {
   if (server && port) return Promise.resolve(port)
-  return new Promise((res, rej) => {
+  // In-flight guard: concurrent first calls (e.g. parallel previewWrite) must share
+  // ONE listen() — otherwise we'd bind two loopback servers and leak one (Bugbot).
+  if (starting) return starting
+  starting = new Promise<number>((res, rej) => {
     const s = createServer(async (req, resp) => {
       try {
         resp.setHeader("Access-Control-Allow-Origin", req.headers.origin ?? "*")
@@ -239,6 +250,10 @@ export function ensureServer(): Promise<number> {
       res(port)
     })
   })
+  starting.catch(() => {}).finally(() => {
+    starting = null // allow a retry if it failed; a success leaves server/port set
+  })
+  return starting
 }
 
 export async function previewUrl(sessionID: string, entry?: string): Promise<string> {
@@ -251,4 +266,5 @@ export function stopServer(): void {
   server?.close()
   server = null
   port = 0
+  starting = null
 }
