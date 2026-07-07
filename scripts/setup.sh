@@ -54,6 +54,18 @@ make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)
 }
 echo "-- [3/6] phase2-mcp venv --";      make_venv phase2-mcp
 echo "-- [4/6] phase2-odysseus venv --"; make_venv phase2-odysseus
+# Browser Use (autonomous form-filling) — isolated venv so its heavy deps
+# (openai/anthropic/google-genai/…) never destabilize phase2-mcp/venv.
+echo "-- [4b/6] browser-use venv --";    make_venv browser-use-mcp
+# Browser Use 0.13.x drives Chromium over CDP and manages its own browser; it needs a
+# Chrome/Chromium available. Best-effort diagnostic only — never fatal (a missing
+# browser disables just the browser-use tool). Run doctor yourself to verify/fix:
+#   browser-use-mcp/venv/bin/browser-use --doctor
+if [ -x browser-use-mcp/venv/bin/browser-use ]; then
+  browser-use-mcp/venv/bin/browser-use --doctor >/dev/null 2>&1 \
+    && echo "   browser-use browser ready" \
+    || echo "   (browser-use needs a Chrome/Chromium — verify later: browser-use-mcp/venv/bin/browser-use --doctor)"
+fi
 
 # 4) UI node modules ------------------------------------------------------------
 echo "-- [5/6] phase3-ui npm install --"

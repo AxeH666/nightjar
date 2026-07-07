@@ -1,0 +1,3 @@
+# Browser Use MCP — autonomous web tasks (form-filling) for JUNE.
+# MIT (browser-use/browser-use). Isolated venv: heavy deps must not touch phase2-mcp/venv.
+browser-use==0.13.3
