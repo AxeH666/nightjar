@@ -9,7 +9,7 @@
 import { ConnectionProvider, useConnection } from "./context/ConnectionContext"
 import { ModelProvider, useModel } from "./context/ModelContext"
 import { ArtifactProvider, useArtifact } from "./context/ArtifactContext"
-import { ChatProvider, useChat } from "./context/ChatContext"
+import { SessionsProvider, useSessions } from "./context/SessionsContext"
 import { PermissionProvider, usePermission } from "./context/PermissionContext"
 import { LOCAL_MODEL } from "./lib/byok"
 import { ChatSurface } from "./components/ChatSurface"
@@ -29,11 +29,11 @@ export default function App() {
     <ConnectionProvider>
       <ModelProvider>
         <ArtifactProvider>
-          <ChatProvider>
+          <SessionsProvider>
             <PermissionProvider>
               <AppBody />
             </PermissionProvider>
-          </ChatProvider>
+          </SessionsProvider>
         </ArtifactProvider>
       </ModelProvider>
     </ConnectionProvider>
@@ -41,7 +41,7 @@ export default function App() {
 }
 
 function AppBody() {
-  const { agents, status, services, wsUrl, sessionRef, reconnect, setStatus } = useConnection()
+  const { agents, status, services, wsUrl, reconnect, setStatus } = useConnection()
   const {
     choices,
     activeModel,
@@ -55,16 +55,34 @@ function AppBody() {
     setRateLimitOffer,
     loadModels,
   } = useModel()
-  const { messages, busy, mode, setMode, suggestion, setSuggestion, send, createImage, fallbackToLocal, acceptOpenRouterSwitch } =
-    useChat()
+  const {
+    sessions,
+    slots,
+    messagesOf,
+    busyOf,
+    send,
+    createImage,
+    setSessionAgent,
+    suggestion,
+    setSuggestion,
+    fallbackToLocal,
+    acceptOpenRouterSwitch,
+  } = useSessions()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode } = useArtifact()
   const { ask, reply, abort } = usePermission()
+
+  // Pre-tab shell: the single visible conversation is the chat slot. Stage 5
+  // surfaces the code slot in its own tab.
+  const chatId = slots.chat
+  const messages = messagesOf(chatId)
+  const busy = busyOf(chatId)
+  const mode = sessions[chatId]?.agent ?? ""
 
   return (
     <div className="flex h-full flex-col bg-nightjar-base">
       <header className="flex items-center gap-3 border-b border-nightjar-surface px-4 py-2">
         <span className="font-semibold text-nightjar-accent">Nightjar</span>
-        {agents.length > 0 && <ModeSelector agents={agents} active={mode} onChange={setMode} />}
+        {agents.length > 0 && <ModeSelector agents={agents} active={mode} onChange={(m) => setSessionAgent(chatId, m)} />}
         <div className="ml-auto flex items-center gap-3">
           <ModelSwitcher choices={choices} activeId={activeModel} onSelect={setActiveModel} onManageKeys={() => setShowKeys(true)} />
           <span className="text-xs text-nightjar-text/40">{status}</span>
@@ -89,9 +107,9 @@ function AppBody() {
           </button>
           <button
             onClick={() => {
-              const t = rateLimitOffer.text
               setRateLimitOffer(null)
-              setFallbackOffer(t) // still offer the local offline escape hatch
+              // still offer the local offline escape hatch — for the same failing session
+              setFallbackOffer({ text: rateLimitOffer.text, sessionId: rateLimitOffer.sessionId, slot: rateLimitOffer.slot })
             }}
             className="text-xs text-nightjar-text/50 hover:underline"
           >
@@ -119,7 +137,7 @@ function AppBody() {
         <SuggestionBanner
           suggested={suggestion}
           onAccept={() => {
-            setMode(suggestion)
+            setSessionAgent(chatId, suggestion)
             setSuggestion(null)
           }}
           onDismiss={() => setSuggestion(null)}
@@ -128,15 +146,16 @@ function AppBody() {
 
       <div className="flex min-h-0 flex-1">
         <main className="min-h-0 flex-1">
-          <ChatSurface messages={messages} busy={busy} onSend={send} onCreateImage={createImage} />
+          <ChatSurface
+            messages={messages}
+            busy={busy}
+            onSend={(text, atts) => send(chatId, text, { attachments: atts })}
+            onCreateImage={(prompt) => createImage(chatId, prompt)}
+          />
         </main>
         {panelOpen && (
           <ArtifactPanel
-            // Use the ref (synchronous) — the SAME source the mirror write + the
-            // reducer's session filter use — so the panel can't read a different
-            // session than the one being written to during a reconnect. (sessionID
-            // state lags a render; mixing the two split-brained the sandbox.)
-            sessionID={sessionRef.current}
+            sessionID={chatId}
             entry={activeEntry}
             nonce={previewNonce}
             live={liveCode}

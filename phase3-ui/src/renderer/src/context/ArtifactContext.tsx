@@ -1,10 +1,10 @@
 // ArtifactContext — the live-preview / Artifacts panel state (AUDIT §10 #4) and
-// the write/edit mirror pipeline. ChatContext's tool-call reducer delegates here
-// via onToolCall(); the panel content is served from a per-session sandbox by the
-// main process (main/preview-server.ts) and rendered in a sandboxed iframe.
+// the write/edit mirror pipeline. SessionsContext's tool-call reducer delegates
+// here via onToolCall(); the panel content is served from a per-session sandbox
+// by the main process (main/preview-server.ts) and rendered in a sandboxed iframe.
 //
-// Sits OUTSIDE ChatContext in the provider tree so the chat reducer (inner) can
-// call onToolCall (outer). Resets on sessionID change — a fresh connect or a
+// Sits OUTSIDE SessionsContext in the provider tree so the session reducer (inner)
+// can call onToolCall (outer). Resets on sessionID change — a fresh connect or a
 // reconnect gets a new session id, so stale artifact paths from the previous
 // (now-empty) sandbox must be dropped.
 //
