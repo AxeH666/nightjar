@@ -139,7 +139,10 @@ function createWindow(): void {
     width: 1200,
     height: 820,
     show: false,
-    backgroundColor: "#14110D",
+    // Must stay in sync with --nj-base in src/renderer/src/index.css. The main
+    // process paints this before any renderer CSS loads, so it can't read the
+    // CSS var — this is the single documented theme-token drift point.
+    backgroundColor: "#080A08",
     autoHideMenuBar: true,
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   })
