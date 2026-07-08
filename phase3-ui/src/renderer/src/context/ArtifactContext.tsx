@@ -53,6 +53,10 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
   // callID → last mirrored content length, so we only re-mirror on growth/completion
   // (a tool part arrives repeatedly as pending→running→completed snapshots).
   const artifactSeen = useRef<Map<string, number>>(new Map())
+  // The session the mirrored artifacts currently belong to. Tracked here (a ref,
+  // set from the write path's sid) so a session change is detected synchronously
+  // at mirror time — independent of the async `sessionID`-state reset effect below.
+  const artifactSessionRef = useRef<string>("")
   const nonceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const bumpNonce = useCallback(() => {
@@ -79,6 +83,14 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
       const action = artifactActionFromTool(call)
       const pv = previewBridge()
       if (!action || !pv || !sid) return
+      // First artifact activity for a new session (e.g. after a reconnect) → drop
+      // the previous session's dedup state synchronously, BEFORE mirroring, so a
+      // write can never be deduped against — or the panel show — a stale session's
+      // sandbox. This is tied to the write path's `sid`, not the async reset effect.
+      if (sid !== artifactSessionRef.current) {
+        artifactSessionRef.current = sid
+        artifactSeen.current.clear()
+      }
       const len = action.kind === "write" ? action.content.length : action.newString.length
       if (artifactSeen.current.get(call.callID) === len) return
       artifactSeen.current.set(call.callID, len)

@@ -76,9 +76,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // callIDs whose generated image we've already loaded inline (avoid re-appending).
   const loadedImages = useRef<Set<string>>(new Set())
 
-  // Initialise mode once agents first arrive (was set inside the connect loop).
+  // Initialise mode when agents first arrive, and RE-VALIDATE whenever the agent
+  // list changes (a reconnect re-fetches it): keep a still-valid user choice, but
+  // if the persisted mode is no longer a real agent, fall back to the default —
+  // otherwise send() would POST prompts to a non-existent agent. (The connect loop
+  // used to hard-reset to "assistant" on every reconnect; this preserves the
+  // choice when it is still valid instead.)
   useEffect(() => {
-    setMode((cur) => cur || (agents.find((a) => a.name === "assistant")?.name ?? agents[0]?.name ?? ""))
+    if (agents.length === 0) return
+    const fallback = agents.find((a) => a.name === "assistant")?.name ?? agents[0]?.name ?? ""
+    setMode((cur) => (cur && agents.some((a) => a.name === cur) ? cur : fallback))
   }, [agents])
 
   // ---- upsert helpers over UiMessage[] ----

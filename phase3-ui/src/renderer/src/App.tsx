@@ -41,7 +41,7 @@ export default function App() {
 }
 
 function AppBody() {
-  const { agents, status, services, wsUrl, sessionID, reconnect, setStatus } = useConnection()
+  const { agents, status, services, wsUrl, sessionRef, reconnect, setStatus } = useConnection()
   const {
     choices,
     activeModel,
@@ -132,7 +132,11 @@ function AppBody() {
         </main>
         {panelOpen && (
           <ArtifactPanel
-            sessionID={sessionID}
+            // Use the ref (synchronous) — the SAME source the mirror write + the
+            // reducer's session filter use — so the panel can't read a different
+            // session than the one being written to during a reconnect. (sessionID
+            // state lags a render; mixing the two split-brained the sandbox.)
+            sessionID={sessionRef.current}
             entry={activeEntry}
             nonce={previewNonce}
             live={liveCode}
