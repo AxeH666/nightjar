@@ -106,7 +106,7 @@ kept for the historical record with their root cause + fix + verification.
   order — the adopted/leftover-engine scenario is exercised during multi-process
   real-hardware testing, and the supervisor lifecycle fix lands with it.
 
-## NJ-4 — Renderer SSE stream does not auto-reconnect after an engine restart — OPEN 2026-07-06
+## NJ-4 — Renderer SSE stream does not auto-reconnect after an engine restart — FIX IMPLEMENTED (runtime-verify pending) 2026-07-08
 - **Severity:** medium — chat silently stops working (dead stream + stale session
   id) until a full window reload.
 - **Symptom:** after `opencode-serve` restarts, the renderer keeps its original
@@ -121,9 +121,18 @@ kept for the historical record with their root cause + fix + verification.
   **crash-restart** path is still uncovered.
 - **Fix idea:** on SSE close, re-enter the bounded connect/retry loop (the same one
   used at startup) instead of parking on a status string.
-- **Scheduled:** **Step 7 (full UI redesign)** in the `AUDIT_REPORT.md` §10 confirmed
-  order — the renderer's connection layer is reworked there, the natural place to
-  generalize the shipped `reconnectTick` to auto-reconnect after *any* engine restart.
+- **Fix (implemented — redesign Stage 3, 2026-07-08, `feat/ui-redesign-nj4`):** in the
+  reworked connection layer (`phase3-ui/src/renderer/src/context/ConnectionContext.tsx`),
+  the single SSE subscription now re-enters the bounded connect/retry loop on **any**
+  stream termination — a clean close (`.then`) OR an error (`.catch`) — not just the
+  BYOK restart; both bump the same `reconnectNonce`, recreating the session + resubscribe.
+  A 1s settle floor plus the loop's existing 2s `listAgents` backoff bound flapping if the
+  engine crash-loops; an aborted-guard prevents a reconnect fired after teardown so it
+  never double-connects.
+- **Verification:** ⚠️ **PENDING** — implemented in a headless env with no reachable
+  opencode-serve, so the actual kill-engine → auto-resubscribe → working-prompt path was
+  NOT driven end-to-end (CLAUDE.md rule 6). Drive it on a live stack before moving this to
+  RESOLVED.
 
 ---
 
