@@ -36,16 +36,17 @@ function hexToRgb(hex: string): RGB {
   ]
 }
 
-// ── Nightjar amber palette (the ONLY change vs orb-ui's grey defaults) ─────────
-// idle: banked ember (armed, waiting for the wake word) → connecting: accent
-// (thinking) → listening: brighter amber (expands toward the user's voice) →
-// speaking: warm gold (agent talking) → error: Nightjar's rust alert.
+// ── JUNE green palette (interim — this orb-ui fork is retired for the custom
+// Three.js vortex orb in Stage 7; recolored now so the app stays coherent).
+// idle: banked green (armed, waiting for the wake word) → connecting: accent
+// (thinking) → listening: the accent green (expands toward the user's voice) →
+// speaking: pale bright green (agent talking) → error: the reserved alert red.
 const STATE_COLORS: Record<OrbState, string> = {
-  idle: "#7A5320",
-  connecting: "#C9852E",
-  listening: "#D99A3E",
-  speaking: "#F0C36B",
-  error: "#A13D2B",
+  idle: "#1E5A34",
+  connecting: "#2FB24C",
+  listening: "#39D353",
+  speaking: "#8BF2A9",
+  error: "#E5484D",
 }
 
 // ─── Keyframes ────────────────────────────────────────────────────────────────

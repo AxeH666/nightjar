@@ -2,7 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* JUNE theme — single source of truth (green/silver/black).
+   Channels are space-separated RGB so Tailwind's <alpha-value> opacity
+   modifiers (e.g. text-nightjar-text/40) resolve. tailwind.config.mjs maps
+   the nightjar.* tokens onto these vars; the orb palette reads them too.
+   The ONE unavoidable duplicate is src/main/index.ts BrowserWindow
+   backgroundColor (--nj-base), which paints before this CSS loads. */
+:root {
+  --nj-base: 8 10 8;        /* #080A08 near-black */
+  --nj-surface: 20 25 21;   /* #141915 panels/cards */
+  --nj-accent: 57 211 83;   /* #39D353 green */
+  --nj-text: 212 232 214;   /* #D4E8D6 warm off-white */
+  --nj-alert: 229 72 77;    /* #E5484D — reserved for warnings/permission ONLY */
+  --nj-silver: 174 184 178; /* #AEB8B2 — HUD rings / secondary chrome */
+}
+
 html, body, #root { height: 100%; margin: 0; }
-body { background: #14110D; color: #EDE6D6; font-family: Inter, system-ui, sans-serif; }
+body { background: rgb(var(--nj-base)); color: rgb(var(--nj-text)); font-family: Inter, system-ui, sans-serif; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2A2419; border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--nj-surface)); border-radius: 6px; }
