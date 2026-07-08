@@ -72,9 +72,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [services, setServices] = useState<ServiceStatus[]>([])
   const [wsUrl, setWsUrl] = useState<string>("ws://127.0.0.1:8765")
   const [sessionID, setSessionID] = useState<string>("")
-  // Bump to force the connect effect to re-run. A BYOK key change restarts
-  // opencode-serve, which kills our SSE stream and invalidates the session id;
-  // without a reconnect, chat stays broken until a full reload.
+  // Bump to force the connect effect to re-run (recreate session + resubscribe).
+  // Two callers now feed it (NJ-4): a BYOK key change (restarts opencode-serve,
+  // killing the SSE stream + invalidating the session id) AND any SSE-stream
+  // close (crash-restart included). Either way, without a reconnect chat stays
+  // broken (dead stream, stale session) until a full reload.
   const [reconnectNonce, setReconnectNonce] = useState(0)
 
   const clientRef = useRef<OpenCodeClient | null>(null)
@@ -120,7 +122,24 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
           setStatus(`connected · ${cfg.opencodeUrl}`)
           // One subscription; fan out every event to the registered listeners.
           const dispatch = (e: OpenCodeEvent) => listenersRef.current.forEach((l) => l(e))
-          client.subscribe(dispatch, ac.signal).catch((err) => setStatus(`stream closed: ${err}`))
+          // NJ-4: on ANY stream termination — a clean close OR a crash — re-enter
+          // this connect/retry loop instead of parking on a dead stream. This
+          // covers the supervisor's crash→auto-restart of opencode-serve, not just
+          // the BYOK-triggered restart (which already bumps reconnectNonce). A 1s
+          // settle floor keeps a flapping engine from spinning us hot; the
+          // aborted-guard prevents a reconnect fired after this effect is torn down
+          // (unmount, or a concurrent BYOK reconnect) — so it never double-connects.
+          const reconnectAfterClose = (reason: string) => {
+            if (ac.signal.aborted) return
+            setStatus(reason)
+            setTimeout(() => {
+              if (!ac.signal.aborted) reconnect()
+            }, 1000)
+          }
+          client
+            .subscribe(dispatch, ac.signal)
+            .then(() => reconnectAfterClose("stream closed — reconnecting…"))
+            .catch((err) => reconnectAfterClose(`stream closed: ${err} — reconnecting…`))
           return
         } catch (err: any) {
           setStatus(`waiting for engine… (${err?.message ?? err})`)
