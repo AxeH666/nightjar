@@ -2,12 +2,12 @@
 // Stage 5). Lists sessions from GET /session; clicking one resumes it into the
 // code slot (rehydrating its transcript via GET /session/:id/message). New spins
 // a fresh coding session.
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSessions } from "../../context/SessionsContext"
 import type { SessionInfo } from "../../lib/opencode"
 
 export function SessionList({ activeId }: { activeId: string }) {
-  const { listSessions, resumeSession, newSession } = useSessions()
+  const { codeSessionIds, listSessions, resumeSession, newSession } = useSessions()
   const [items, setItems] = useState<SessionInfo[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -21,6 +21,19 @@ export function SessionList({ activeId }: { activeId: string }) {
   useEffect(() => {
     refresh()
   }, [refresh, activeId])
+
+  // GET /session returns EVERY session (chat, code, agent sub-sessions) with no
+  // per-session kind tag. Show only sessions our registry knows as CODE sessions
+  // (created/resumed in this tab; persisted client-side), so the live chat
+  // conversation and unrelated histories never appear here — resuming the chat
+  // session into the code slot would hijack it and force the coding agent on it.
+  // Exclude agent-task sub-sessions (parentID) defensively. The active session is
+  // always in the registry; `|| s.id === activeId` guards a first-render race
+  // before the mark propagates.
+  const visible = useMemo(
+    () => items.filter((s) => (codeSessionIds.has(s.id) || s.id === activeId) && !s.parentID),
+    [items, codeSessionIds, activeId],
+  )
 
   return (
     <div className="flex w-56 shrink-0 flex-col border-r border-nightjar-surface">
@@ -44,10 +57,10 @@ export function SessionList({ activeId }: { activeId: string }) {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {items.map((s) => (
+        {visible.map((s) => (
           <button
             key={s.id}
-            onClick={() => resumeSession("code", s.id, "coding")}
+            onClick={() => resumeSession("code", s.id, "coding", s.title)}
             title={s.title || s.id}
             className={`block w-full truncate px-3 py-2 text-left text-sm ${
               s.id === activeId
@@ -58,7 +71,7 @@ export function SessionList({ activeId }: { activeId: string }) {
             {s.title || s.id.slice(0, 8)}
           </button>
         ))}
-        {items.length === 0 && (
+        {visible.length === 0 && (
           <div className="px-3 py-2 text-xs text-nightjar-text/30">{loading ? "loading…" : "no sessions yet"}</div>
         )}
       </div>
