@@ -21,6 +21,22 @@ export interface AgentInfo {
   native?: boolean // true for OpenCode's built-in agents (build/plan); Nightjar's own modes are false
 }
 
+// A session as returned by GET /session (list) or POST /session (create).
+export interface SessionInfo {
+  id: string
+  title?: string
+  agent?: string
+  parentID?: string
+  time?: { created?: number; updated?: number }
+}
+
+// A message plus its ordered parts, as returned by GET /session/:id/message.
+// Used to rehydrate a resumed conversation into the UI's UiMessage[] shape.
+export interface MessageWithParts {
+  info: { id: string; role: "user" | "assistant"; time?: { created?: number }; [k: string]: unknown }
+  parts: any[]
+}
+
 export interface PermissionAsk {
   id: string
   sessionID: string
@@ -139,6 +155,39 @@ export class OpenCodeClient {
       headers: this.headers(),
     })
     if (!res.ok) throw new Error(`POST abort → ${res.status}`)
+  }
+
+  // List all sessions (server returns most-recently-updated first). GET /session.
+  // Powers the Code tab's resumable session-history list.
+  async listSessions(): Promise<SessionInfo[]> {
+    const res = await fetch(this.url("/session"), { headers: this.headers() })
+    if (!res.ok) throw new Error(`GET /session → ${res.status}`)
+    return (await res.json()) as SessionInfo[]
+  }
+
+  // Full message history for a session (limit omitted → ALL messages).
+  // GET /session/:id/message → WithParts[] = { info, parts }[]. Used to rehydrate
+  // a resumed conversation; order defensively by info.time.created when mapping.
+  async getMessages(sessionID: string): Promise<MessageWithParts[]> {
+    const res = await fetch(this.url(`/session/${sessionID}/message`), { headers: this.headers() })
+    if (!res.ok) throw new Error(`GET /session/${sessionID}/message → ${res.status}`)
+    return (await res.json()) as MessageWithParts[]
+  }
+
+  // Delete a session. DELETE /session/:id → boolean.
+  async deleteSession(sessionID: string): Promise<void> {
+    const res = await fetch(this.url(`/session/${sessionID}`), { method: "DELETE", headers: this.headers() })
+    if (!res.ok) throw new Error(`DELETE /session/${sessionID} → ${res.status}`)
+  }
+
+  // Rename a session. PATCH /session/:id { title } → Session.Info.
+  async renameSession(sessionID: string, title: string): Promise<void> {
+    const res = await fetch(this.url(`/session/${sessionID}`), {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify({ title }),
+    })
+    if (!res.ok) throw new Error(`PATCH /session/${sessionID} → ${res.status}`)
   }
 
   // Subscribe to the instance-wide SSE stream. `signal` to stop. Callback gets

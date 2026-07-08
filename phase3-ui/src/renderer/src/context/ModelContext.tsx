@@ -4,8 +4,8 @@
 //
 // Owns handleSessionError, which only DECIDES which offer to surface — it never
 // re-sends. The actions that re-send (fallbackToLocal / acceptOpenRouterSwitch)
-// live in ChatContext, which already depends on this context, so the dependency
-// stays one-way (Chat → Model) with no cycle.
+// live in SessionsContext, which already depends on this context, so the
+// dependency stays one-way (Sessions → Model) with no cycle.
 //
 // Extracted from the former App.tsx monolith (redesign Stage 2), verbatim.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
@@ -58,7 +58,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const [fallbackOffer, setFallbackOffer] = useState<string | null>(null) // last prompt text, if a cloud send failed
   const [rateLimitOffer, setRateLimitOffer] = useState<RateLimitOffer | null>(null)
 
-  // Mirrors so handleSessionError (called from the SSE listener in ChatContext)
+  // Mirrors so handleSessionError (called from the SSE listener in SessionsContext)
   // reads current values without being a stale closure or a resubscribe trigger.
   const activeModelRef = useRef<string>(LOCAL_MODEL.id)
   const choicesRef = useRef<ModelChoice[]>([LOCAL_MODEL])

@@ -4,16 +4,18 @@
 // with no server-side timeout (an unanswered ask blocks the agent loop
 // indefinitely — hence the mandatory abort).
 //
-// Innermost provider: consumes ConnectionContext (client + sessionRef) and
-// ChatContext (setBusy, cleared on abort). Registers only the permission.* slice
-// of the old handleEvent.
+// Innermost provider: consumes ConnectionContext (client) and SessionsContext
+// (hasSession — a permission from ANY of our sessions surfaces; setBusy, cleared
+// on abort). Registers only the permission.* slice of the SSE stream.
 //
-// Extracted from the former App.tsx monolith (redesign Stage 2), verbatim.
+// Extracted from the former App.tsx monolith (redesign Stage 2); generalized to
+// multi-session in Stage 4 (the ask carries its own sessionID, so abort targets
+// that session, not a single global one).
 import { createContext, useCallback, useContext, useState } from "react"
 import type { ReactNode } from "react"
 import type { OpenCodeEvent, PermissionAsk, ReplyKind } from "../lib/opencode"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
-import { useChat } from "./ChatContext"
+import { useSessions } from "./SessionsContext"
 
 interface PermissionValue {
   ask: PermissionAsk | null
@@ -30,18 +32,19 @@ export function usePermission(): PermissionValue {
 }
 
 export function PermissionProvider({ children }: { children: ReactNode }) {
-  const { clientRef, sessionRef, setStatus } = useConnection()
-  const { setBusy } = useChat()
+  const { clientRef, setStatus } = useConnection()
+  const { hasSession, setBusy } = useSessions()
   const [ask, setAsk] = useState<PermissionAsk | null>(null)
 
   useOpenCodeEvents((e: OpenCodeEvent) => {
     const p = e.properties ?? {}
     const sid = p.sessionID ?? p.info?.sessionID ?? p.part?.sessionID
-    const mine = sessionRef.current && sid === sessionRef.current
     switch (e.type) {
       case "permission.asked":
       case "permission.v2.asked":
-        if (mine) setAsk(p as PermissionAsk)
+        // Surface an ask from ANY of our sessions (chat or code), even one whose
+        // tab isn't active — it blocks that session's agent loop indefinitely.
+        if (sid && hasSession(sid)) setAsk(p as PermissionAsk)
         break
       case "permission.replied":
       case "permission.v2.replied":
@@ -63,10 +66,11 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
 
   const abort = useCallback(async () => {
     const client = clientRef.current
+    const sid = ask?.sessionID
     setAsk(null)
-    setBusy(false)
-    if (client && sessionRef.current) await client.abort(sessionRef.current).catch(() => {})
-  }, [clientRef, sessionRef, setBusy])
+    if (sid) setBusy(sid, false)
+    if (client && sid) await client.abort(sid).catch(() => {})
+  }, [clientRef, ask, setBusy])
 
   const value: PermissionValue = { ask, reply, abort }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
