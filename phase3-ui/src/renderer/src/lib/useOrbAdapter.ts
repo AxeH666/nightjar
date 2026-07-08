@@ -4,7 +4,7 @@
 // as the source of truth and the component purely controlled mirrors how orb-ui
 // separates provider adapters from rendering.
 import { useEffect, useState } from "react"
-import type { OrbAdapter, OrbState } from "orb-ui"
+import type { OrbAdapter, OrbState } from "./orbTypes"
 
 export function useOrbAdapter(adapter: OrbAdapter | null): { state: OrbState; volume: number } {
   const [state, setState] = useState<OrbState>("idle")
