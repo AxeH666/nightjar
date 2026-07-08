@@ -11,7 +11,7 @@
 // Extracted from the former App.tsx monolith (redesign Stage 2); generalized to
 // multi-session in Stage 4 (the ask carries its own sessionID, so abort targets
 // that session, not a single global one).
-import { createContext, useCallback, useContext, useState } from "react"
+import { createContext, useCallback, useContext, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import type { OpenCodeEvent, PermissionAsk, ReplyKind } from "../lib/opencode"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
@@ -40,6 +40,11 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
   // aborted). We surface the head of the queue and advance as each is resolved.
   const [queue, setQueue] = useState<PermissionAsk[]>([])
   const ask = queue[0] ?? null
+  // Ids the SERVER has confirmed resolved (seen on the permission.replied stream).
+  // Lets a failed reply/abort POST tell a transient failure (server never applied
+  // it → re-surface) from a lost-ACK (server DID apply it → do NOT re-surface, or
+  // we pin an already-answered zombie). See reply()/abort() below.
+  const repliedIds = useRef<Set<string>>(new Set())
 
   useOpenCodeEvents((e: OpenCodeEvent) => {
     const p = e.properties ?? {}
@@ -56,23 +61,46 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
         break
       case "permission.replied":
       case "permission.v2.replied": {
-        // Answered elsewhere (or by us) → remove it from the queue wherever it sits.
+        // Answered elsewhere (or by us) → record it resolved + remove from the queue.
         const rid = p.requestID ?? p.id
+        if (rid) repliedIds.current.add(rid)
         setQueue((q) => q.filter((x) => x.id !== rid))
         break
       }
     }
   })
 
+  // Re-surface an optimistically-removed ask after a FAILED POST, but ONLY when it
+  // is genuinely still pending: (1) we did NOT see permission.replied for it (a
+  // lost-ACK means the server already applied it — re-surfacing would pin an
+  // already-answered zombie that masks newer asks) AND (2) its session still exists
+  // (a gone/GC'd session 404s forever — an unclearable stuck ask). Otherwise the
+  // optimistic remove already left it correctly cleared. A genuinely-transient
+  // failure (server never applied it → its agent loop is still paused) DOES
+  // re-surface, so the session never wedges without a reply/abort control.
+  const requeueIfPending = useCallback(
+    (cur: PermissionAsk) => {
+      if (repliedIds.current.has(cur.id) || !hasSession(cur.sessionID)) return false
+      setQueue((q) => (q.some((x) => x.id === cur.id) ? q : [cur, ...q]))
+      return true
+    },
+    [hasSession],
+  )
+
   const reply = useCallback(
     async (kind: ReplyKind) => {
       const client = clientRef.current
       const cur = queue[0]
       if (!client || !cur) return
-      setQueue((q) => q.filter((x) => x.id !== cur.id)) // advance to the next queued ask
-      await client.replyPermission(cur.id, kind).catch((err) => setStatus(`reply failed: ${err}`))
+      setQueue((q) => q.filter((x) => x.id !== cur.id)) // optimistically advance to the next ask
+      try {
+        await client.replyPermission(cur.id, kind)
+      } catch (err) {
+        setStatus(`reply failed: ${err}`)
+        requeueIfPending(cur)
+      }
     },
-    [queue, clientRef, setStatus],
+    [queue, clientRef, setStatus, requeueIfPending],
   )
 
   const abort = useCallback(async () => {
@@ -81,8 +109,15 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
     if (!cur) return
     setQueue((q) => q.filter((x) => x.id !== cur.id))
     if (cur.sessionID) setBusy(cur.sessionID, false)
-    if (client && cur.sessionID) await client.abort(cur.sessionID).catch(() => {})
-  }, [queue, clientRef, setBusy])
+    // Unlike reply, abort does NOT re-surface the ask on a failed POST. Aborting a
+    // session resolves its pending permission WITHOUT a permission.replied event
+    // (the server cancels the fiber + silently deletes the pending permission), so
+    // repliedIds can never detect an abort lost-ACK — re-surfacing would risk a
+    // zombie ask for an already-aborted session that masks a live cross-session ask.
+    // abort already cleared busy above, so a failed abort leaves the composer usable
+    // (no hard wedge); a genuinely-undelivered abort is a rare, milder residual.
+    if (client && cur.sessionID) await client.abort(cur.sessionID).catch((err) => setStatus(`abort failed: ${err}`))
+  }, [queue, clientRef, setBusy, setStatus])
 
   const value: PermissionValue = { ask, reply, abort }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

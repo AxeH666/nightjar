@@ -109,7 +109,7 @@ function AppBody() {
             onClick={() => {
               setRateLimitOffer(null)
               // still offer the local offline escape hatch — for the same failing session
-              setFallbackOffer({ text: rateLimitOffer.text, sessionId: rateLimitOffer.sessionId })
+              setFallbackOffer({ text: rateLimitOffer.text, sessionId: rateLimitOffer.sessionId, slot: rateLimitOffer.slot })
             }}
             className="text-xs text-nightjar-text/50 hover:underline"
           >

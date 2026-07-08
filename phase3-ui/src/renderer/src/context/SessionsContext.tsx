@@ -130,12 +130,16 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const perSessionRefs = useRef<Map<string, RefBundle>>(new Map())
   const sessionsRef = useRef<Record<string, SessionState>>({})
   const slotsRef = useRef<Record<SlotId, string>>({ chat: "", code: "" })
+  const agentsRef = useRef(agents) // stable read of the live agent list (for validAgent, without a deps cascade)
   useEffect(() => {
     sessionsRef.current = sessions
   }, [sessions])
   useEffect(() => {
     slotsRef.current = slots
   }, [slots])
+  useEffect(() => {
+    agentsRef.current = agents
+  }, [agents])
 
   // ---- registry helpers ----
   const updateMessages = useCallback((sid: string, fn: (msgs: UiMessage[]) => UiMessage[]) => {
@@ -157,6 +161,25 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const hasSession = useCallback((sid: string) => perSessionRefs.current.has(sid), [])
   const messagesOf = useCallback((id: string) => sessions[id]?.messages ?? [], [sessions])
   const busyOf = useCallback((id: string) => sessions[id]?.busy ?? false, [sessions])
+
+  // Which slot (if any) currently holds this session — used to make a recovery
+  // retry survive a reconnect that replaced the session id (Bugbot #1).
+  const slotOf = useCallback(
+    (sid: string): SlotId | null => (Object.keys(slotsRef.current) as SlotId[]).find((s) => slotsRef.current[s] === sid) ?? null,
+    [],
+  )
+
+  // Resolve a valid agent name from the live list. DEFAULT_AGENT ("assistant"/
+  // "coding") may be absent from a given workspace; seed the real one at session
+  // CREATION time so the first send never targets a non-existent mode (Bugbot #3
+  // — the [agents] revalidation effect below runs before sessions exist and so
+  // can't fix the initial ones on its own). Reads agentsRef so it stays stable.
+  const validAgent = useCallback((preferred: string): string => {
+    const list = agentsRef.current
+    if (list.length === 0) return preferred // not loaded yet → revalidation effect heals it
+    if (list.some((a) => a.name === preferred)) return preferred
+    return list.find((a) => a.name === "assistant")?.name ?? list[0]?.name ?? preferred
+  }, [])
 
   // Garbage-collect the registry so it holds EXACTLY the slot-bound sessions.
   // Any session no longer referenced by a slot stops receiving demuxed SSE and
@@ -192,7 +215,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         ...prev,
         [newId]: {
           id: newId,
-          agent: old?.agent ?? DEFAULT_AGENT[slot],
+          agent: old?.agent ?? validAgent(DEFAULT_AGENT[slot]),
           title: old?.title ?? DEFAULT_TITLE[slot],
           messages: old?.messages ?? [],
           busy: false,
@@ -202,7 +225,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       setSlots((prev) => ({ ...prev, [slot]: newId }))
       gcSessions()
     },
-    [gcSessions],
+    [gcSessions, validAgent],
   )
 
   // ---- upsert helpers over one session's UiMessage[] (NJ-3 machinery, verbatim) ----
@@ -334,7 +357,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         setBusy(sid, false)
         const name: string | undefined = p.error?.name
         setStatus(`error: ${name ?? p.error ?? "unknown"}`)
-        handleSessionError(p.error, refs.lastSent, sid)
+        handleSessionError(p.error, refs.lastSent, sid, slotOf(sid))
         break
       }
     }
@@ -433,7 +456,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       client.promptAsync(sessionId, promptText, agent, model, files).catch((err) => {
         setBusy(sessionId, false)
         setStatus(`send failed: ${err?.message ?? err}`)
-        if (!isLocalModel(model)) setFallbackOffer({ text, sessionId })
+        if (!isLocalModel(model)) setFallbackOffer({ text, sessionId, slot: slotOf(sessionId) })
       })
     },
     [agents, activeModel, clientRef, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
@@ -463,23 +486,39 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [agents, activeModel, clientRef, setSessionAgent, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
   )
 
-  // Retry on the local model after a cloud failure — into the SESSION that
-  // failed (from the offer), not always the chat slot.
+  // Where a recovery retry should land: prefer the slot's CURRENT session (so it
+  // survives a reconnect that replaced the id — Bugbot #1), else the original
+  // session if it's still alive, else "" (caller surfaces it — never a silent drop).
+  const retryTarget = useCallback((offer: { sessionId: string; slot: string | null }): string => {
+    const bySlot = offer.slot ? slotsRef.current[offer.slot as SlotId] : ""
+    if (bySlot && sessionsRef.current[bySlot]) return bySlot
+    if (sessionsRef.current[offer.sessionId]) return offer.sessionId
+    return ""
+  }, [])
+
+  // Retry on the local model after a cloud failure — into the SESSION/slot that
+  // failed, resolving a reconnect-replaced id via the slot's current session.
   const fallbackToLocal = useCallback(() => {
     const offer = fallbackOffer
     setFallbackOffer(null)
     setActiveModel(LOCAL_MODEL.id)
-    if (offer) send(offer.sessionId, offer.text, { model: LOCAL_MODEL.id })
-  }, [fallbackOffer, setFallbackOffer, setActiveModel, send])
+    if (!offer) return
+    const target = retryTarget(offer)
+    if (target) send(target, offer.text, { model: LOCAL_MODEL.id })
+    else setStatus("Couldn't retry — that conversation has ended.")
+  }, [fallbackOffer, setFallbackOffer, setActiveModel, send, retryTarget, setStatus])
 
   // Accept the 429 switch: move to the free OpenRouter model (persists for the
-  // session) and resend the failing session's last prompt.
+  // session) and resend the failing session's last prompt (same slot resolution).
   const acceptOpenRouterSwitch = useCallback(() => {
     const offer = rateLimitOffer
     setRateLimitOffer(null)
     setActiveModel(OPENROUTER_FREE_CHOICE.id)
-    if (offer) send(offer.sessionId, offer.text, { model: OPENROUTER_FREE_CHOICE.id })
-  }, [rateLimitOffer, setRateLimitOffer, setActiveModel, send])
+    if (!offer) return
+    const target = retryTarget(offer)
+    if (target) send(target, offer.text, { model: OPENROUTER_FREE_CHOICE.id })
+    else setStatus("Couldn't retry — that conversation has ended.")
+  }, [rateLimitOffer, setRateLimitOffer, setActiveModel, send, retryTarget, setStatus])
 
   // ---- session-history list (Code tab) ----
   const listSessions = useCallback(async () => {
@@ -506,13 +545,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       perSessionRefs.current.set(sessionId, freshRefs())
       setSessions((prev) => ({
         ...prev,
-        [sessionId]: { id: sessionId, agent, title: prev[sessionId]?.title ?? DEFAULT_TITLE[slot], messages, busy: false },
+        [sessionId]: { id: sessionId, agent: validAgent(agent), title: prev[sessionId]?.title ?? DEFAULT_TITLE[slot], messages, busy: false },
       }))
       slotsRef.current = { ...slotsRef.current, [slot]: sessionId }
       setSlots((prev) => ({ ...prev, [slot]: sessionId }))
       gcSessions() // forget the previous slot session (unless another slot uses it)
     },
-    [clientRef, gcSessions],
+    [clientRef, gcSessions, validAgent],
   )
 
   const newSession = useCallback(
@@ -521,9 +560,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (!client) return
       const id = await client.createSession(DEFAULT_TITLE[slot])
       rebindSlot(slot, id, false) // fresh session → do not carry the old transcript
-      setSessionAgent(id, agent)
+      setSessionAgent(id, validAgent(agent))
     },
-    [clientRef, rebindSlot, setSessionAgent],
+    [clientRef, rebindSlot, setSessionAgent, validAgent],
   )
 
   const deleteSession = useCallback(
