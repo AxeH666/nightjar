@@ -107,9 +107,9 @@ function AppBody() {
           </button>
           <button
             onClick={() => {
-              const t = rateLimitOffer.text
               setRateLimitOffer(null)
-              setFallbackOffer(t) // still offer the local offline escape hatch
+              // still offer the local offline escape hatch — for the same failing session
+              setFallbackOffer({ text: rateLimitOffer.text, sessionId: rateLimitOffer.sessionId })
             }}
             className="text-xs text-nightjar-text/50 hover:underline"
           >

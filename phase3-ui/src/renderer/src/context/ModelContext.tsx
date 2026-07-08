@@ -22,9 +22,17 @@ import {
   type ModelChoice,
 } from "../lib/byok"
 
+// Recovery offers carry the sessionId of the FAILING session, so the retry
+// resends into that session — not always the chat slot (Bugbot: a code-session
+// failure was being retried in chat).
+interface FallbackOffer {
+  text: string
+  sessionId: string
+}
 interface RateLimitOffer {
   text: string
   provider: string
+  sessionId: string
 }
 
 interface ModelValue {
@@ -34,13 +42,13 @@ interface ModelValue {
   activeChoice: ModelChoice
   showKeys: boolean
   setShowKeys: (v: boolean) => void
-  fallbackOffer: string | null
-  setFallbackOffer: (v: string | null) => void
+  fallbackOffer: FallbackOffer | null
+  setFallbackOffer: (v: FallbackOffer | null) => void
   rateLimitOffer: RateLimitOffer | null
   setRateLimitOffer: (v: RateLimitOffer | null) => void
   loadModels: () => Promise<void>
-  // Given a session.error, set the appropriate non-silent recovery offer (or none).
-  handleSessionError: (err: any, lastText: string) => void
+  // Given a session.error on `sessionId`, set the appropriate non-silent recovery offer (or none).
+  handleSessionError: (err: any, lastText: string, sessionId: string) => void
 }
 
 const Ctx = createContext<ModelValue | null>(null)
@@ -55,7 +63,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const [choices, setChoices] = useState<ModelChoice[]>([LOCAL_MODEL])
   const [activeModel, setActiveModel] = useState<string>(LOCAL_MODEL.id)
   const [showKeys, setShowKeys] = useState(false)
-  const [fallbackOffer, setFallbackOffer] = useState<string | null>(null) // last prompt text, if a cloud send failed
+  const [fallbackOffer, setFallbackOffer] = useState<FallbackOffer | null>(null) // last prompt + its session, if a cloud send failed
   const [rateLimitOffer, setRateLimitOffer] = useState<RateLimitOffer | null>(null)
 
   // Mirrors so handleSessionError (called from the SSE listener in SessionsContext)
@@ -84,7 +92,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     choicesRef.current = choices
   }, [choices])
 
-  const handleSessionError = useCallback((err: any, lastText: string) => {
+  const handleSessionError = useCallback((err: any, lastText: string, sessionId: string) => {
     // Graceful cloud fallback: a cloud model failing (bad/expired key, rate
     // limit, provider down) should offer local, not silently die. But NOT every
     // session.error is the cloud provider's fault — a user abort or a local
@@ -96,11 +104,11 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     if (!isLocalModel(activeM) && lastText && !notProviderFailure) {
       // Rate-limit (429) on a paid cloud provider + OpenRouter configured → offer
       // a switch to a free OpenRouter model (never silent). Otherwise fall back to
-      // the local-retry offer.
+      // the local-retry offer. Either way, remember WHICH session failed.
       if (isRateLimitError(err) && openRouterReadyRef.current && activeM !== OPENROUTER_FREE_CHOICE.id) {
-        setRateLimitOffer({ text: lastText, provider: providerNameOf(activeM, choicesRef.current) })
+        setRateLimitOffer({ text: lastText, provider: providerNameOf(activeM, choicesRef.current), sessionId })
       } else {
-        setFallbackOffer(lastText)
+        setFallbackOffer({ text: lastText, sessionId })
       }
     }
   }, [])

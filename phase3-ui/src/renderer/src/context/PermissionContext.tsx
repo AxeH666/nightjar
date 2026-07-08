@@ -34,7 +34,12 @@ export function usePermission(): PermissionValue {
 export function PermissionProvider({ children }: { children: ReactNode }) {
   const { clientRef, setStatus } = useConnection()
   const { hasSession, setBusy } = useSessions()
-  const [ask, setAsk] = useState<PermissionAsk | null>(null)
+  // A QUEUE, not a single ask: with multiple sessions (chat + code) two asks can
+  // be outstanding at once. A single slot would let the second overwrite the
+  // first, leaving the earlier session's request unanswerable (never replied or
+  // aborted). We surface the head of the queue and advance as each is resolved.
+  const [queue, setQueue] = useState<PermissionAsk[]>([])
+  const ask = queue[0] ?? null
 
   useOpenCodeEvents((e: OpenCodeEvent) => {
     const p = e.properties ?? {}
@@ -44,33 +49,40 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
       case "permission.v2.asked":
         // Surface an ask from ANY of our sessions (chat or code), even one whose
         // tab isn't active — it blocks that session's agent loop indefinitely.
-        if (sid && hasSession(sid)) setAsk(p as PermissionAsk)
+        if (sid && hasSession(sid)) {
+          const a = p as PermissionAsk
+          setQueue((q) => (q.some((x) => x.id === a.id) ? q : [...q, a]))
+        }
         break
       case "permission.replied":
-      case "permission.v2.replied":
-        setAsk((cur) => (cur && cur.id === (p.requestID ?? p.id) ? null : cur))
+      case "permission.v2.replied": {
+        // Answered elsewhere (or by us) → remove it from the queue wherever it sits.
+        const rid = p.requestID ?? p.id
+        setQueue((q) => q.filter((x) => x.id !== rid))
         break
+      }
     }
   })
 
   const reply = useCallback(
     async (kind: ReplyKind) => {
       const client = clientRef.current
-      if (!client || !ask) return
-      const id = ask.id
-      setAsk(null)
-      await client.replyPermission(id, kind).catch((err) => setStatus(`reply failed: ${err}`))
+      const cur = queue[0]
+      if (!client || !cur) return
+      setQueue((q) => q.filter((x) => x.id !== cur.id)) // advance to the next queued ask
+      await client.replyPermission(cur.id, kind).catch((err) => setStatus(`reply failed: ${err}`))
     },
-    [ask, clientRef, setStatus],
+    [queue, clientRef, setStatus],
   )
 
   const abort = useCallback(async () => {
     const client = clientRef.current
-    const sid = ask?.sessionID
-    setAsk(null)
-    if (sid) setBusy(sid, false)
-    if (client && sid) await client.abort(sid).catch(() => {})
-  }, [clientRef, ask, setBusy])
+    const cur = queue[0]
+    if (!cur) return
+    setQueue((q) => q.filter((x) => x.id !== cur.id))
+    if (cur.sessionID) setBusy(cur.sessionID, false)
+    if (client && cur.sessionID) await client.abort(cur.sessionID).catch(() => {})
+  }, [queue, clientRef, setBusy])
 
   const value: PermissionValue = { ask, reply, abort }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
