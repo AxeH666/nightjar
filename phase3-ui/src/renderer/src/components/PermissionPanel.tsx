@@ -11,18 +11,18 @@ function humanAction(ask: PermissionAsk): { title: string; detail: string; alway
   const target = (ask.patterns && ask.patterns[0]) || ""
   if (p.includes("email") || ask.tool?.callID?.includes("email") || "to" in meta) {
     const to = (meta["to"] as string) || target || "this recipient"
-    return { title: "Send email?", detail: `Nightjar wants to send an email to ${to}.`, alwaysLabel: `Always allow sending to ${to}` }
+    return { title: "Send email?", detail: `June wants to send an email to ${to}.`, alwaysLabel: `Always allow sending to ${to}` }
   }
   if (p === "edit" || p === "write") {
-    return { title: "Edit file?", detail: `Nightjar wants to modify ${target || "a file"}.`, alwaysLabel: `Always allow edits to ${target || "this path"}` }
+    return { title: "Edit file?", detail: `June wants to modify ${target || "a file"}.`, alwaysLabel: `Always allow edits to ${target || "this path"}` }
   }
   if (p === "bash") {
-    return { title: "Run command?", detail: `Nightjar wants to run: ${(meta["command"] as string) || target || "a shell command"}.`, alwaysLabel: "Always allow this command" }
+    return { title: "Run command?", detail: `June wants to run: ${(meta["command"] as string) || target || "a shell command"}.`, alwaysLabel: "Always allow this command" }
   }
   if (p === "doom_loop") {
-    return { title: "Repeated action detected", detail: `Nightjar is repeating the same '${meta["tool"] ?? "tool"}' call. Continue?`, alwaysLabel: "Always allow" }
+    return { title: "Repeated action detected", detail: `June is repeating the same '${meta["tool"] ?? "tool"}' call. Continue?`, alwaysLabel: "Always allow" }
   }
-  return { title: `Permission: ${p}`, detail: `Nightjar is requesting the '${p}' permission${target ? ` (${target})` : ""}.`, alwaysLabel: "Always allow this" }
+  return { title: `Permission: ${p}`, detail: `June is requesting the '${p}' permission${target ? ` (${target})` : ""}.`, alwaysLabel: "Always allow this" }
 }
 
 export function PermissionPanel({

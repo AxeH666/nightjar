@@ -64,7 +64,7 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
         <div className="space-y-4 px-5 py-4">
           {/* privacy framing — local vs cloud */}
           <p className="rounded-md bg-nightjar-surface/60 p-3 text-xs leading-relaxed text-nightjar-text/80">
-            Nightjar is <b>local-first</b>: the default <b>Qwen3-4B</b> model runs entirely on your machine —
+            June is <b>local-first</b>: the default <b>Qwen3-4B</b> model runs entirely on your machine —
             nothing leaves it. Adding a cloud key lets you select that provider's models, but{" "}
             <b className="text-nightjar-alert">messages sent to a cloud model leave your machine</b>. Keys are used{" "}
             <b>only</b> for the model you explicitly select — your local voice, vision, and memory stay on-device
@@ -86,7 +86,7 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
           {mode === "unavailable" && (
             <p className="rounded-md border border-nightjar-alert/60 bg-nightjar-alert/10 p-2 text-xs text-nightjar-alert">
               ⚠️ Your OS secure storage (keychain) is unavailable, so saving keys is <b>disabled</b> on this machine —
-              Nightjar will never write a key in plaintext. Enable a system keyring, or use macOS/Windows.
+              June will never write a key in plaintext. Enable a system keyring, or use macOS/Windows.
             </p>
           )}
 

@@ -116,7 +116,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         try {
           const list = await client.listAgents()
           setAgents(list)
-          const sid = await client.createSession("Nightjar session")
+          const sid = await client.createSession("June session")
           sessionRef.current = sid
           setSessionID(sid) // triggers the per-session artifact reset in ArtifactContext
           setStatus(`connected · ${cfg.opencodeUrl}`)

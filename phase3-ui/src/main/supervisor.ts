@@ -215,7 +215,7 @@ export class Supervisor {
         m,
         "adopted",
         "cannot apply change: opencode-serve is running unmanaged (adopted) and still holds its port — " +
-          "restart Nightjar (or stop that process) to pick up the API-key change",
+          "restart June (or stop that process) to pick up the API-key change",
       )
       this.beginHealthWatch(m)
       return
