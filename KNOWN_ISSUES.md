@@ -6,7 +6,40 @@ kept for the historical record with their root cause + fix + verification.
 
 ---
 
-## 🔧 OPEN
+## 🧪 MANUAL VERIFICATION CHECKLIST (NJ-4 … NJ-11)
+
+The Phase 0–6 pass (PRs #29–#35) code-wired every open item. Per **CLAUDE.md rule 6**,
+nothing below is marked RESOLVED yet — each fix was implemented in a **headless** env with
+no live stack/hardware, so it must be re-triggered on a real running instance before it
+graduates. Run each check on the live app; when it passes, move that NJ item to ✅ RESOLVED
+with the observed result.
+
+**A. No special hardware — just the running app:**
+- [ ] **NJ-4** (SSE reconnect): with a chat streaming, kill `opencode-serve` (`pkill -f "serve --port 4096"`); confirm the renderer auto-reconnects (recreates session + resubscribes) and the *next* prompt works — no window reload. (Also the BYOK-restart path.)
+- [ ] **NJ-9** (image retry keeps its kind): force a **cloud** image turn to fail (bad/expired key or rate limit) → click **Retry on local model** → confirm it regenerates an **image**, not a chat reply about the prompt.
+- [ ] **NJ-10** (persistent Stop): drive a coding edit so the permission ask fires; interrupt so the abort is dropped → confirm the ask clears, the session stays busy, and the red **Stop** stays clickable (session remains interruptible).
+- [ ] **NJ-8** (large-artifact mitigation): on the **local 4B**, ask for a large single-file page → confirm you get multi-file output or a clean error, never a silent/garbage artifact; confirm a stronger BYOK model renders a big artifact fine.
+
+**B. Needs Ollama + `gemma3:4b`:**
+- [ ] **NJ-7** (local vision): with Ollama + `gemma3:4b` running → attach an image + ask about it → analysis works. Stop Ollama → composer **warns** (doesn't silently fail). Text docs (`.md`/`.txt`) work on any model.
+
+**C. Needs a real GPU + `Z-Image-Turbo` pulled:**
+- [ ] **NJ-6** (local-first image): with the model + GPU venv present → generate an image → served **locally/offline**. Stop the diffusion server → falls back to cloud (with a BYOK key set).
+- [ ] **NJ-11 / B3** (diffusion wall-clock cap): the follow-up — add the server-side `--gen-timeout` backstop to `diffusion_server.py` and verify a hung generation is aborted server-side. GPU-only; lands with the NJ-6 hardware check.
+
+**D. Needs a leftover/dev engine (adopt path):**
+- [ ] **NJ-5** (adopted-engine restart): start a stray `opencode serve --port 4096` **before** launching June (so June *adopts* it) → change a BYOK key → confirm June restarts the adopted engine and the new key takes effect. Watch for orphaned MCP children (documented tradeoff).
+
+**Also needs a real key (independent of the above):** NJ-6's **cloud** path was only mock-verified — do a real **paste-OpenAI-key → chat → approve → image** and a real **OpenRouter `sk-or-…`** run once.
+
+---
+
+## 🔧 FIX IMPLEMENTED — RUNTIME/HARDWARE VERIFY PENDING
+
+_All items below were code-wired in the Phase 0–6 pass (PRs #29–#35). They stay here (not
+in ✅ RESOLVED) until re-triggered on a live stack per the checklist above + CLAUDE.md rule 6.
+The only genuinely un-fixed remainder is **NJ-11 / B3** (the server-side diffusion wall-clock
+cap), a GPU-only follow-up._
 
 ## NJ-11 — image endpoint: seeded model was pinned but the resolver probed anyway; local diffusion server has no per-generation wall-clock cap — B13 FIXED / B3 OPEN 2026-07-09
 - **Severity:** low — surfaced while wiring the NJ-6 local-first image backend.
@@ -26,7 +59,8 @@ kept for the historical record with their root cause + fix + verification.
 - **Scheduled:** B13 ships with the NJ-6 local-image PR; B3 lands with the GPU-hardware verification
   of the local diffusion backend (it's GPU-only code — can't be exercised headless, per rule 6).
 
-## NJ-10 — permission: a genuinely-undelivered abort leaves no in-UI re-abort control (rare) — OPEN 2026-07-08
+## NJ-10 — permission: a genuinely-undelivered abort leaves no in-UI re-abort control (rare) — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
+- **Resolution (PR #31, Phase 2):** a persistent per-session **Stop** control in the composer, backed by `abortSession(id)` in `PermissionContext` — a still-running/paused session is always interruptible even with no ask shown; on a failed abort `busy` stays true so Stop remains, and `client.abort()` is 10s-bounded (a 404 = already gone → clears). **To close (rule 6):** drive a coding edit so the ask fires, simulate a dropped abort, confirm the ask clears, `busy` stays, and the red **Stop** stays clickable.
 - **Severity:** low — only on an actual `POST /session/:id/abort` failure (uncommon
   against the loopback engine), and it does **not** hard-wedge (the composer stays
   usable because `abort()` clears the session's `busy` before the POST).
@@ -52,7 +86,8 @@ kept for the historical record with their root cause + fix + verification.
   queue (`feat/ui-redesign-sessions`, PR #23); recorded inline in `PermissionContext.abort()`.
   Revisit if the engine gains an abort-resolved permission event.
 
-## NJ-9 — Create-Image recovery resends the raw prompt as a plain chat message (loses the generate_image directive) — OPEN 2026-07-08
+## NJ-9 — Create-Image recovery resends the raw prompt as a plain chat message (loses the generate_image directive) — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
+- **Resolution (PR #32, Phase 3):** fallback/rate-limit offers now carry a `SendKind` (`"chat" | "image"`); the local-retry path re-dispatches an image offer through `createImage()` (which re-wraps the `generate_image` directive) instead of the plain `send()`, so an image request stays an image request on recovery. **To close (rule 6):** force a cloud image turn to fail (bad key / rate limit), click **Retry on local model**, confirm it regenerates an *image* — not a chat reply describing one.
 - **Severity:** low — only when a **cloud** image-generation turn fails via
   `session.error`, and the local model *may* still opportunistically call the tool.
 - **Detail:** `SessionsContext.createImage()` stores the **raw** description in
@@ -72,21 +107,24 @@ kept for the historical record with their root cause + fix + verification.
 - **Scheduled:** small follow-up; natural home is the chat-attachments / image-gen
   path (relates to **NJ-6**/**NJ-7**). Not a blocker for the multi-session PR.
 
-## NJ-8 — live-preview: large single-file artifacts truncate on the local 4B — OPEN 2026-07-07
+## NJ-8 — live-preview: large single-file artifacts truncate on the local 4B — MITIGATED (runtime-verify pending) 2026-07-09
+- **Resolution (PR #30, Phase 1):** this is a local-model *capacity* limit, not a bug, so it's **mitigated** rather than closed. The coding prompt now steers the local 4B toward **concise, multi-file** writes (each under budget); an opt-in `NIGHTJAR_DESIGN_PROFILE=1` raises the predict/context caps **and** the matching wall-clock timeouts **together** and each stays finite (rule 3 — never the global default, `services.ts`); a truncated `write` still fails cleanly (empty part → `error`, no partial file). **To close (rule 6):** on a real local 4B ask for a large single-file page → confirm it emits multi-file (or a clean error), never a silent/garbage artifact; a stronger BYOK model renders big artifacts directly.
 - **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → iframe + markdown render + download) is implemented and **verified end-to-end** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 18/18). Only the model's ability to emit a *big* artifact in one tool call is limited.
 - **Detail:** the coding agent writes files via its `write` tool. The local **Qwen3-4B** is capped at `--predict 2048` tokens (a rule-3 safety backstop, `services.ts`). An elaborate single self-contained page can exceed that, so the `write` tool-call JSON is **truncated → the part goes `pending → error` with empty `input`** (observed). The preview correctly renders nothing for an errored write (no partial/garbage file). A **concise** page or a **markdown doc** fits the budget and renders fine; so does any artifact on a **stronger BYOK/OpenRouter model**.
 - **Mitigations in place:** the coding-mode system prompt steers previewable artifacts under a (gitignored) `preview/` dir **using the write tool** (not inline), and toward concise output; multi-file output (separate `index.html`/`style.css`/`script.js`) also keeps each write within budget.
 - **Fix ideas:** encourage multi-file/concise generation more strongly; raise `--predict` only behind a "design" profile (never the global default — rule 3); rely on a BYOK model for large artifacts.
 - **Scheduled:** revisit with the full UI redesign (AUDIT §10 Step 7) and/or a stronger local model; documented behavior of the live-preview feature (`feat/live-preview-panel`).
 
-## NJ-7 — attached-image analysis is model-dependent (local needs Ollama gemma3; Create-Image reliability) — OPEN 2026-07-06
+## NJ-7 — attached-image analysis is model-dependent (local needs Ollama gemma3; Create-Image reliability) — FIX IMPLEMENTED (code-wired; needs Ollama+gemma3 to verify) 2026-07-09
+- **Resolution (PR #33, Phase 4):** the composer now gates on a **vision-readiness** probe — `useVisionReadiness()` returns `boolean | null` (null = status not yet known), keyed on `ollama === "running"`, and only *blocks/warns* on an explicit `=== false` so it never false-warns before status arrives; the local route saves the image + hints the path and `nightjar_analyze_image` is permission-granted (assistant mode); `vision.py`'s `_local_vision_blocker()` probes the active model and fails **open** (skips cloud/`/`-prefixed models). Create-Image reliability improved via a retry-once. **To close (rule 6):** with **Ollama + `gemma3:4b`** running, attach an image → analysis works; with it stopped → composer warns (not silently fails); text docs work on any model. The gemma3 bundling is an installer task (Step 11).
 - **Severity:** low — the attach-and-send *mechanism* (paste/drag/browse → file part → agent) works; only the downstream image *analysis* is conditional.
 - **Detail:** the local Qwen3-4B is **text-only**, so an attached image is only *seen* directly by a **cloud vision model** (BYOK OpenAI/Anthropic/Google). For the **local** route the composer saves the image to disk + hints the path, and `nightjar_analyze_image` is now permission-granted (assistant mode) — but that tool needs **Ollama + `gemma3:4b`** installed/running; without it the call errors. Text docs (`.txt`/`.md`/…) are read server-side and injected as text, so they work on **any** model.
 - **Also:** the **Create Image** button uses a strong directive (OpenCode exposes no client-side `tool_choice`), so a small local model may occasionally not call `generate_image` on the first try.
 - **Fix idea:** bundle/guide the `gemma3:4b` install in the installer (Step 11); optionally ship a vision-capable local model (mmproj); if OpenCode adds forced tool-choice, wire Create-Image to it directly.
 - **Scheduled:** the gemma3 dependency → installer (Step 11); otherwise documented behavior of the chat-attachments feature (`feat/chat-attachments`).
 
-## NJ-6 — image_gen: cloud path enabled (OpenAI + OpenRouter); local-first backend still pending — PARTIAL 2026-07-07
+## NJ-6 — image_gen: cloud path enabled (OpenAI + OpenRouter); local-first backend now code-wired — FIX IMPLEMENTED (code-wired; needs GPU+Z-Image-Turbo to verify) 2026-07-09
+- **Resolution (PR #34, Phase 5):** the **local-first/offline** backend is now wired end-to-end (previously the remaining gap). `services.ts` adds a best-effort `diffusion-server` sidecar, launched **only** when both the model dir (`~/models/Z-Image-Turbo` with `model_index.json`) and the GPU venv exist (mirrors the ollama gate), wall-clock-gated by `readyTimeoutMs:180000` (rule 3 at process level); `index.ts` picks **local-first** (only unseeds the cloud endpoint after a *confirmed* local seed) and reconciles on diffusion-server health transitions. Two odysseus patch fixes ride along: **B13** (`_resolve_model` consults pinned models → no `/v1/models` probe per generation) and **B12** (`response_format=b64_json` + retry-without-param). **To close (rule 6):** on a real **GPU box + Z-Image-Turbo pulled**, generate → served locally (offline); stop the local server → falls back to cloud (with a BYOK key). Residual **B3** (no server-side per-generation cap) tracked under **NJ-11**. Installer model-pull is Step 11.
 - **Severity:** medium (was: does not work at all). Chat→image now works via a **cloud**
   endpoint once seeded — either **OpenAI** or **OpenRouter** (auto-wired from the BYOK key,
   OpenAI takes precedence); the **local-first/offline** backend is still pending.
@@ -151,7 +189,8 @@ kept for the historical record with their root cause + fix + verification.
   (Step 11, model download) + a one-line `opencode.json` permission grant. The license audit
   itself (Step 3) is ✅ done.
 
-## NJ-5 — BYOK key change can't be applied to an *adopted* opencode-serve — OPEN 2026-07-06
+## NJ-5 — BYOK key change can't be applied to an *adopted* opencode-serve — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
+- **Resolution (PR #35, Phase 6):** the supervisor now **captures the external PID at adoption** via a cross-platform `pidOnPort()` (linux `ss`→`lsof`→`fuser`, darwin `lsof`, win32 `netstat`; `execFile` with a 2s timeout + `windowsHide` per rule 3), returning a PID **only when exactly one distinct listener is found** (rule 4 — never an ambiguous kill target). `restartService()`'s adopted branch **re-queries the current listener at restart time** (no stale PID), then SIGTERM→wait→SIGKILL→wait→bail-if-still-held, else re-spawns with the new `NIGHTJAR_BYOK_*` env — so a BYOK change now applies to an adopted engine. **Known tradeoff (rule 7):** restarting an adopted engine we didn't spawn can orphan MCP children it started; documented inline in `supervisor.ts` + the PR. **To close (rule 6):** leave a stray `opencode serve` on :4096, start June, change a BYOK key → confirm the adopted engine restarts and the new key takes effect.
 - **Severity:** low — only affects the adopt path (a `opencode serve` already on
   :4096 when Nightjar starts, e.g. a leftover/dev instance); the normal path
   where Nightjar spawns the engine is unaffected.
@@ -193,6 +232,11 @@ kept for the historical record with their root cause + fix + verification.
   A 1s settle floor plus the loop's existing 2s `listAgents` backoff bound flapping if the
   engine crash-loops; an aborted-guard prevents a reconnect fired after teardown so it
   never double-connects.
+- **Hardening (PR #31, Phase 2):** the multi-session refactor added a **superseded-run guard**
+  so a reconnect that fires after a newer session/subscription has taken over cannot deliver
+  stale SSE events into the live session (plus the stale-ask prune in `PermissionContext`), and
+  `gcSessions` won't abort a still-busy session mid-reconnect. Reconnect is now covered on **both**
+  the BYOK-restart and the crash-restart paths.
 - **Verification:** ⚠️ **PENDING** — implemented in a headless env with no reachable
   opencode-serve, so the actual kill-engine → auto-resubscribe → working-prompt path was
   NOT driven end-to-end (CLAUDE.md rule 6). Drive it on a live stack before moving this to
