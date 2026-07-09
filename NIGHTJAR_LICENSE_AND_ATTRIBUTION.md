@@ -36,7 +36,7 @@ adding networked access.
 | Odysseus | email/RAG/research/PIM bolt-on | AGPL-3.0-or-later | `research/odysseus/LICENSE`, `research/odysseus/ACKNOWLEDGMENTS.md`, `research/odysseus/licenses/` |
 | llmfit (© 2026 Alex Jones) | hardware model-fit (vendored) | MIT | `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS |
 | Tongyi DeepResearch | deep-research pipeline (via Odysseus) | Apache-2.0 | `research/odysseus/licenses/DeepResearch-Apache-2.0.txt` |
-| orb-ui (© Alexander Chen) | voice-reactive UI orb (Phase 4) | MIT | `phase3-ui/node_modules/orb-ui/LICENSE`; forked circle theme credits upstream in `phase3-ui/src/renderer/src/components/orb/AmberCircleTheme.tsx` |
+| three.js (© three.js authors) | custom voice-reactive vortex orb (WebGL, redesign Step 7) | MIT | `phase3-ui/node_modules/three/LICENSE` |
 | Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
 | marked | markdown→HTML in the live-preview panel | MIT | `phase3-ui/node_modules/marked/LICENSE.md` (npm dep) |
 | gemma-chat (© 2026 ammaar) | live-preview "Canvas" **pattern reference only** — reimplemented, **no code copied** (`phase3-ui/src/main/preview-server.ts` + `components/ArtifactPanel.tsx` are original AGPL) | MIT | pattern documented in `research/AUDIT_REPORT.md` §5; no gemma-chat files vendored |
@@ -79,11 +79,13 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
   **nut.js**, and any local grounding models (Holo-1.5, UI-TARS). Add each here.
 - **Step 6 — Phase 6 (CAD).** License-audit the Text2CAD/Text-to-CadQuery checkpoint,
   **CadQuery** (Apache-2.0), and the 3D render libs; add here.
-- **Step 7 — custom orb + JUNE rebrand.** The custom Three.js swirling-vortex orb
-  **replaces orb-ui**, so the **orb-ui (MIT) row above is retired** (drop the dependency;
-  keep the historical credit if any forked code remains). Three.js is MIT. This document
-  and the rest of the docs are **renamed Nightjar → JUNE** at this step; the AGPL license
-  of the combined work is unchanged by the rename.
+- **Step 7 — custom orb + JUNE rebrand. ✅ Implemented (2026-07-08).** The custom Three.js
+  swirling-vortex orb **replaced orb-ui**: the `orb-ui` dependency was dropped, the forked
+  `AmberCircleTheme` deleted (no forked code remains), and the orb-ui row above **retired** and
+  replaced with the **three.js (MIT — LICENSE read per rule 5)** row. **User-facing** strings are
+  renamed Nightjar → JUNE; internal identifiers stay (`NIGHTJAR_*` env, `window.nightjar` IPC,
+  the `nightjar.*` Tailwind class namespace). The AGPL license of the combined work is unchanged
+  by the rename. (Runtime verification of the redesign branches is pending a live-stack run.)
 - **Step 10 — Odysseus fork.** Attribution is **unchanged by re-hosting** — the fork keeps
   Odysseus's `LICENSE` / `ACKNOWLEDGMENTS.md` / `licenses/` intact; AGPL travels with the
   code regardless of host (see §10 fork subsection).
