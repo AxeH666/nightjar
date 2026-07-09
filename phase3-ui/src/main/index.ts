@@ -43,7 +43,10 @@ const ODYSSEUS_DATA_DIR = join(homedir(), ".nightjar", "odysseus")
 // generation works from the single key entry — no separate seed step. Runs the same
 // phase2-odysseus/seed_image_endpoint.py the CLI uses, passing the decrypted key via
 // env. Best-effort: a failure never blocks storing the key or the engine restart.
-function runImageSeed(extraEnv: Record<string, string>): Promise<void> {
+// Resolves TRUE only on a clean (exit-0) seed/unseed; false on spawn error or a
+// non-zero exit — so callers can avoid, e.g., retiring the working cloud rows after a
+// FAILED local seed (which would strand image gen with no backend).
+function runImageSeed(extraEnv: Record<string, string>): Promise<boolean> {
   return new Promise((done) => {
     const py = join(REPO, "phase2-odysseus", "venv", "bin", "python")
     const script = join(REPO, "phase2-odysseus", "seed_image_endpoint.py")
@@ -53,9 +56,9 @@ function runImageSeed(extraEnv: Record<string, string>): Promise<void> {
     })
     child.on("error", (e) => {
       console.warn("[byok] image-endpoint seed failed:", e)
-      done()
+      done(false)
     })
-    child.on("exit", () => done())
+    child.on("exit", (code) => done(code === 0))
   })
 }
 // Image generation resolves ONE active image endpoint. We keep exactly one seeded,
@@ -65,28 +68,28 @@ function runImageSeed(extraEnv: Record<string, string>): Promise<void> {
 // org verification); OpenRouter defaults to openai/gpt-image-1 via its Unified Image API.
 const IMAGE_OPENAI_NAME = "OpenAI (image)"
 const IMAGE_OPENROUTER_NAME = "OpenRouter (image)"
-const seedOpenAIImage = (key: string): Promise<void> =>
+const seedOpenAIImage = (key: string): Promise<boolean> =>
   runImageSeed({
     NIGHTJAR_IMAGE_API_KEY: key,
     NIGHTJAR_IMAGE_BASE_URL: "https://api.openai.com/v1",
     NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_MODEL || "dall-e-3",
     NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_OPENAI_NAME,
   })
-const seedOpenRouterImage = (key: string): Promise<void> =>
+const seedOpenRouterImage = (key: string): Promise<boolean> =>
   runImageSeed({
     NIGHTJAR_IMAGE_API_KEY: key,
     NIGHTJAR_IMAGE_BASE_URL: "https://openrouter.ai/api/v1",
     NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_OPENROUTER_MODEL || "openai/gpt-image-1",
     NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_OPENROUTER_NAME,
   })
-const unseedImage = (name: string): Promise<void> =>
+const unseedImage = (name: string): Promise<boolean> =>
   runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1", NIGHTJAR_IMAGE_ENDPOINT_NAME: name })
 
 // Local-first image gen (NJ-6): an endpoint pointing at the local diffusion sidecar.
 // modelId = basename of the model dir so it matches the server's own _model_id.
 const IMAGE_LOCAL_NAME = "Local (image)"
 const DIFFUSION_PORT = process.env.NIGHTJAR_DIFFUSION_PORT || "8100"
-const seedLocalImage = (modelId: string): Promise<void> =>
+const seedLocalImage = (modelId: string): Promise<boolean> =>
   runImageSeed({
     NIGHTJAR_IMAGE_API_KEY: "",
     NIGHTJAR_IMAGE_BASE_URL: `http://127.0.0.1:${DIFFUSION_PORT}/v1`,
@@ -113,10 +116,14 @@ async function localImageHealthy(): Promise<boolean> {
 async function applyImageEndpoint(): Promise<void> {
   const localDir = findImageModel()
   if (localDir && (await localImageHealthy())) {
-    await seedLocalImage(basename(localDir))
-    await unseedImage(IMAGE_OPENAI_NAME)
-    await unseedImage(IMAGE_OPENROUTER_NAME)
-    return
+    // Retire the cloud rows ONLY after the local seed actually succeeds — a failed
+    // local seed must not strand image gen with no working backend (Bugbot). On
+    // failure, fall through to cloud precedence below.
+    if (await seedLocalImage(basename(localDir))) {
+      await unseedImage(IMAGE_OPENAI_NAME)
+      await unseedImage(IMAGE_OPENROUTER_NAME)
+      return
+    }
   }
   const openai = byok.getKey("openai")
   const openrouter = byok.getKey("openrouter")
@@ -165,9 +172,19 @@ function reconcileImageEndpoint(): Promise<void> {
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
 
+let lastDiffusionHealthy = false
 const supervisor = new Supervisor(nightjarServices(), (statuses) => {
   latestStatus = statuses
   win?.webContents.send("nightjar:status", statuses)
+  // The diffusion sidecar can reach (or lose) health AFTER the startup/post-start
+  // reconcile passes — a slow ~6GB cold load finishing past the readyTimeout, or a
+  // crash-restart. Re-reconcile on either transition so the LOCAL image endpoint
+  // activates once it's serving, and falls back to cloud if it dies (NJ-6 / Bugbot).
+  const diffHealthy = statuses.some((s) => s.name === "diffusion-server" && s.state === "healthy")
+  if (diffHealthy !== lastDiffusionHealthy) {
+    lastDiffusionHealthy = diffHealthy
+    reconcileImageEndpoint().catch((e) => console.warn("[image] diffusion-transition reconcile:", e))
+  }
 })
 
 function createWindow(): void {
