@@ -21,7 +21,7 @@ import { type UiMessage, type UiBlock } from "../components/ChatSurface"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
-import { useModel } from "./ModelContext"
+import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
 
 export type SlotId = "chat" | "code"
@@ -42,6 +42,8 @@ interface RefBundle {
   pendingParts: Map<string, any[]>
   loadedImages: Set<string>
   lastSent: string
+  lastKind: SendKind // what the last send was (chat|image) → correct retry dispatch (NJ-9)
+  lastModel: string // the model the last send used → recovery judged on it, not global (B4)
 }
 const freshRefs = (): RefBundle => ({
   textParts: new Map(),
@@ -49,6 +51,8 @@ const freshRefs = (): RefBundle => ({
   pendingParts: new Map(),
   loadedImages: new Set(),
   lastSent: "",
+  lastKind: "chat",
+  lastModel: "",
 })
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -113,7 +117,7 @@ interface SessionsValue {
   busyOf: (id: string) => boolean
   // actions (general — a screen passes the target session id)
   send: (sessionId: string, text: string, opts?: { agent?: string; attachments?: Attachment[]; model?: string }) => void
-  createImage: (sessionId: string, prompt: string) => void
+  createImage: (sessionId: string, prompt: string, opts?: { model?: string }) => void
   setSessionAgent: (sessionId: string, agent: string) => void
   // session-history list (Code tab)
   listSessions: () => Promise<SessionInfo[]>
@@ -406,7 +410,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         setBusy(sid, false)
         const name: string | undefined = p.error?.name
         setStatus(`error: ${name ?? p.error ?? "unknown"}`)
-        handleSessionError(p.error, refs.lastSent, sid, slotOf(sid))
+        handleSessionError(p.error, refs.lastSent, refs.lastKind, refs.lastModel, sid, slotOf(sid))
         break
       }
     }
@@ -513,6 +517,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       setBusy(sessionId, true)
       refs.lastSent = text
       const model = opts?.model ?? activeModel
+      refs.lastKind = "chat"
+      refs.lastModel = model
       const files: FilePart[] = atts.map((a) => ({ mime: a.mime, url: a.dataUrl, filename: a.name }))
       const imgPaths = atts.filter((a) => a.isImage && a.path).map((a) => a.path as string)
       const promptText = imgPaths.length
@@ -521,14 +527,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       client.promptAsync(sessionId, promptText, agent, model, files).catch((err) => {
         setBusy(sessionId, false)
         setStatus(`send failed: ${err?.message ?? err}`)
-        if (!isLocalModel(model)) setFallbackOffer({ text, sessionId, slot: slotOf(sessionId) })
+        if (!isLocalModel(model)) setFallbackOffer({ text, kind: "chat", sessionId, slot: slotOf(sessionId) })
       })
     },
     [activeModel, clientRef, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
   )
 
   const createImage = useCallback(
-    (sessionId: string, prompt: string) => {
+    (sessionId: string, prompt: string, opts?: { model?: string }) => {
       const client = clientRef.current
       const refs = perSessionRefs.current.get(sessionId)
       if (!client || !refs) return
@@ -541,10 +547,18 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       updateMessages(sessionId, (prev) => [...prev, { id: uid, role: "user", blocks: [{ kind: "text", text: `🎨 Create image: ${prompt}` }] }])
       setBusy(sessionId, true)
       refs.lastSent = prompt
+      const model = opts?.model ?? activeModel
+      refs.lastKind = "image" // NJ-9: a failed image turn must retry via createImage (re-wraps the directive)
+      refs.lastModel = model
       const directive = `Use the generate_image tool to create an image now. Image description: "${prompt}". Call the tool immediately; do not ask follow-up questions.`
-      client.promptAsync(sessionId, directive, imgAgent, activeModel).catch((err) => {
+      client.promptAsync(sessionId, directive, imgAgent, model).catch((err) => {
         setBusy(sessionId, false)
         setStatus(`create image failed: ${err?.message ?? err}`)
+        // Parity with send(): a synchronous cloud reject should also surface a local-
+        // retry offer — as an IMAGE (kind), so the retry re-wraps the directive rather
+        // than resending the raw prompt as chat. (The SSE session.error path is already
+        // covered via handleSessionError with refs.lastKind="image".)
+        if (!isLocalModel(model)) setFallbackOffer({ text: prompt, kind: "image", sessionId, slot: slotOf(sessionId) })
       })
     },
     [agents, activeModel, clientRef, setSessionAgent, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
@@ -568,9 +582,15 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     setActiveModel(LOCAL_MODEL.id)
     if (!offer) return
     const target = retryTarget(offer)
-    if (target) send(target, offer.text, { model: LOCAL_MODEL.id })
-    else setStatus("Couldn't retry — that conversation has ended.")
-  }, [fallbackOffer, setFallbackOffer, setActiveModel, send, retryTarget, setStatus])
+    if (!target) {
+      setStatus("Couldn't retry — that conversation has ended.")
+      return
+    }
+    // NJ-9: an image retry MUST go through createImage (re-wraps the generate_image
+    // directive) — a plain send of the raw prompt would just chat about it.
+    if (offer.kind === "image") createImage(target, offer.text, { model: LOCAL_MODEL.id })
+    else send(target, offer.text, { model: LOCAL_MODEL.id })
+  }, [fallbackOffer, setFallbackOffer, setActiveModel, send, createImage, retryTarget, setStatus])
 
   // Accept the 429 switch: move to the free OpenRouter model (persists for the
   // session) and resend the failing session's last prompt (same slot resolution).
@@ -580,9 +600,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     setActiveModel(OPENROUTER_FREE_CHOICE.id)
     if (!offer) return
     const target = retryTarget(offer)
-    if (target) send(target, offer.text, { model: OPENROUTER_FREE_CHOICE.id })
-    else setStatus("Couldn't retry — that conversation has ended.")
-  }, [rateLimitOffer, setRateLimitOffer, setActiveModel, send, retryTarget, setStatus])
+    if (!target) {
+      setStatus("Couldn't retry — that conversation has ended.")
+      return
+    }
+    if (offer.kind === "image") createImage(target, offer.text, { model: OPENROUTER_FREE_CHOICE.id })
+    else send(target, offer.text, { model: OPENROUTER_FREE_CHOICE.id })
+  }, [rateLimitOffer, setRateLimitOffer, setActiveModel, send, createImage, retryTarget, setStatus])
 
   // ---- session-history list (Code tab) ----
   const listSessions = useCallback(async () => {
