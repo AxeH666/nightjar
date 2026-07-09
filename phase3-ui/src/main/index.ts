@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir } from "fs/promises"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO, WORKSPACE } from "./services"
+import { nightjarServices, REPO, WORKSPACE, findImageModel } from "./services"
 import * as byok from "./byok"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import * as preview from "./preview-server"
@@ -82,20 +82,56 @@ const seedOpenRouterImage = (key: string): Promise<void> =>
 const unseedImage = (name: string): Promise<void> =>
   runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1", NIGHTJAR_IMAGE_ENDPOINT_NAME: name })
 
-// One reconcile pass: read the current keys and seed/unseed so the single active
-// image endpoint matches precedence (OpenAI > OpenRouter). Reads keys at call time.
+// Local-first image gen (NJ-6): an endpoint pointing at the local diffusion sidecar.
+// modelId = basename of the model dir so it matches the server's own _model_id.
+const IMAGE_LOCAL_NAME = "Local (image)"
+const DIFFUSION_PORT = process.env.NIGHTJAR_DIFFUSION_PORT || "8100"
+const seedLocalImage = (modelId: string): Promise<void> =>
+  runImageSeed({
+    NIGHTJAR_IMAGE_API_KEY: "",
+    NIGHTJAR_IMAGE_BASE_URL: `http://127.0.0.1:${DIFFUSION_PORT}/v1`,
+    NIGHTJAR_IMAGE_MODEL: modelId,
+    NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_LOCAL_NAME,
+  })
+// Is the local diffusion sidecar actually serving? Disk presence alone isn't enough —
+// a slow ~6GB GPU load may not be ready yet — so gate local-first on /health, giving
+// graceful degradation to a cloud key when the sidecar is down. Short timeout so
+// reconcile stays snappy.
+async function localImageHealthy(): Promise<boolean> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${DIFFUSION_PORT}/health`, { signal: AbortSignal.timeout(1500) })
+    return r.ok && (await r.text()).includes("ok")
+  } catch {
+    return false
+  }
+}
+
+// One reconcile pass: pick the single active image endpoint. LOCAL-FIRST — if the
+// local model is present AND the sidecar is serving, prefer it (fully offline, no
+// key) and retire the cloud rows; otherwise fall through to cloud precedence
+// (OpenAI > OpenRouter) and retire the local row. Reads keys/health at call time.
 async function applyImageEndpoint(): Promise<void> {
+  const localDir = findImageModel()
+  if (localDir && (await localImageHealthy())) {
+    await seedLocalImage(basename(localDir))
+    await unseedImage(IMAGE_OPENAI_NAME)
+    await unseedImage(IMAGE_OPENROUTER_NAME)
+    return
+  }
   const openai = byok.getKey("openai")
   const openrouter = byok.getKey("openrouter")
   if (openai) {
     await seedOpenAIImage(openai)
     await unseedImage(IMAGE_OPENROUTER_NAME)
+    await unseedImage(IMAGE_LOCAL_NAME)
   } else if (openrouter) {
     await seedOpenRouterImage(openrouter)
     await unseedImage(IMAGE_OPENAI_NAME)
+    await unseedImage(IMAGE_LOCAL_NAME)
   } else {
     await unseedImage(IMAGE_OPENAI_NAME)
     await unseedImage(IMAGE_OPENROUTER_NAME)
+    await unseedImage(IMAGE_LOCAL_NAME)
   }
 }
 
@@ -381,7 +417,13 @@ app.whenReady().then(() => {
   if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") {
     supervisor
       .start()
-      .then(() => ensureVision())
+      .then(() => {
+        ensureVision()
+        // The startup reconcile above was fire-and-forget before the diffusion sidecar
+        // was healthy; re-reconcile now so a freshly-serving LOCAL image endpoint wins
+        // over any cloud row (NJ-6). No-op when there's no local model.
+        reconcileImageEndpoint().catch((e) => console.warn("[image] post-start reconcile:", e))
+      })
       .catch((e) => console.error("supervisor:", e))
   } else {
     ensureVision().catch(() => {})

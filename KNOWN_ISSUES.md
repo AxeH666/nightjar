@@ -8,6 +8,24 @@ kept for the historical record with their root cause + fix + verification.
 
 ## 🔧 OPEN
 
+## NJ-11 — image endpoint: seeded model was pinned but the resolver probed anyway; local diffusion server has no per-generation wall-clock cap — B13 FIXED / B3 OPEN 2026-07-09
+- **Severity:** low — surfaced while wiring the NJ-6 local-first image backend.
+- **B13 (FIXED — this PR, via `nightjar-odysseus.patch`):** `phase2-odysseus/seed_image_endpoint.py`
+  pins the model (`ep.pinned_models = [model]`, commented "so it resolves without probing"),
+  but Odysseus's `_resolve_model` (`research/odysseus/src/ai_interaction.py`) ignored pinned
+  models for OpenAI-compatible endpoints and hit `/v1/models` on **every** image generation —
+  an extra round-trip that hard-fails on the 5s probe timeout or a rate limit. The resolver now
+  consults pinned models first (getattr-guarded, no-op without pins), resolving with no network
+  call. (Setting `cached_models` alone was insufficient — it's only read when `build_models_url`
+  is falsy, which never happens for OpenAI/OpenRouter.)
+- **B3 (OPEN — follow-up):** `research/odysseus/scripts/diffusion_server.py` has **no server-side
+  per-generation wall-clock cap** (rule 3) — a hung/looping pipeline `__call__` is bounded only by
+  the client httpx read-timeout (300s) / the opencode MCP timeout, not server-side. Add a
+  `--gen-timeout` backstop (run the pipeline call under a thread with a hard abort) when the local
+  diffusion backend is driven on real GPU hardware.
+- **Scheduled:** B13 ships with the NJ-6 local-image PR; B3 lands with the GPU-hardware verification
+  of the local diffusion backend (it's GPU-only code — can't be exercised headless, per rule 6).
+
 ## NJ-10 — permission: a genuinely-undelivered abort leaves no in-UI re-abort control (rare) — OPEN 2026-07-08
 - **Severity:** low — only on an actual `POST /session/:id/abort` failure (uncommon
   against the loopback engine), and it does **not** hard-wedge (the composer stays

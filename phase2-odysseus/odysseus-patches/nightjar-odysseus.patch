@@ -1,5 +1,5 @@
 diff --git a/mcp_servers/image_gen_server.py b/mcp_servers/image_gen_server.py
-index 6cb77f7..17e9777 100644
+index 6cb77f7..54fa6c2 100644
 --- a/mcp_servers/image_gen_server.py
 +++ b/mcp_servers/image_gen_server.py
 @@ -21,6 +21,29 @@ from src.constants import GENERATED_IMAGES_DIR
@@ -32,7 +32,7 @@ index 6cb77f7..17e9777 100644
  @server.list_tools()
  async def list_tools() -> list[Tool]:
      return [
-@@ -85,13 +108,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+@@ -85,22 +108,48 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
  
          is_gpt_image = "gpt-image" in model_id.lower()
          base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
@@ -59,6 +59,32 @@ index 6cb77f7..17e9777 100644
              size = "1024x1024"
  
          payload = {"model": model_id, "prompt": prompt, "n": 1, "size": size}
+         if is_gpt_image:
+             payload["quality"] = quality if quality in ("low", "medium", "high", "auto") else "medium"
++        elif not is_openrouter:
++            # DALL·E-3 (OpenAI-compatible, non gpt-image) defaults to returning a
++            # short-lived REMOTE URL, which the renderer can't match to a local file
++            # and which rots — so the image never renders inline. Force base64 so the
++            # response goes through the b64_json branch below (writes a real PNG +
++            # a /generated-image/<file>.png link the UI resolves). gpt-image returns
++            # b64 natively (and rejects this param); OpenRouter uses its own b64 shape.
++            payload["response_format"] = "b64_json"
+ 
+         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)) as client:
+             resp = await client.post(images_url, json=payload, headers=headers)
+ 
++            # Defensive: a model that rejects response_format (e.g. a gpt-image
++            # deployment whose id doesn't contain the "gpt-image" substring, so it
++            # slipped past the check above) answers 400 mentioning the param. Retry
++            # ONCE without it so such models degrade to their native output shape
++            # instead of hard-failing.
++            if resp.status_code == 400 and "response_format" in payload and "response_format" in resp.text.lower():
++                payload.pop("response_format", None)
++                resp = await client.post(images_url, json=payload, headers=headers)
++
+             if resp.status_code != 200:
+                 error_text = resp.text[:500]
+                 try:
 diff --git a/services/docs/service.py b/services/docs/service.py
 index 5242aa5..11f2724 100644
 --- a/services/docs/service.py
@@ -72,6 +98,37 @@ index 5242aa5..11f2724 100644
                  source=r.get("source", r.get("metadata", {}).get("source", "unknown")),
                  score=r.get("score", 0.0),
                  metadata=r.get("metadata"),
+diff --git a/src/ai_interaction.py b/src/ai_interaction.py
+index 41c61a7..b5de627 100644
+--- a/src/ai_interaction.py
++++ b/src/ai_interaction.py
+@@ -128,6 +128,26 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
+                 if matched:
+                     return build_chat_url(base), matched, headers
+             else:
++                # NIGHTJAR (NJ-11 / B13): consult admin-PINNED models FIRST. The image-
++                # endpoint seed pins its model ("so it resolves without probing"), but the
++                # resolver used to ignore that and hit /v1/models on EVERY request — an
++                # extra round-trip that hard-fails on the 5s timeout / a rate limit. A
++                # pinned match now resolves with no network call. getattr-guarded so it is
++                # a no-op on endpoints without pinned_models.
++                try:
++                    pinned = json.loads(getattr(ep, "pinned_models", None) or "[]")
++                except Exception:
++                    pinned = []
++                # Exact match first, THEN partial — mirroring the probe path's two-phase
++                # order, so a request for "llama3.1" isn't hijacked by a pinned "llama3".
++                for pid in pinned:
++                    if isinstance(pid, str) and pid.lower() == model_name.lower():
++                        return build_chat_url(base), pid, headers
++                for pid in pinned:
++                    if isinstance(pid, str) and pid and (
++                        model_name.lower() in pid.lower() or pid.lower() in model_name.lower()
++                    ):
++                        return build_chat_url(base), pid, headers
+                 # OpenAI-compatible and native Ollama: probe the provider's model list.
+                 try:
+                     models_url = build_models_url(base)
 diff --git a/src/chroma_client.py b/src/chroma_client.py
 index 3a0a80c..1db0e24 100644
 --- a/src/chroma_client.py

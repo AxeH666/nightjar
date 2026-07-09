@@ -16,11 +16,11 @@ cd "$ROOT"
 echo "== Nightjar setup (root: $ROOT) =="
 
 # 1) Odysseus submodule (AGPL source-availability + the runtime sidecar) ---------
-echo "-- [1/6] Odysseus submodule --"
+echo "-- [1/7] Odysseus submodule --"
 git submodule update --init research/odysseus
 
 # 2) Apply Nightjar's Odysseus patch (idempotent) -------------------------------
-echo "-- [2/6] Odysseus integration patch --"
+echo "-- [2/7] Odysseus integration patch --"
 PATCH="$ROOT/phase2-odysseus/odysseus-patches/nightjar-odysseus.patch"
 if git -C research/odysseus apply --reverse --check "$PATCH" 2>/dev/null; then
   echo "   already applied — skipping"
@@ -52,11 +52,11 @@ make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)
   "$d/venv/bin/pip" install -q --upgrade pip
   "$d/venv/bin/pip" install -q -r "$d/requirements.txt"
 }
-echo "-- [3/6] phase2-mcp venv --";      make_venv phase2-mcp
-echo "-- [4/6] phase2-odysseus venv --"; make_venv phase2-odysseus
+echo "-- [3/7] phase2-mcp venv --";      make_venv phase2-mcp
+echo "-- [4/7] phase2-odysseus venv --"; make_venv phase2-odysseus
 # Browser Use (autonomous form-filling) — isolated venv so its heavy deps
 # (openai/anthropic/google-genai/…) never destabilize phase2-mcp/venv.
-echo "-- [4b/6] browser-use venv --";    make_venv browser-use-mcp
+echo "-- [4b/7] browser-use venv --";    make_venv browser-use-mcp
 # Browser Use 0.13.x drives Chromium over CDP and manages its own browser; it needs a
 # Chrome/Chromium available. Best-effort diagnostic only — never fatal (a missing
 # browser disables just the browser-use tool). Run doctor yourself to verify/fix:
@@ -68,13 +68,13 @@ if [ -x browser-use-mcp/venv/bin/browser-use ]; then
 fi
 
 # 4) UI node modules ------------------------------------------------------------
-echo "-- [5/6] phase3-ui npm install --"
+echo "-- [5/7] phase3-ui npm install --"
 ( cd phase3-ui && npm install --no-audit --no-fund )
 
 # 5) Local vision model — Ollama + gemma3:4b (best-effort, NEVER fatal) ----------
 # Powers offline image analysis (nightjar_analyze_image). Skippable with
 # NIGHTJAR_SKIP_OLLAMA=1. Cloud vision (BYOK) works regardless of this step.
-echo "-- [6/6] local vision (Ollama + gemma3:4b) --"
+echo "-- [6/7] local vision (Ollama + gemma3:4b) --"
 OLLAMA_HOST_URL="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 if command -v ollama >/dev/null 2>&1; then
   echo "   ollama present"
@@ -100,6 +100,31 @@ if command -v ollama >/dev/null 2>&1; then
   fi
 else
   echo "   skipping vision model — ollama unavailable (cloud vision via BYOK still works)"
+fi
+
+# 5b) Local IMAGE model — diffusers venv + Z-Image-Turbo (best-effort, NEVER fatal) --
+# Powers OFFLINE image generation (NJ-6). Skippable with NIGHTJAR_SKIP_DIFFUSION=1.
+# Cloud image gen (OpenAI/OpenRouter BYOK) works regardless of this step. Needs a
+# CUDA GPU + ~6 GB VRAM to actually generate; the model is Apache-2.0.
+echo "-- [7/7] local image backend (diffusion + Z-Image-Turbo) --"
+IMAGE_MODEL_DIR="${NIGHTJAR_IMAGE_MODEL_DIR:-$HOME/models/Z-Image-Turbo}"
+if [ "${NIGHTJAR_SKIP_DIFFUSION:-0}" = "1" ]; then
+  echo "   skipped (NIGHTJAR_SKIP_DIFFUSION=1)"
+else
+  echo "   creating diffusion-mcp/venv (heavy CUDA deps — this can take a while)…"
+  make_venv diffusion-mcp || echo "   (diffusion venv setup failed — retry later: make_venv diffusion-mcp)"
+  if [ -f "$IMAGE_MODEL_DIR/model_index.json" ]; then
+    echo "   Z-Image-Turbo already present ($IMAGE_MODEL_DIR)"
+  elif [ -x diffusion-mcp/venv/bin/python ]; then
+    echo "   downloading Tongyi-MAI/Z-Image-Turbo (~6 GB, one-time) → $IMAGE_MODEL_DIR …"
+    diffusion-mcp/venv/bin/python - "$IMAGE_MODEL_DIR" <<'PY' || echo "   (model download failed — retry later; cloud image gen via BYOK still works)"
+import sys
+from huggingface_hub import snapshot_download
+snapshot_download("Tongyi-MAI/Z-Image-Turbo", local_dir=sys.argv[1])
+PY
+  else
+    echo "   skipping model download — diffusion venv unavailable (cloud image gen via BYOK still works)"
+  fi
 fi
 
 # 6) NIGHTJAR_ROOT --------------------------------------------------------------

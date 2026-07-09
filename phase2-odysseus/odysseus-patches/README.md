@@ -6,7 +6,7 @@
 it with `git submodule update --init`). The submodule is kept **clean** — it
 points at the unmodified upstream commit.
 
-Nightjar's two small, integration-only changes to Odysseus live here as a patch,
+Nightjar's small, integration-only changes to Odysseus live here as a patch,
 applied on top of the pinned submodule by `scripts/setup.sh` (or manually with
 `git -C research/odysseus apply phase2-odysseus/odysseus-patches/nightjar-odysseus.patch`):
 
@@ -21,7 +21,13 @@ applied on top of the pinned submodule by `scripts/setup.sh` (or manually with
   as an image backend alongside OpenAI. Picks the endpoint path by provider host
   (`_image_api_style()`: `/images` for openrouter.ai vs `/images/generations` for
   OpenAI-compatible), and relaxes the DALL·E-3 size clamp for non-OpenAI models
-  (FLUX/Seedream/etc). Backward-compatible: OpenAI endpoints behave exactly as before.
+  (FLUX/Seedream/etc). Also forces `response_format=b64_json` on the DALL·E path so the
+  image is written locally + rendered inline instead of a rotting remote URL (**B12**),
+  with a one-shot retry-without-the-param for models that reject it. Backward-compatible.
+- **`src/ai_interaction.py`** — `_resolve_model` consults an endpoint's **pinned**
+  models before the live `/v1/models` probe, so a seeded (image) endpoint resolves with
+  **no network round-trip** — removing an extra call + its 5s-timeout hard-fail on every
+  generation (**B13 / NJ-11**). getattr-guarded → no-op for endpoints without pins.
 
 Keeping these as a patch (rather than committing them into the submodule) means
 the submodule stays a faithful mirror of upstream — the AGPL source is exactly
