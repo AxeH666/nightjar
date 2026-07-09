@@ -45,8 +45,13 @@ export async function pidOnPort(port: number): Promise<number | undefined> {
   } else {
     // linux: ss (modern), then lsof, then fuser (fuser can emit multiple pids).
     for (const line of (await run("ss", ["-ltnpH"])).split(/\r?\n/)) {
-      const local = line.trim().split(/\s+/)[3] || "" // State Recv-Q Send-Q Local:Port Peer:Port Process
-      if (local.endsWith(`:${port}`)) addAll(line, /pid=(\d+)/g)
+      // Match the local address:port column by its `:<port>` SUFFIX rather than a
+      // fixed index — ss prints a leading Netid column in some iproute2 versions, so
+      // the address isn't always at the same position. For -l (listening) output the
+      // peer column is always `*`-suffixed, so the only token ending in `:<port>` is
+      // the local listen address; endsWith requires the colon so `:496` can't match `:96`.
+      const cols = line.trim().split(/\s+/)
+      if (cols.some((c) => c.endsWith(`:${port}`))) addAll(line, /pid=(\d+)/g)
     }
     if (pids.size === 0) addAll(await run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]), /(\d+)/g)
     if (pids.size === 0) addAll(await run("fuser", [`${port}/tcp`]), /(\d+)/g)
