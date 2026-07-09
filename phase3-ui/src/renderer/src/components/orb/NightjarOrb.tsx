@@ -2,17 +2,17 @@
 // Siri-style full-screen overlay (Phase 4 follow-up) that takes over whenever
 // the pipeline is actually active.
 //
-// Replaces the static amber placeholder disc. Builds a NightjarOrbAdapter (the
-// custom orb-ui adapter wired to the :8765 side-channel + Web Audio), bridges it
-// into React with useOrbAdapter, and renders orb-ui's circle theme — forked to
-// Nightjar amber — in controlled mode: `<AmberCircleTheme state volume />`. The
-// small header orb and the OrbOverlay share this one adapter subscription (one
-// side-channel connection, one set of audio analysers) so both stay in sync.
+// Builds a NightjarOrbAdapter (wired to the :8765 side-channel + Web Audio),
+// bridges it into React with useOrbAdapter, and renders the custom orb: a cheap
+// CSS mini-orb in the header (always on) plus the WebGL VortexOverlay that takes
+// over during a voice turn. Both share this one adapter subscription (one
+// side-channel connection, one set of audio analysers) so they stay in sync.
+// (Stage 7: replaced the orb-ui circle-theme fork with the Three.js vortex.)
 import { useEffect, useMemo } from "react"
 import { createNightjarOrbAdapter } from "../../lib/orbAdapter"
 import { useOrbAdapter } from "../../lib/useOrbAdapter"
-import { AmberCircleTheme } from "./AmberCircleTheme"
-import { OrbOverlay } from "./OrbOverlay"
+import { CssMiniOrb } from "./CssMiniOrb"
+import { VortexOverlay } from "./VortexOverlay"
 
 const DEFAULT_WS =
   (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_NIGHTJAR_WS_URL ||
@@ -56,12 +56,12 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
         data-orb-state={state}
         title={`Voice orb — ${LABELS[state] ?? state}`}
       >
-        <AmberCircleTheme state={state} volume={volume} size={size} />
+        <CssMiniOrb state={state} volume={volume} size={size} />
         <span className="text-[10px] uppercase tracking-wide text-nightjar-text/40">
           {LABELS[state] ?? state}
         </span>
       </div>
-      <OrbOverlay state={state} volume={volume} active={state !== "idle"} />
+      <VortexOverlay state={state} volume={volume} active={state !== "idle"} />
     </>
   )
 }

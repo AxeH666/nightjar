@@ -20,7 +20,7 @@
 // the local-file→URL step for the TTS WAV) is injectable, so the whole state
 // machine is drivable headlessly in tests and against the real :8765 hub.
 
-import type { OrbAdapter, OrbState } from "orb-ui"
+import type { OrbAdapter, OrbState } from "./orbTypes"
 import {
   AudioLevelMonitor,
   defaultScheduler,
