@@ -1,4 +1,5 @@
 import type { ToolCall } from "../lib/opencode"
+import { isTruncatedWrite } from "../lib/preview"
 
 // A tool call rendered from message.part.updated events, keyed by callID. The
 // same card advances pending → running → completed/error as events arrive.
@@ -31,6 +32,13 @@ export function ToolCallCard({ call }: { call: ToolCall }) {
       )}
       {call.status === "error" && call.error && (
         <div className="mt-2 text-nightjar-alert text-xs">{call.error}</div>
+      )}
+      {isTruncatedWrite(call) && (
+        <div className="mt-2 rounded border border-nightjar-alert/40 bg-nightjar-alert/10 px-2 py-1.5 text-nightjar-text/80 text-xs">
+          This write didn't complete — usually because the file was too large for the local model's output limit, so
+          the tool call was cut off. Try a smaller or multi-file version (e.g. separate HTML/CSS/JS), a stronger BYOK
+          model, or the design profile (<span className="font-mono">NIGHTJAR_DESIGN_PROFILE=1</span>).
+        </div>
       )}
     </div>
   )

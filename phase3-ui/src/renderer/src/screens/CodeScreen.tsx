@@ -15,17 +15,17 @@ import { SessionList } from "../components/code/SessionList"
 
 export function CodeScreen() {
   const { slots, sessions, messagesOf, busyOf, send, createImage } = useSessions()
-  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, resetPreview } = useArtifact()
+  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, syncCodeSession } = useArtifact()
   const id = slots.code
   const title = sessions[id]?.title ?? "Coding session"
 
-  // Switching the code slot to another session (new/resumed) must clear the live
-  // preview — otherwise the panel keeps showing the previous session's artifacts
-  // against a sandbox that no longer holds them. ArtifactContext resets on the
-  // chat primary's id, which doesn't change here, so we drive it from the code id.
+  // Reset the live preview only when the code slot actually switches sessions.
+  // syncCodeSession tracks the previous id in the persistent ArtifactProvider, so a
+  // bare remount from a Chat↔Code tab switch (unchanged id) no longer wipes the
+  // panel — it re-lists the still-live sandbox instead.
   useEffect(() => {
-    resetPreview()
-  }, [id, resetPreview])
+    syncCodeSession(id)
+  }, [id, syncCodeSession])
 
   return (
     <div className="flex h-full min-h-0">
