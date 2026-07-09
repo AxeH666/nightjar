@@ -36,6 +36,7 @@ interface Managed {
   logs: string[]
   intentionalStop: boolean
   healthTimer?: NodeJS.Timeout
+  restartTimer?: NodeJS.Timeout // pending crash-restart backoff; tracked so stop()/restartService can cancel it
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -122,7 +123,11 @@ export class Supervisor {
         m.status.restarts++
         this.set(m, "restarting", `exited (code ${code}); restart ${m.status.restarts}`)
         const backoff = Math.min(15000, 1000 * 2 ** (m.status.restarts - 1))
-        setTimeout(() => this.spawn(m).catch(() => {}), backoff)
+        m.restartTimer = setTimeout(() => {
+          m.restartTimer = undefined
+          if (m.intentionalStop) return // stop() landed between scheduling and firing → do not respawn
+          this.spawn(m).catch(() => {})
+        }, backoff)
       } else {
         this.set(m, "failed", `exited (code ${code}); restarts exhausted`)
       }
@@ -190,6 +195,11 @@ export class Supervisor {
       clearInterval(m.healthTimer)
       m.healthTimer = undefined
     }
+    // Cancel any pending crash-restart backoff so it can't double-spawn during the restart.
+    if (m.restartTimer) {
+      clearTimeout(m.restartTimer)
+      m.restartTimer = undefined
+    }
     const c = m.child
     const owned = Boolean(c) // did WE spawn it? (adopted processes have no child)
     if (c) {
@@ -228,6 +238,10 @@ export class Supervisor {
     for (const m of this.managed) {
       m.intentionalStop = true
       if (m.healthTimer) clearInterval(m.healthTimer)
+      if (m.restartTimer) {
+        clearTimeout(m.restartTimer)
+        m.restartTimer = undefined
+      }
       const c = m.child
       if (!c?.pid) {
         this.set(m, "stopped")
