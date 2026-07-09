@@ -429,19 +429,27 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       for (;;) {
         if (cancelled) return
         try {
-          // B3: snapshot whether the CURRENT code session was ever used, so we can
-          // reap it below if not — otherwise every reconnect (BYOK change, SSE drop,
-          // crash-restart) leaves an empty "June coding" session behind, cluttering
-          // the Code list and growing nightjar.codeSessionIds without bound.
+          // B3: reap the prior code session on reconnect if it was never used —
+          // otherwise every reconnect (BYOK change, SSE drop, crash-restart) leaves an
+          // empty "June coding" session behind, cluttering the Code list and growing
+          // nightjar.codeSessionIds without bound.
           const prevCodeId = slotsRef.current.code
-          const prevEmpty = !prevCodeId || (sessionsRef.current[prevCodeId]?.messages.length ?? 0) === 0
           const codeId = await client.createSession(DEFAULT_TITLE.code)
           if (!cancelled) {
+            // Decide reapability AFTER the await (Bugbot: a pre-await snapshot goes
+            // stale) and BEFORE rebind (which gc's the old id): the user may have sent
+            // on the code slot during the createSession round-trip. Reap only if the
+            // prior session is still present, empty, and not mid-turn — any real /
+            // in-flight conversation is carried into the new session and kept.
+            // sessionsRef (messages/busy) is refreshed by a passive effect, so it can
+            // lag a send by one flush; perSessionRefs.lastSent is set SYNCHRONOUSLY by
+            // send()/createImage(), so it closes that residual window with no lag.
+            const prev = prevCodeId ? sessionsRef.current[prevCodeId] : undefined
+            const prevSent = !!(prevCodeId && perSessionRefs.current.get(prevCodeId)?.lastSent)
+            const prevReapable = !!prev && prev.messages.length === 0 && !prev.busy && !prevSent
             rebindSlot("code", codeId, true) // carries the old transcript into the new session
             markCodeSession(codeId)
-            // Delete the prior code session ONLY if it was empty (a real in-progress
-            // coding conversation is preserved + resumable).
-            if (prevCodeId && prevCodeId !== codeId && prevEmpty) {
+            if (prevCodeId && prevCodeId !== codeId && prevReapable) {
               unmarkCodeSession(prevCodeId)
               client.deleteSession(prevCodeId).catch(() => {})
             }
