@@ -72,7 +72,7 @@ export function AppShell() {
               // still offer the local offline escape hatch — for the SAME failing
               // session/slot (the offer carries them so the retry lands in the
               // right conversation, not always the chat slot).
-              setFallbackOffer({ text: rateLimitOffer.text, sessionId: rateLimitOffer.sessionId, slot: rateLimitOffer.slot })
+              setFallbackOffer({ text: rateLimitOffer.text, kind: rateLimitOffer.kind, sessionId: rateLimitOffer.sessionId, slot: rateLimitOffer.slot })
             }}
             className="text-xs text-nightjar-text/50 hover:underline"
           >

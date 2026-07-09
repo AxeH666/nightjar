@@ -27,14 +27,21 @@ import {
 // still works if a reconnect replaced the session id in the meantime: the retry
 // resolves via the slot's CURRENT session (Bugbot #1). `slot` is typed loosely
 // (string) to avoid a ModelContext→SessionsContext import cycle.
+// What kind of send failed, so the retry re-dispatches correctly (NJ-9): a "chat"
+// retry uses the plain send path; an "image" retry MUST go back through
+// createImage() so it re-wraps the generate_image directive (a plain resend of the
+// raw prompt would just chat about it instead of regenerating).
+export type SendKind = "chat" | "image"
 interface FallbackOffer {
   text: string
+  kind: SendKind
   sessionId: string
   slot: string | null
 }
 interface RateLimitOffer {
   text: string
   provider: string
+  kind: SendKind
   sessionId: string
   slot: string | null
 }
@@ -51,8 +58,12 @@ interface ModelValue {
   rateLimitOffer: RateLimitOffer | null
   setRateLimitOffer: (v: RateLimitOffer | null) => void
   loadModels: () => Promise<void>
-  // Given a session.error on `sessionId` (in `slot`), set the appropriate non-silent recovery offer (or none).
-  handleSessionError: (err: any, lastText: string, sessionId: string, slot: string | null) => void
+  // Given a session.error on `sessionId` (in `slot`), set the appropriate non-silent
+  // recovery offer (or none). `kind` = what failed (chat|image, so the retry
+  // re-dispatches correctly). `sentModel` = the model the FAILING send actually used
+  // (B4: decide recovery on that, not the current global model the user may have
+  // since switched).
+  handleSessionError: (err: any, lastText: string, kind: SendKind, sentModel: string, sessionId: string, slot: string | null) => void
 }
 
 const Ctx = createContext<ModelValue | null>(null)
@@ -72,7 +83,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
 
   // Mirrors so handleSessionError (called from the SSE listener in SessionsContext)
   // reads current values without being a stale closure or a resubscribe trigger.
-  const activeModelRef = useRef<string>(LOCAL_MODEL.id)
+  // (The failing send's OWN model now arrives as a param — B4 — so no activeModel
+  // mirror is needed here.)
   const choicesRef = useRef<ModelChoice[]>([LOCAL_MODEL])
   const openRouterReadyRef = useRef<boolean>(false)
 
@@ -90,32 +102,34 @@ export function ModelProvider({ children }: { children: ReactNode }) {
 
   const activeChoice = choices.find((c) => c.id === activeModel) ?? LOCAL_MODEL
   useEffect(() => {
-    activeModelRef.current = activeModel
-  }, [activeModel])
-  useEffect(() => {
     choicesRef.current = choices
   }, [choices])
 
-  const handleSessionError = useCallback((err: any, lastText: string, sessionId: string, slot: string | null) => {
-    // Graceful cloud fallback: a cloud model failing (bad/expired key, rate
-    // limit, provider down) should offer local, not silently die. But NOT every
-    // session.error is the cloud provider's fault — a user abort or a local
-    // tool/MCP failure isn't, and offering "the cloud model failed" for those is
-    // misleading. Skip those.
-    const name: string | undefined = err?.name
-    const notProviderFailure = name === "MessageAbortedError" || name === "MCPFailed"
-    const activeM = activeModelRef.current
-    if (!isLocalModel(activeM) && lastText && !notProviderFailure) {
-      // Rate-limit (429) on a paid cloud provider + OpenRouter configured → offer
-      // a switch to a free OpenRouter model (never silent). Otherwise fall back to
-      // the local-retry offer. Either way, remember WHICH session failed.
-      if (isRateLimitError(err) && openRouterReadyRef.current && activeM !== OPENROUTER_FREE_CHOICE.id) {
-        setRateLimitOffer({ text: lastText, provider: providerNameOf(activeM, choicesRef.current), sessionId, slot })
-      } else {
-        setFallbackOffer({ text: lastText, sessionId, slot })
+  const handleSessionError = useCallback(
+    (err: any, lastText: string, kind: SendKind, sentModel: string, sessionId: string, slot: string | null) => {
+      // Graceful cloud fallback: a cloud model failing (bad/expired key, rate
+      // limit, provider down) should offer local, not silently die. But NOT every
+      // session.error is the cloud provider's fault — a user abort or a local
+      // tool/MCP failure isn't, and offering "the cloud model failed" for those is
+      // misleading. Skip those.
+      const name: string | undefined = err?.name
+      const notProviderFailure = name === "MessageAbortedError" || name === "MCPFailed"
+      // B4: judge by the model the FAILING send used (sentModel), not the current
+      // global active model — the user may have switched models mid-turn, which
+      // would otherwise suppress (or misattribute) the recovery offer.
+      if (!isLocalModel(sentModel) && lastText && !notProviderFailure) {
+        // Rate-limit (429) on a paid cloud provider + OpenRouter configured → offer
+        // a switch to a free OpenRouter model (never silent). Otherwise fall back to
+        // the local-retry offer. Either way, remember WHICH session + KIND failed.
+        if (isRateLimitError(err) && openRouterReadyRef.current && sentModel !== OPENROUTER_FREE_CHOICE.id) {
+          setRateLimitOffer({ text: lastText, provider: providerNameOf(sentModel, choicesRef.current), kind, sessionId, slot })
+        } else {
+          setFallbackOffer({ text: lastText, kind, sessionId, slot })
+        }
       }
-    }
-  }, [])
+    },
+    [],
+  )
 
   const value: ModelValue = {
     choices,
