@@ -1,0 +1,19 @@
+# Local image generation (Z-Image-Turbo via diffusers) — NJ-6. A dedicated GPU venv
+# so its heavy CUDA deps never destabilize the other venvs. Best-effort: the app runs
+# fine without it (image gen falls back to a cloud BYOK endpoint when a key is set).
+#
+# NOTE: `torch` here is the default wheel, which may be CPU-only. For real GPU image
+# generation install the CUDA build matching your driver first, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch
+diffusers>=0.31
+accelerate
+transformers
+safetensors
+sentencepiece
+protobuf
+huggingface_hub
+pillow
+numpy
+fastapi
+uvicorn
