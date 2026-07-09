@@ -15,6 +15,14 @@ import row_bot.vision as _vision
 
 _svc = None
 
+# NJ-7: shown when local image analysis can't run because Ollama / the vision model
+# isn't set up. Actionable + points at the in-app setup path and the cloud escape.
+_VISION_HELP = (
+    "Local image analysis needs Ollama running with the gemma3:4b vision model. "
+    "Install it from Nightjar's vision banner (or run `ollama pull gemma3:4b`), or "
+    "pick a cloud vision model (BYOK) to analyze images now."
+)
+
 
 def _service():
     global _svc
@@ -23,8 +31,47 @@ def _service():
     return _svc
 
 
+def _local_vision_blocker() -> Optional[str]:
+    """Return an actionable message if local vision is DEFINITIVELY not ready (Ollama
+    unreachable, or the model not pulled); return None if it looks ready OR the check
+    is inconclusive (fail-open — an unexpected probe error must not block a path that
+    might work, so analyze() still gets to try and surface its own error)."""
+    import json
+    import os
+    import urllib.error
+    import urllib.request
+
+    # Probe the EXACT model analyze() will use — VisionService reads its model from
+    # vision_settings.json (else the gemma3:4b default) and does NOT read
+    # NIGHTJAR_VISION_MODEL, so keying the probe off that env could block a call the
+    # analysis path would have completed. Reading _service().model keeps them aligned.
+    try:
+        model = _service().model
+    except Exception:
+        return None  # can't resolve the model → inconclusive, let analyze() try
+    # A cloud/BYOK vision model (provider-prefixed, e.g. "openai/…") doesn't use
+    # Ollama — never gate it on local readiness.
+    if not model or "/" in model:
+        return None
+    host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=2) as r:
+            names = [m.get("name", "") for m in json.load(r).get("models", [])]
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return _VISION_HELP  # Ollama not reachable → definitively not ready
+    except Exception:
+        return None  # unexpected probe error → inconclusive, let analyze() try
+    base = model.split(":")[0]
+    if not any(n == model or n.split(":")[0] == base for n in names):
+        return _VISION_HELP  # model not pulled
+    return None
+
+
 def analyze_image(image: Union[str, bytes], question: str = "Describe this image.") -> str:
     """Analyze an image (file path or raw bytes) with the local vision model."""
+    blocker = _local_vision_blocker()
+    if blocker:
+        return blocker
     if isinstance(image, str):
         data = open(image, "rb").read()
     else:

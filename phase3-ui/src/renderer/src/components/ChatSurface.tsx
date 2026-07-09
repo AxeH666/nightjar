@@ -3,6 +3,35 @@ import type { ToolCall } from "../lib/opencode"
 import { ToolCallCard } from "./ToolCallCard"
 import { ToolsMenu } from "./composer/ToolsMenu"
 import { type Attachment, pickAttachments, attachmentsFromDataTransfer, fmtSize } from "../lib/attachments"
+import { useModel } from "../context/ModelContext"
+import { isLocalModel } from "../lib/byok"
+
+// Local-vision readiness (Ollama + gemma3:4b), mirrored from the main process — used
+// to warn before an image is sent to the text-only local model (NJ-7).
+type VisionStatus = { ollama?: string; model?: string }
+function visionBridge() {
+  return (
+    window as unknown as {
+      nightjar?: {
+        getVisionStatus?(): Promise<VisionStatus>
+        onVisionStatus?(cb: (s: VisionStatus) => void): () => void
+        installVisionModel?(): Promise<unknown>
+        openOllamaDownload?(): Promise<void>
+      }
+    }
+  ).nightjar
+}
+function useVisionReadiness(): boolean {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    const b = visionBridge()
+    if (!b?.getVisionStatus) return
+    const upd = (s: VisionStatus) => setReady(s?.ollama === "running" && s?.model === "present")
+    b.getVisionStatus().then(upd).catch(() => {})
+    return b.onVisionStatus?.(upd)
+  }, [])
+  return ready
+}
 
 export type UiBlock =
   | { kind: "text"; text: string }
@@ -54,6 +83,11 @@ export function ChatSurface({
   const [createMode, setCreateMode] = useState(false) // "Create Image" prompt mode
   // Per-message tool toggles from the "+" menu (reset after each send).
   const [tools, setTools] = useState({ research: false, webSearch: false })
+  // NJ-7: warn before sending an image to the text-only local model when local
+  // vision (Ollama + gemma3:4b) isn't ready — with a "Send anyway" escape.
+  const { activeModel } = useModel()
+  const visionReady = useVisionReadiness()
+  const [visionWarn, setVisionWarn] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -90,10 +124,19 @@ export function ChatSurface({
       return
     }
     if (!t && attachments.length === 0) return
+    // NJ-7: sending an image to the local (text-only) model with local vision not
+    // ready would silently fail the analyze tool. Warn once (setup + "Send anyway")
+    // rather than hard-block or silently error. Clicking "Send anyway" re-enters
+    // submit() with visionWarn already true, so it proceeds.
+    if (attachments.some((a) => a.isImage) && isLocalModel(activeModel) && !visionReady && !visionWarn) {
+      setVisionWarn(true)
+      return
+    }
     onSend(t, { attachments, research: tools.research || tools.webSearch })
     setInput("")
     setAttachments([])
     setTools({ research: false, webSearch: false })
+    setVisionWarn(false)
   }
 
   const canSend = !busy && (createMode ? !!input.trim() : !!input.trim() || attachments.length > 0)
@@ -182,6 +225,21 @@ export function ChatSurface({
           <div className="mb-2 flex items-center gap-2 text-xs text-nightjar-accent">
             🎨 Create-Image mode — describe the image, then press Create.
             <button onClick={() => setCreateMode(false)} className="text-nightjar-text/50 hover:underline">cancel</button>
+          </div>
+        )}
+        {visionWarn && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-nightjar-alert/40 bg-nightjar-alert/10 px-3 py-2 text-xs text-nightjar-text/80">
+            <span>👁 The local model can't read images — offline vision needs Ollama + gemma3:4b.</span>
+            <button onClick={() => visionBridge()?.installVisionModel?.()} className="rounded border border-nightjar-accent px-2 py-0.5 text-nightjar-accent hover:bg-nightjar-accent/10">
+              Download model
+            </button>
+            <button onClick={() => visionBridge()?.openOllamaDownload?.()} className="rounded border border-nightjar-accent px-2 py-0.5 text-nightjar-accent hover:bg-nightjar-accent/10">
+              Install Ollama
+            </button>
+            <button onClick={submit} className="rounded bg-nightjar-accent px-2 py-0.5 font-medium text-nightjar-base hover:brightness-110">
+              Send anyway
+            </button>
+            <button onClick={() => setVisionWarn(false)} className="text-nightjar-text/50 hover:underline">cancel</button>
           </div>
         )}
         <div className="flex items-end gap-2">
