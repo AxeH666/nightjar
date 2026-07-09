@@ -37,8 +37,10 @@ adding networked access.
 | llmfit (© 2026 Alex Jones) | hardware model-fit (vendored) | MIT | `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS |
 | Tongyi DeepResearch | deep-research pipeline (via Odysseus) | Apache-2.0 | `research/odysseus/licenses/DeepResearch-Apache-2.0.txt` |
 | three.js (© three.js authors) | custom voice-reactive vortex orb (WebGL, redesign Step 7) | MIT | `phase3-ui/node_modules/three/LICENSE` |
+| react (© Meta Platforms / Facebook, Inc.) | UI framework for the Electron renderer | MIT | `phase3-ui/node_modules/react/LICENSE` (npm dep) |
+| react-dom (© Meta Platforms / Facebook, Inc.) | React DOM renderer (renderer root) | MIT | `phase3-ui/node_modules/react-dom/LICENSE` (npm dep) |
 | Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
-| marked | markdown→HTML in the live-preview panel | MIT | `phase3-ui/node_modules/marked/LICENSE.md` (npm dep) |
+| marked | markdown→HTML in the live-preview panel | MIT | `phase3-ui/node_modules/marked/LICENSE` (npm dep) |
 | gemma-chat (© 2026 ammaar) | live-preview "Canvas" **pattern reference only** — reimplemented, **no code copied** (`phase3-ui/src/main/preview-server.ts` + `components/ArtifactPanel.tsx` are original AGPL) | MIT | pattern documented in `research/AUDIT_REPORT.md` §5; no gemma-chat files vendored |
 
 Odysseus's own `ACKNOWLEDGMENTS.md` and `licenses/` directory (opencode-MIT,

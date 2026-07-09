@@ -8,8 +8,54 @@ kept for the historical record with their root cause + fix + verification.
 
 ## 🔧 OPEN
 
+## NJ-10 — permission: a genuinely-undelivered abort leaves no in-UI re-abort control (rare) — OPEN 2026-07-08
+- **Severity:** low — only on an actual `POST /session/:id/abort` failure (uncommon
+  against the loopback engine), and it does **not** hard-wedge (the composer stays
+  usable because `abort()` clears the session's `busy` before the POST).
+- **Detail:** in the Stage-4 multi-session permission **queue** (`PermissionContext`),
+  a failed `reply()` re-surfaces the ask only when it is genuinely still pending —
+  reconciled against the `permission.replied` SSE stream (`repliedIds`) so a lost-ACK
+  doesn't create a "zombie" already-answered ask. `abort()` **cannot** use that
+  signal: the server resolves an aborted permission by cancelling the fiber and
+  **silently deleting the pending permission with no `permission.replied` event**
+  (confirmed in the vendored OpenCode source). With no way to tell a lost-ACK
+  (already aborted) from a genuinely-undelivered abort, re-surfacing on abort would
+  risk a zombie ask masking a live cross-session ask — worse than the residual. So
+  abort deliberately does not re-surface: a genuinely-dropped abort leaves the
+  session paused server-side with no in-UI re-abort control until reload/reconnect.
+- **Root cause:** at-most-once semantics over an unreliable POST, with no engine-side
+  ack/idempotency for the "abort resolves a pending permission" path.
+- **Fix ideas:** (a) have the engine emit a `permission.replied`-family event when an
+  abort cancels a pending permission — then the same reconciliation `reply()` uses
+  would cover abort; (b) client-side, add a persistent per-session stop/interrupt
+  control (independent of the ask) so a paused session is always abortable even when
+  no ask is shown.
+- **Scheduled:** documented tradeoff introduced with the multi-session permission
+  queue (`feat/ui-redesign-sessions`, PR #23); recorded inline in `PermissionContext.abort()`.
+  Revisit if the engine gains an abort-resolved permission event.
+
+## NJ-9 — Create-Image recovery resends the raw prompt as a plain chat message (loses the generate_image directive) — OPEN 2026-07-08
+- **Severity:** low — only when a **cloud** image-generation turn fails via
+  `session.error`, and the local model *may* still opportunistically call the tool.
+- **Detail:** `SessionsContext.createImage()` stores the **raw** description in
+  `refs.lastSent`, while the prompt actually sent is the wrapped *"Use the
+  generate_image tool…"* directive (never stored). If the image turn fails on a cloud
+  model (`session.error` → `handleSessionError`), the recovery offer's `text` is the
+  raw prompt; clicking **Retry on local model** runs `send(…, prompt)` and dispatches
+  the bare prompt as an **ordinary chat message**, so the model chats *about* the
+  prompt instead of regenerating the image.
+- **Root cause:** the recovery offer carries no *kind* (chat vs image); `lastSent` is
+  the raw prompt, not the directive, and retry always uses the plain `send` path.
+  **Pre-existing** — the identical wiring existed in the former single-session
+  `ChatContext`; the PR #23 adversarial review surfaced it (did not introduce it).
+- **Fix idea:** tag the recovery offer with the send kind (`chat` | `image`) and
+  re-dispatch an image retry through `createImage()` (which re-wraps the directive),
+  or store the directive-wrapped text for image sends.
+- **Scheduled:** small follow-up; natural home is the chat-attachments / image-gen
+  path (relates to **NJ-6**/**NJ-7**). Not a blocker for the multi-session PR.
+
 ## NJ-8 — live-preview: large single-file artifacts truncate on the local 4B — OPEN 2026-07-07
-- **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → iframe + markdown render + download) is implemented and **verified end-to-end** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 16/16). Only the model's ability to emit a *big* artifact in one tool call is limited.
+- **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → iframe + markdown render + download) is implemented and **verified end-to-end** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 18/18). Only the model's ability to emit a *big* artifact in one tool call is limited.
 - **Detail:** the coding agent writes files via its `write` tool. The local **Qwen3-4B** is capped at `--predict 2048` tokens (a rule-3 safety backstop, `services.ts`). An elaborate single self-contained page can exceed that, so the `write` tool-call JSON is **truncated → the part goes `pending → error` with empty `input`** (observed). The preview correctly renders nothing for an errored write (no partial/garbage file). A **concise** page or a **markdown doc** fits the budget and renders fine; so does any artifact on a **stronger BYOK/OpenRouter model**.
 - **Mitigations in place:** the coding-mode system prompt steers previewable artifacts under a (gitignored) `preview/` dir **using the write tool** (not inline), and toward concise output; multi-file output (separate `index.html`/`style.css`/`script.js`) also keeps each write within budget.
 - **Fix ideas:** encourage multi-file/concise generation more strongly; raise `--predict` only behind a "design" profile (never the global default — rule 3); rely on a BYOK model for large artifacts.
