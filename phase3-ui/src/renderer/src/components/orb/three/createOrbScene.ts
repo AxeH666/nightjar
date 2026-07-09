@@ -21,7 +21,22 @@ export function createOrbScene(canvas: HTMLCanvasElement, size: number): OrbScen
   try {
     renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "low-power" })
   } catch {
-    return null // no WebGL → caller uses the CSS fallback
+    return null // constructor threw → no WebGL, caller uses the CSS fallback
+  }
+  // The constructor does NOT always throw when a usable GL context can't be
+  // acquired: a blocked/software/already-lost context can still yield a renderer
+  // whose canvas draws nothing. Validate the real context and bail to the CSS
+  // fallback if it's missing or lost — otherwise the orb is a permanently blank
+  // canvas instead of degrading. (Bugbot: "WebGL init skips fallback".)
+  const gl = renderer.getContext()
+  if (!gl || (typeof gl.isContextLost === "function" && gl.isContextLost())) {
+    try {
+      renderer.dispose()
+      renderer.forceContextLoss()
+    } catch {
+      /* already-dead context → nothing to release */
+    }
+    return null
   }
   renderer.setClearColor(0x000000, 0)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)) // cap DPR (GPU/VRAM budget)
