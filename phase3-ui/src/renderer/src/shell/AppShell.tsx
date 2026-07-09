@@ -43,7 +43,7 @@ export function AppShell() {
   return (
     <div className="flex h-full flex-col bg-nightjar-base">
       <header className="flex items-center gap-4 border-b border-nightjar-surface px-4 py-2">
-        <span className="font-semibold text-nightjar-accent">Nightjar</span>
+        <span className="font-semibold text-nightjar-accent">June</span>
         <TabBar tab={tab} onChange={setTab} />
         <div className="ml-auto flex items-center gap-3">
           <ModelSwitcher choices={choices} activeId={activeModel} onSelect={setActiveModel} onManageKeys={() => setShowKeys(true)} />

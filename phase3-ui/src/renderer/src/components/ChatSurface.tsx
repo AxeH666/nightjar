@@ -33,9 +33,9 @@ export function ChatSurface({
   onSend,
   onCreateImage,
   menu = DEFAULT_MENU,
-  emptyHint = "Ask Nightjar something.",
-  placeholder = "Message Nightjar…  (Enter to send · paste or drop files)",
-  assistantLabel = "nightjar",
+  emptyHint = "Ask June something.",
+  placeholder = "Message June…  (Enter to send · paste or drop files)",
+  assistantLabel = "june",
 }: {
   messages: UiMessage[]
   busy: boolean

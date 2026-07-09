@@ -53,7 +53,7 @@ const freshRefs = (): RefBundle => ({
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding" }
-const DEFAULT_TITLE: Record<SlotId, string> = { chat: "Nightjar chat", code: "Nightjar coding" }
+const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June coding" }
 
 // Client-side "kind" tag for sessions. OpenCode has NO per-session kind, so we
 // remember which session ids have served as CODE sessions (created or resumed
