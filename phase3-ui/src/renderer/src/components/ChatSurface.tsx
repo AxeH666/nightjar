@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type ClipboardEvent, type DragEvent } from "react"
 import type { ToolCall } from "../lib/opencode"
 import { ToolCallCard } from "./ToolCallCard"
+import { ToolsMenu } from "./composer/ToolsMenu"
 import { type Attachment, pickAttachments, attachmentsFromDataTransfer, fmtSize } from "../lib/attachments"
 
 export type UiBlock =
@@ -14,21 +15,43 @@ export interface UiMessage {
   blocks: UiBlock[]
 }
 
+// Per-message send options. `research` is true if the user armed Research and/or
+// Web search in the "+" menu for this message; the parent screen maps it to the
+// `research` agent (both toggles collapse to it — the only web-capable agent).
+export interface SendOpts {
+  attachments?: Attachment[]
+  research?: boolean
+}
+
+// Which "+"-menu tool items this surface offers. The Code tab hides
+// Research/Web-search (it always sends to the coding agent).
+const DEFAULT_MENU = { research: true, webSearch: true, createImage: true }
+
 export function ChatSurface({
   messages,
   busy,
   onSend,
   onCreateImage,
+  menu = DEFAULT_MENU,
+  emptyHint = "Ask Nightjar something.",
+  placeholder = "Message Nightjar…  (Enter to send · paste or drop files)",
+  assistantLabel = "nightjar",
 }: {
   messages: UiMessage[]
   busy: boolean
-  onSend: (text: string, attachments?: Attachment[]) => void
+  onSend: (text: string, opts: SendOpts) => void
   onCreateImage: (prompt: string) => void
+  menu?: { research: boolean; webSearch: boolean; createImage: boolean }
+  emptyHint?: string
+  placeholder?: string
+  assistantLabel?: string
 }) {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [createMode, setCreateMode] = useState(false) // "Create Image" prompt mode
+  // Per-message tool toggles from the "+" menu (reset after each send).
+  const [tools, setTools] = useState({ research: false, webSearch: false })
   const endRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -65,9 +88,10 @@ export function ChatSurface({
       return
     }
     if (!t && attachments.length === 0) return
-    onSend(t, attachments)
+    onSend(t, { attachments, research: tools.research || tools.webSearch })
     setInput("")
     setAttachments([])
+    setTools({ research: false, webSearch: false })
   }
 
   const canSend = !busy && (createMode ? !!input.trim() : !!input.trim() || attachments.length > 0)
@@ -75,10 +99,12 @@ export function ChatSurface({
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        {messages.length === 0 && <div className="mt-20 text-center text-nightjar-text/40">Ask Nightjar something.</div>}
+        {messages.length === 0 && <div className="mt-20 text-center text-nightjar-text/40">{emptyHint}</div>}
         {messages.map((m) => (
           <div key={m.id} className="mb-4">
-            <div className="mb-1 text-xs uppercase tracking-wide text-nightjar-text/40">{m.role === "user" ? "you" : "nightjar"}</div>
+            <div className="mb-1 text-xs uppercase tracking-wide text-nightjar-text/40">
+              {m.role === "user" ? "you" : assistantLabel}
+            </div>
             <div className={m.role === "user" ? "rounded-lg bg-nightjar-surface px-4 py-2 text-nightjar-text" : "text-nightjar-text/90"}>
               {m.blocks.map((b, i) => {
                 if (b.kind === "text") return <p key={i} className="whitespace-pre-wrap leading-relaxed">{b.text}</p>
@@ -133,6 +159,23 @@ export function ChatSurface({
             ))}
           </div>
         )}
+        {/* Armed per-message tool chips (explicit, visible before send). */}
+        {(tools.research || tools.webSearch) && !createMode && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {tools.research && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-nightjar-accent/50 bg-nightjar-accent/10 px-2 py-0.5 text-xs text-nightjar-accent">
+                🔎 Research
+                <button onClick={() => setTools((t) => ({ ...t, research: false }))} title="Remove" className="hover:brightness-125">✕</button>
+              </span>
+            )}
+            {tools.webSearch && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-nightjar-accent/50 bg-nightjar-accent/10 px-2 py-0.5 text-xs text-nightjar-accent">
+                🌐 Web search
+                <button onClick={() => setTools((t) => ({ ...t, webSearch: false }))} title="Remove" className="hover:brightness-125">✕</button>
+              </span>
+            )}
+          </div>
+        )}
         {createMode && (
           <div className="mb-2 flex items-center gap-2 text-xs text-nightjar-accent">
             🎨 Create-Image mode — describe the image, then press Create.
@@ -140,24 +183,18 @@ export function ChatSurface({
           </div>
         )}
         <div className="flex items-end gap-2">
-          <button
-            onClick={browse}
+          <ToolsMenu
+            show={menu}
+            active={{ research: tools.research, webSearch: tools.webSearch, createImage: createMode }}
             disabled={busy}
-            title="Attach files (or paste / drag-drop)"
-            className="rounded-lg border border-nightjar-surface px-2.5 py-2 text-nightjar-text/70 hover:bg-nightjar-surface disabled:opacity-40"
-          >
-            📎
-          </button>
-          <button
-            onClick={() => setCreateMode((v) => !v)}
-            disabled={busy}
-            title="Create an image"
-            className={`rounded-lg border px-2.5 py-2 disabled:opacity-40 ${
-              createMode ? "border-nightjar-accent text-nightjar-accent" : "border-nightjar-surface text-nightjar-text/70 hover:bg-nightjar-surface"
-            }`}
-          >
-            🎨
-          </button>
+            onAddFiles={browse}
+            onToggleResearch={() => setTools((t) => ({ ...t, research: !t.research }))}
+            onToggleWebSearch={() => setTools((t) => ({ ...t, webSearch: !t.webSearch }))}
+            onToggleCreateImage={() => {
+              setCreateMode((v) => !v)
+              setTools({ research: false, webSearch: false }) // image mode ignores research toggles
+            }}
+          />
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -169,7 +206,7 @@ export function ChatSurface({
               }
             }}
             rows={1}
-            placeholder={createMode ? "Describe the image to create…" : "Message Nightjar…  (Enter to send · paste or drop files)"}
+            placeholder={createMode ? "Describe the image to create…" : placeholder}
             className="max-h-40 flex-1 resize-none rounded-lg bg-nightjar-surface px-3 py-2 text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
           />
           <button

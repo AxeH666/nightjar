@@ -17,7 +17,6 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { ReactNode } from "react"
 import { toolCallFromPart } from "../lib/opencode"
 import type { OpenCodeEvent, FilePart, SessionInfo, MessageWithParts } from "../lib/opencode"
-import { suggestMode } from "../lib/suggestMode"
 import { type UiMessage, type UiBlock } from "../components/ChatSurface"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
@@ -55,6 +54,29 @@ const freshRefs = (): RefBundle => ({
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding" }
 const DEFAULT_TITLE: Record<SlotId, string> = { chat: "Nightjar chat", code: "Nightjar coding" }
+
+// Client-side "kind" tag for sessions. OpenCode has NO per-session kind, so we
+// remember which session ids have served as CODE sessions (created or resumed
+// into the code slot) and persist that across restarts — the Code tab lists only
+// these, never the chat session or unrelated pre-existing histories. localStorage
+// is renderer-only and can be unavailable/blocked, so every access is guarded and
+// degrades to in-memory-only for the current run.
+const CODE_SESSIONS_KEY = "nightjar.codeSessionIds"
+function loadCodeSessionIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(CODE_SESSIONS_KEY)
+    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+function persistCodeSessionIds(ids: Set<string>): void {
+  try {
+    localStorage.setItem(CODE_SESSIONS_KEY, JSON.stringify([...ids]))
+  } catch {
+    /* localStorage unavailable → this run keeps the set in memory only */
+  }
+}
 
 // Rehydrate a resumed session's history (WithParts[]) into UiMessage[]. Unlike
 // the live path (which drops the user echo and renders it optimistically), a
@@ -95,16 +117,16 @@ interface SessionsValue {
   setSessionAgent: (sessionId: string, agent: string) => void
   // session-history list (Code tab)
   listSessions: () => Promise<SessionInfo[]>
-  resumeSession: (slot: SlotId, sessionId: string, agent: string) => Promise<void>
+  resumeSession: (slot: SlotId, sessionId: string, agent: string, title?: string) => Promise<void>
   newSession: (slot: SlotId, agent: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
-  // recovery offers (chat slot) + soft mode nudge
-  suggestion: string | null
-  setSuggestion: (s: string | null) => void
+  // code-session kind registry (Code tab list); persisted client-side
+  codeSessionIds: Set<string>
+  // recovery offers (chat slot)
   fallbackToLocal: () => void
   acceptOpenRouterSwitch: () => void
 }
@@ -125,7 +147,26 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
 
   const [sessions, setSessions] = useState<Record<string, SessionState>>({})
   const [slots, setSlots] = useState<Record<SlotId, string>>({ chat: "", code: "" })
-  const [suggestion, setSuggestion] = useState<string | null>(null)
+  // Persisted set of session ids that have served as CODE sessions (see the
+  // module-level helpers). The Code tab filters GET /session down to these.
+  const [codeSessionIds, setCodeSessionIds] = useState<Set<string>>(loadCodeSessionIds)
+  const markCodeSession = useCallback((id: string) => {
+    setCodeSessionIds((prev) => {
+      if (!id || prev.has(id)) return prev
+      const next = new Set(prev).add(id)
+      persistCodeSessionIds(next)
+      return next
+    })
+  }, [])
+  const unmarkCodeSession = useCallback((id: string) => {
+    setCodeSessionIds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      persistCodeSessionIds(next)
+      return next
+    })
+  }, [])
 
   const perSessionRefs = useRef<Map<string, RefBundle>>(new Map())
   const sessionsRef = useRef<Record<string, SessionState>>({})
@@ -381,7 +422,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         try {
           const codeId = await client.createSession(DEFAULT_TITLE.code)
-          if (!cancelled) rebindSlot("code", codeId, true)
+          if (!cancelled) {
+            rebindSlot("code", codeId, true)
+            markCodeSession(codeId)
+          }
           return
         } catch {
           await sleep(1500)
@@ -391,7 +435,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [primaryId, clientRef, rebindSlot])
+  }, [primaryId, clientRef, rebindSlot, markCodeSession])
 
   // Validate every session's agent against the live agent list (Bugbot: default
   // agent init removed + the ported #21 mode-revalidation). DEFAULT_AGENT
@@ -426,15 +470,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const agent = opts?.agent ?? session.agent
       if (!agent) return
       const atts = opts?.attachments ?? []
-      setSuggestion(null)
       setFallbackOffer(null)
       setRateLimitOffer(null)
-      const sug = suggestMode(
-        text,
-        agent,
-        agents.map((a) => a.name),
-      )
-      if (sug) setSuggestion(sug)
       const uid = `local-${Date.now()}`
       // Optimistic render: text + attachment previews.
       const blocks: UiBlock[] = []
@@ -459,7 +496,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (!isLocalModel(model)) setFallbackOffer({ text, sessionId, slot: slotOf(sessionId) })
       })
     },
-    [agents, activeModel, clientRef, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
+    [activeModel, clientRef, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
   )
 
   const createImage = useCallback(
@@ -470,7 +507,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const imgAgent = agents.some((a) => a.name === "assistant") ? "assistant" : sessionsRef.current[sessionId]?.agent
       if (!imgAgent) return
       setSessionAgent(sessionId, imgAgent)
-      setSuggestion(null)
       setFallbackOffer(null)
       setRateLimitOffer(null)
       const uid = `local-${Date.now()}`
@@ -532,7 +568,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   }, [clientRef])
 
   const resumeSession = useCallback(
-    async (slot: SlotId, sessionId: string, agent: string) => {
+    async (slot: SlotId, sessionId: string, agent: string, title?: string) => {
       const client = clientRef.current
       if (!client) return
       if (slotsRef.current[slot] === sessionId) return // already on it
@@ -543,15 +579,19 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         /* engine has no history → empty (still switch to the live session) */
       }
       perSessionRefs.current.set(sessionId, freshRefs())
+      // Prefer the title the caller already has from the session list (so the
+      // Code toolbar shows the real name, not the generic DEFAULT_TITLE); fall
+      // back to any prior state for this id, then the slot default.
       setSessions((prev) => ({
         ...prev,
-        [sessionId]: { id: sessionId, agent: validAgent(agent), title: prev[sessionId]?.title ?? DEFAULT_TITLE[slot], messages, busy: false },
+        [sessionId]: { id: sessionId, agent: validAgent(agent), title: title || prev[sessionId]?.title || DEFAULT_TITLE[slot], messages, busy: false },
       }))
       slotsRef.current = { ...slotsRef.current, [slot]: sessionId }
       setSlots((prev) => ({ ...prev, [slot]: sessionId }))
+      if (slot === "code") markCodeSession(sessionId) // remember it as a code session
       gcSessions() // forget the previous slot session (unless another slot uses it)
     },
-    [clientRef, gcSessions, validAgent],
+    [clientRef, gcSessions, validAgent, markCodeSession],
   )
 
   const newSession = useCallback(
@@ -561,8 +601,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const id = await client.createSession(DEFAULT_TITLE[slot])
       rebindSlot(slot, id, false) // fresh session → do not carry the old transcript
       setSessionAgent(id, validAgent(agent))
+      if (slot === "code") markCodeSession(id) // remember it as a code session
     },
-    [clientRef, rebindSlot, setSessionAgent, validAgent],
+    [clientRef, rebindSlot, setSessionAgent, validAgent, markCodeSession],
   )
 
   const deleteSession = useCallback(
@@ -581,9 +622,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           /* leave the slot; gcSessions below still forgets the dead id */
         }
       }
+      unmarkCodeSession(sessionId) // drop it from the code-session kind registry too
       gcSessions() // drop the deleted id from the client-side registry
     },
-    [clientRef, rebindSlot, gcSessions],
+    [clientRef, rebindSlot, gcSessions, unmarkCodeSession],
   )
 
   const renameSession = useCallback(
@@ -611,8 +653,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     renameSession,
     hasSession,
     setBusy,
-    suggestion,
-    setSuggestion,
+    codeSessionIds,
     fallbackToLocal,
     acceptOpenRouterSwitch,
   }

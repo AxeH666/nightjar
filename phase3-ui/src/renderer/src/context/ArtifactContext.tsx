@@ -34,6 +34,10 @@ interface ArtifactValue {
   liveCode: LiveCode | null
   // Mirror a coding-agent write/edit tool-call into the session sandbox + open the panel.
   onToolCall: (call: ToolCall, sessionID: string) => void
+  // Drop all live-preview state. Called on any underlying-session change this
+  // provider can't observe itself — notably a Code-tab session switch (CodeScreen);
+  // this provider sits above SessionsContext and so never sees the code slot's id.
+  resetPreview: () => void
 }
 
 const Ctx = createContext<ArtifactValue | null>(null)
@@ -64,16 +68,24 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     nonceTimer.current = setTimeout(() => setPreviewNonce(Date.now()), 300)
   }, [])
 
-  // New session (fresh connect or a reconnect) → drop any artifacts from the
-  // previous session so the panel never shows stale paths against the new (empty)
-  // sandbox.
-  useEffect(() => {
+  // Drop every trace of the previous session's live preview (panel open state,
+  // active entry, mirrored content, nonce, dedup map, and the artifact-session
+  // anchor) so the panel never shows stale paths against a new (empty) sandbox.
+  const resetPreview = useCallback(() => {
     setPanelOpen(false)
     setActiveEntry("")
     setLiveCode(null)
     setPreviewNonce(0)
     artifactSeen.current.clear()
-  }, [sessionID])
+    artifactSessionRef.current = ""
+  }, [])
+
+  // Fresh connect or a reconnect (new primary session id) → reset. A Code-tab
+  // session switch is NOT visible here (the code slot lives in SessionsContext,
+  // below this provider); CodeScreen calls resetPreview() directly for that.
+  useEffect(() => {
+    resetPreview()
+  }, [sessionID, resetPreview])
 
   const onToolCall = useCallback(
     (call: ToolCall, sid: string) => {
@@ -125,6 +137,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     previewNonce,
     liveCode,
     onToolCall,
+    resetPreview,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
