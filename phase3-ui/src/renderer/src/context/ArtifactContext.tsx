@@ -23,6 +23,7 @@ interface LiveCode {
   rel: string
   content: string
   streaming: boolean
+  callID: string // which write tool-call this preview belongs to (so a completion only clears ITS own streaming flag)
 }
 
 interface ArtifactValue {
@@ -132,13 +133,16 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
         // blind early-return would leave liveCode.streaming stuck true forever.
         // Clear the streaming flag on completion (do NOT re-run pv.write/pv.edit:
         // the write is idempotent but a re-edit would fail to re-match oldString).
-        if (!streaming) setLiveCode((lc) => (lc && lc.streaming ? { ...lc, streaming: false } : lc))
+        // Guard on callID: with overlapping tool calls, liveCode may already belong
+        // to a LATER, still-streaming write — an earlier call's terminal snapshot
+        // must not clear that one's flag.
+        if (!streaming) setLiveCode((lc) => (lc && lc.streaming && lc.callID === call.callID ? { ...lc, streaming: false } : lc))
         return
       }
       artifactSeen.current.set(call.callID, len)
       setPanelOpen(true)
       if (action.kind === "write") {
-        setLiveCode({ rel: action.filePath.split(/[\\/]/).pop() || action.filePath, content: action.content, streaming })
+        setLiveCode({ rel: action.filePath.split(/[\\/]/).pop() || action.filePath, content: action.content, streaming, callID: call.callID })
         pv.write(sid, action.filePath, action.content)
           .then(({ rel }) => {
             setActiveEntry((prev) => preferHtml(prev, rel))
