@@ -133,6 +133,7 @@ export function createNightjarOrbAdapter(
   let micStarting = false
   let ttsAudio: HTMLAudioElement | null = null
   let ttsUrl: string | null = null
+  let ttsPlayId = 0 // monotonic token — any teardown bumps it, invalidating an in-flight playTts load (B11)
 
   // ── side-channel connection ─────────────────────────────────────────────────
   let ws: WebSocket | null = null
@@ -185,6 +186,7 @@ export function createNightjarOrbAdapter(
 
   // ── tts playback ─────────────────────────────────────────────────────────────
   function teardownTts(): void {
+    ttsPlayId++ // invalidate any in-flight playTts load (from a newer playTts / enterListening / stop / disconnect) — B11
     ttsMonitor.stop()
     if (ttsAudio) {
       try {
@@ -218,13 +220,26 @@ export function createNightjarOrbAdapter(
     listeningTimer = clearTimer(listeningTimer)
     thinkingTimer = clearTimer(thinkingTimer)
     stopMic()
-    teardownTts()
+    teardownTts() // bumps ttsPlayId
+    const myId = ttsPlayId // capture AFTER teardown; a later teardown/playTts makes this run stale
     let url: string
     try {
       url = await loadTtsAudio(path)
     } catch (err) {
       console.warn("[nightjar-orb] could not load TTS audio:", err)
-      setState("idle")
+      if (myId === ttsPlayId) setState("idle") // only if we're still the active run
+      return
+    }
+    // Superseded while loading (a second 'ready' event, enterListening, stop, …) →
+    // discard this clip so it can't leak its URL or clobber the winning playback (B11).
+    if (myId !== ttsPlayId) {
+      if (url.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(url)
+        } catch {
+          /* noop */
+        }
+      }
       return
     }
     const audio = createAudioElement()
@@ -243,7 +258,7 @@ export function createNightjarOrbAdapter(
       await audio.play()
     } catch (err) {
       console.warn("[nightjar-orb] TTS playback failed:", err)
-      endTts("idle")
+      if (myId === ttsPlayId) endTts("idle") // don't let a superseded run tear down the winner
     }
   }
 

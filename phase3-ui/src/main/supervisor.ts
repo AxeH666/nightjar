@@ -4,7 +4,55 @@
 // main process imports it. Features: dependency-ordered start, adopt-if-already-
 // healthy (don't double-spawn), readiness gating, restart-on-crash with backoff,
 // periodic health checks, and clean process-group shutdown.
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, execFile, type ChildProcess } from "node:child_process"
+import { promisify } from "node:util"
+
+const execFileP = promisify(execFile)
+
+// Best-effort cross-platform "which PID is LISTENing on this local TCP port". Hard
+// 2s wall-clock cap (rule 3) so a blocked probe can never wedge a restart. Returns a
+// PID ONLY when EXACTLY ONE distinct listener is found — zero, or ambiguous (>1, as
+// `fuser` can emit) → undefined, and we never guess a kill target (rule-4 analogue).
+export async function pidOnPort(port: number): Promise<number | undefined> {
+  const opts = { timeout: 2000, windowsHide: true } as const
+  const run = async (cmd: string, args: string[]): Promise<string> => {
+    try {
+      const { stdout } = await execFileP(cmd, args, opts)
+      return stdout || ""
+    } catch (e: any) {
+      return (e?.stdout as string) || "" // some tools exit non-zero on no-match; keep partial stdout
+    }
+  }
+  const pids = new Set<number>()
+  const addAll = (out: string, re: RegExp) => {
+    for (const m of out.matchAll(re)) {
+      const n = Number(m[1])
+      if (Number.isInteger(n) && n > 0) pids.add(n)
+    }
+  }
+  if (process.platform === "win32") {
+    // rows: TCP  0.0.0.0:4096  0.0.0.0:0  LISTENING  1234
+    for (const line of (await run("netstat", ["-ano"])).split(/\r?\n/)) {
+      const cols = line.trim().split(/\s+/)
+      const local = cols[1] || ""
+      if (/LISTENING/i.test(line) && local.endsWith(`:${port}`)) {
+        const n = Number(cols[cols.length - 1])
+        if (Number.isInteger(n) && n > 0) pids.add(n)
+      }
+    }
+  } else if (process.platform === "darwin") {
+    addAll(await run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]), /(\d+)/g)
+  } else {
+    // linux: ss (modern), then lsof, then fuser (fuser can emit multiple pids).
+    for (const line of (await run("ss", ["-ltnpH"])).split(/\r?\n/)) {
+      const local = line.trim().split(/\s+/)[3] || "" // State Recv-Q Send-Q Local:Port Peer:Port Process
+      if (local.endsWith(`:${port}`)) addAll(line, /pid=(\d+)/g)
+    }
+    if (pids.size === 0) addAll(await run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]), /(\d+)/g)
+    if (pids.size === 0) addAll(await run("fuser", [`${port}/tcp`]), /(\d+)/g)
+  }
+  return pids.size === 1 ? [...pids][0] : undefined
+}
 
 export type ServiceState =
   | "pending" | "starting" | "healthy" | "unhealthy" | "restarting" | "stopped" | "failed" | "adopted"
@@ -19,6 +67,7 @@ export interface ServiceDef {
   readyTimeoutMs?: number // wait this long for first healthy after spawn (default 90s)
   autoRestart?: boolean // default true
   maxRestarts?: number // default 5
+  port?: number // the TCP port this service LISTENs on — enables PID capture on ADOPT (NJ-5)
 }
 
 export interface ServiceStatus {
@@ -37,6 +86,7 @@ interface Managed {
   intentionalStop: boolean
   healthTimer?: NodeJS.Timeout
   restartTimer?: NodeJS.Timeout // pending crash-restart backoff; tracked so stop()/restartService can cancel it
+  adoptedPid?: number // PID of an ADOPTED (not-spawned-by-us) process, so restartService can stop it (NJ-5)
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -75,7 +125,7 @@ export class Supervisor {
   private set(m: Managed, state: ServiceState, detail?: string) {
     m.status.state = state
     m.status.detail = detail
-    m.status.pid = m.child?.pid
+    m.status.pid = m.child?.pid ?? m.adoptedPid // show the adopted PID too (NJ-5)
     this.emit()
   }
 
@@ -88,6 +138,10 @@ export class Supervisor {
   private async bring(m: Managed): Promise<void> {
     // adopt if something is already answering the health probe on that port
     if (await m.def.ready()) {
+      // NJ-5: capture the adopted process's PID (via its declared port) so a later
+      // restartService (e.g. a BYOK key change) can stop + re-exec it under the new
+      // env — instead of bailing because we have no handle on it.
+      if (m.def.port) m.adoptedPid = await pidOnPort(m.def.port)
       this.set(m, "adopted", "already running — adopted, not spawned")
       this.beginHealthWatch(m)
       return
@@ -97,6 +151,7 @@ export class Supervisor {
 
   private async spawn(m: Managed): Promise<void> {
     m.intentionalStop = false
+    m.adoptedPid = undefined // we're spawning our OWN process now — no longer adopting
     this.set(m, "starting")
     const child = spawn(m.def.command, m.def.args, {
       cwd: m.def.cwd,
@@ -218,17 +273,54 @@ export class Supervisor {
       const freeBy = Date.now() + 6000
       while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
     } else if (await m.def.ready()) {
-      // Adopted/unmanaged process still holds the port and we have no PID to stop
-      // it. Respawning would only collide and let the stale process shadow the new
-      // env, so bail loudly and keep watching the process that is actually running.
-      this.set(
-        m,
-        "adopted",
-        "cannot apply change: opencode-serve is running unmanaged (adopted) and still holds its port — " +
-          "restart June (or stop that process) to pick up the API-key change",
-      )
-      this.beginHealthWatch(m)
-      return
+      // Adopted/unmanaged process still holds the port. NJ-5: stop it (SIGTERM →
+      // SIGKILL), wait for the port to free, then spawn our own under the new env.
+      // Re-query the CURRENT listener NOW rather than trusting the adopt-time PID —
+      // the adopted process may have been externally restarted (new PID) since adopt,
+      // and a stale PID could ESRCH or, if recycled, signal an innocent process (rule
+      // 4). pidOnPort returns undefined on 0/ambiguous, so we never guess a target.
+      // NOTE (rule 7): we signal ONLY the single main PID, never a `-group` we didn't
+      // create — so an adopted opencode-serve's MCP CHILDREN can be left orphaned when
+      // its parent dies (they're re-created by our fresh spawn). Group-killing an
+      // unowned session would be the more dangerous rule-4 violation; this is the
+      // documented tradeoff (see KNOWN_ISSUES NJ-5).
+      const pid = m.def.port ? await pidOnPort(m.def.port) : undefined
+      if (!pid) {
+        this.set(
+          m,
+          "adopted",
+          "cannot apply change: opencode-serve is running unmanaged (adopted) and still holds its port — " +
+            "restart June (or stop that process) to pick up the API-key change",
+        )
+        this.beginHealthWatch(m)
+        return
+      }
+      try {
+        process.kill(pid, "SIGTERM")
+      } catch {}
+      let freeBy = Date.now() + 4000
+      while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+      if (await m.def.ready()) {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {}
+        freeBy = Date.now() + 4000
+        while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+      }
+      m.adoptedPid = undefined
+      if (await m.def.ready()) {
+        // Still held (our kill didn't free it — wrong PID, or a peer respawned it) →
+        // don't collide; surface honestly.
+        this.set(
+          m,
+          "adopted",
+          `cannot apply change: the adopted process on port ${m.def.port} didn't release it — ` +
+            "restart June (or stop that process) to pick up the API-key change",
+        )
+        this.beginHealthWatch(m)
+        return
+      }
+      // Port freed → fall through to spawn our own under the new env.
     }
     m.status.restarts = 0
     await this.spawn(m)

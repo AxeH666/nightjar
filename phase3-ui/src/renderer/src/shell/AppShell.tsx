@@ -97,9 +97,18 @@ export function AppShell() {
       )}
 
       <main className="min-h-0 flex-1">
-        {tab === "chat" && <ChatScreen />}
-        {tab === "cowork" && <CoworkScreen />}
-        {tab === "code" && <CodeScreen />}
+        {/* All three tabs stay MOUNTED — visibility toggled via CSS — so switching
+            tabs never unmounts a screen and discards the composer draft (typed text +
+            attached files) or the Code tab's live-preview state (B10). */}
+        <div className={tab === "chat" ? "h-full" : "hidden"}>
+          <ChatScreen />
+        </div>
+        <div className={tab === "cowork" ? "h-full" : "hidden"}>
+          <CoworkScreen />
+        </div>
+        <div className={tab === "code" ? "h-full" : "hidden"}>
+          <CodeScreen />
+        </div>
       </main>
 
       {/* Global overlays — a permission ask (from ANY session) must sit above the
