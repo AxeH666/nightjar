@@ -43,6 +43,16 @@ export function artifactActionFromTool(call: ToolCall): ArtifactAction | null {
   return null
 }
 
+// A write/edit that ERRORED with no usable input — the local model overran its
+// output limit mid tool-call, so the arguments JSON truncated and no filePath/
+// content survived (NJ-8). Distinct from a no-destructive-write plugin rejection,
+// which carries a full filePath+content (artifactActionFromTool non-null). Lets the
+// UI show an actionable hint instead of a bare "error".
+export function isTruncatedWrite(call: ToolCall): boolean {
+  const t = (call.tool || "").toLowerCase()
+  return call.status === "error" && (t === "write" || t === "edit") && artifactActionFromTool(call) === null
+}
+
 // Is this relative path something the Preview tab can render? (html/svg/markdown —
 // markdown is rendered → HTML server-side.)
 export function isRenderable(rel: string): boolean {

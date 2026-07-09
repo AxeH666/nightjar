@@ -38,6 +38,10 @@ interface ArtifactValue {
   // provider can't observe itself — notably a Code-tab session switch (CodeScreen);
   // this provider sits above SessionsContext and so never sees the code slot's id.
   resetPreview: () => void
+  // Reset the preview ONLY when the code slot's session id actually changes. The
+  // "previous id" lives here (persistent provider), so a bare CodeScreen remount
+  // (Chat↔Code tab switch) with an unchanged id no longer wipes the panel.
+  syncCodeSession: (codeSessionId: string) => void
 }
 
 const Ctx = createContext<ArtifactValue | null>(null)
@@ -61,6 +65,10 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
   // set from the write path's sid) so a session change is detected synchronously
   // at mirror time — independent of the async `sessionID`-state reset effect below.
   const artifactSessionRef = useRef<string>("")
+  // The code slot's session id we last reset for. Persistent (this provider never
+  // unmounts on a tab switch), so CodeScreen can call syncCodeSession on every
+  // mount and we reset only on a real id change — not on a bare tab-switch remount.
+  const codeSessionRef = useRef<string>("")
   const nonceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const bumpNonce = useCallback(() => {
@@ -79,6 +87,19 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     artifactSeen.current.clear()
     artifactSessionRef.current = ""
   }, [])
+
+  // Reset iff the code slot's session id truly changed (new/resumed code session),
+  // never on a bare CodeScreen remount from a Chat↔Code tab switch (the bug my
+  // earlier per-mount resetPreview() introduced).
+  const syncCodeSession = useCallback(
+    (codeSessionId: string) => {
+      if (codeSessionId && codeSessionId !== codeSessionRef.current) {
+        codeSessionRef.current = codeSessionId
+        resetPreview()
+      }
+    },
+    [resetPreview],
+  )
 
   // Fresh connect or a reconnect (new primary session id) → reset. A Code-tab
   // session switch is NOT visible here (the code slot lives in SessionsContext,
@@ -104,9 +125,17 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
         artifactSeen.current.clear()
       }
       const len = action.kind === "write" ? action.content.length : action.newString.length
-      if (artifactSeen.current.get(call.callID) === len) return
-      artifactSeen.current.set(call.callID, len)
       const streaming = call.status !== "completed"
+      if (artifactSeen.current.get(call.callID) === len) {
+        // Same content already mirrored — but the tool's terminal `completed`
+        // snapshot often carries the SAME length as the last `running` one, so a
+        // blind early-return would leave liveCode.streaming stuck true forever.
+        // Clear the streaming flag on completion (do NOT re-run pv.write/pv.edit:
+        // the write is idempotent but a re-edit would fail to re-match oldString).
+        if (!streaming) setLiveCode((lc) => (lc && lc.streaming ? { ...lc, streaming: false } : lc))
+        return
+      }
+      artifactSeen.current.set(call.callID, len)
       setPanelOpen(true)
       if (action.kind === "write") {
         setLiveCode({ rel: action.filePath.split(/[\\/]/).pop() || action.filePath, content: action.content, streaming })
@@ -138,6 +167,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     liveCode,
     onToolCall,
     resetPreview,
+    syncCodeSession,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

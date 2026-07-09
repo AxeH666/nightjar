@@ -40,14 +40,27 @@ function tcpOpen(host: string, port: number, timeoutMs = 1500): Promise<boolean>
 
 export function nightjarServices(): ServiceDef[] {
   const ollamaBin = findOllama()
+  // NJ-8: opt-in "design profile" (NIGHTJAR_DESIGN_PROFILE=1) lifts the local
+  // model's output caps so a bigger single previewable artifact fits in one write.
+  // OFF by default — when off, every value below equals the prior hardcoded one, so
+  // behavior is unchanged (rule 3: never the global default). When on, the predict
+  // AND context caps AND the matching wall-clock timeouts all rise TOGETHER (a raised
+  // predict alone would just hit the old timeout), and each stays FINITE. The
+  // opencode-serve generation-cap plugin reads NIGHTJAR_MAX_OUTPUT_TOKENS, so it is
+  // lifted in lockstep below — otherwise it would re-clamp output back to 2048.
+  const DESIGN = /^(1|true|on)$/i.test(process.env.NIGHTJAR_DESIGN_PROFILE || "")
+  const PREDICT = DESIGN ? 6144 : 2048
+  const LCTX = DESIGN ? 16384 : 8192
+  const LLAMA_TIMEOUT = DESIGN ? 300 : 120
+  const PROXY_TIMEOUT_MS = DESIGN ? 300000 : 90000
   const services: ServiceDef[] = [
     {
       name: "llama-server",
       command: LLAMA_BIN,
       args: [
         "-m", MODEL, "--alias", "qwen3-4b-instruct-2507",
-        "--jinja", "-c", "8192", "--cache-type-k", "q8_0", "-ngl", "99",
-        "--predict", "2048", "--timeout", "120",
+        "--jinja", "-c", String(LCTX), "--cache-type-k", "q8_0", "-ngl", "99",
+        "--predict", String(PREDICT), "--timeout", String(LLAMA_TIMEOUT),
         "--host", "127.0.0.1", "--port", "8085",
       ],
       ready: () => httpOk("http://127.0.0.1:8085/health", (b) => b.includes("ok")),
@@ -57,7 +70,7 @@ export function nightjarServices(): ServiceDef[] {
       name: "inference-proxy",
       command: BUN,
       args: [join(REPO, "phase1-engine/inference-proxy.mjs")],
-      env: { NIGHTJAR_UPSTREAM: "http://127.0.0.1:8085", NIGHTJAR_PROXY_PORT: "8086", NIGHTJAR_INFERENCE_TIMEOUT_MS: "90000" },
+      env: { NIGHTJAR_UPSTREAM: "http://127.0.0.1:8085", NIGHTJAR_PROXY_PORT: "8086", NIGHTJAR_INFERENCE_TIMEOUT_MS: String(PROXY_TIMEOUT_MS) },
       ready: () => httpOk("http://127.0.0.1:8086/health"),
       readyTimeoutMs: 15000,
     },
@@ -69,7 +82,7 @@ export function nightjarServices(): ServiceDef[] {
       // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
       // config is portable (no hardcoded /home/<user>/...). Pass NIGHTJAR_ROOT
       // through so those substitutions resolve — the app needs no manual setup.
-      env: { NIGHTJAR_ROOT: REPO },
+      env: { NIGHTJAR_ROOT: REPO, ...(DESIGN ? { NIGHTJAR_MAX_OUTPUT_TOKENS: "6144" } : {}) },
       ready: () => httpOk("http://127.0.0.1:4096/agent"),
       readyTimeoutMs: 60000, // also spawns the MCP servers per opencode.json
     },
