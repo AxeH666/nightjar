@@ -5,10 +5,12 @@
 //    macOS Keychain / Windows DPAPI / Linux libsecret-or-kwallet). We store the
 //    encrypted bytes (base64) in userData/byok-keys.json — NEVER the plaintext.
 //  - If the OS keychain is unavailable (e.g. a headless box with no keyring),
-//    `safeStorage` falls back to a `basic_text` backend that is NOT real
-//    encryption. In that case we REFUSE to persist a key rather than write
-//    anything less than encrypted-at-rest. (A test-only override exists — see
-//    ALLOW_INSECURE — never enabled in production.)
+//    `safeStorage.encryptString` THROWS ("Encryption is not available") — it does
+//    NOT silently fall back to a weaker backend. In that case we REFUSE to persist a
+//    key rather than write anything less than encrypted-at-rest. (A test-only override
+//    exists — see ALLOW_INSECURE — which stores a base64-obfuscated key, bypassing
+//    safeStorage entirely, so the flow can be exercised without a keychain; never
+//    enabled in production.)
 //  - The renderer NEVER receives raw keys: it gets a masked/status list only.
 //    Decryption + injection into the engine happen here in the main process.
 //
@@ -67,6 +69,14 @@ function providerById(id: string): ByokProvider | undefined {
 // NEVER set in production — logged loudly when used.
 const ALLOW_INSECURE = process.env.NIGHTJAR_BYOK_ALLOW_INSECURE === "1"
 
+// Storage scheme tags so decrypt() knows how each entry was written: real safeStorage
+// ciphertext (ENC) vs the ALLOW_INSECURE base64 obfuscation (INSEC). The ":" is not in
+// the base64 alphabet, so a raw ciphertext string can never collide with these prefixes;
+// an entry written before the scheme tag existed is un-prefixed and read back as ENC
+// (legacy back-compat).
+const ENC_PREFIX = "enc:"
+const INSEC_PREFIX = "insec:"
+
 function storePath(): string {
   return join(app.getPath("userData"), "byok-keys.json")
 }
@@ -87,8 +97,8 @@ function writeStore(s: Record<string, string>): void {
 // + honest messaging), so it must not overstate safety:
 //  • "encrypted"   — real OS-keychain encryption is available.
 //  • "insecure"    — no keychain, but the NIGHTJAR_BYOK_ALLOW_INSECURE test hatch
-//                    is on, so setKey() will store via safeStorage's basic_text
-//                    obfuscation. NOT real encryption — test only.
+//                    is on, so setKey() stores the key with base64 obfuscation only
+//                    (safeStorage is bypassed — it would throw). NOT real encryption.
 //  • "unavailable" — no keychain and no hatch → saving is refused (never plaintext).
 export type KeyStorageMode = "encrypted" | "insecure" | "unavailable"
 
@@ -101,22 +111,31 @@ export function setKey(providerId: string, key: string): void {
   if (!providerById(providerId)) throw new Error(`unknown provider: ${providerId}`)
   const trimmed = key.trim()
   if (!trimmed) throw new Error("empty API key")
-  if (!safeStorage.isEncryptionAvailable() && !ALLOW_INSECURE) {
+  const canEncrypt = safeStorage.isEncryptionAvailable()
+  if (!canEncrypt && !ALLOW_INSECURE) {
     throw new Error(
       "OS secure storage (Keychain / DPAPI / libsecret) is unavailable on this machine — " +
         "refusing to store the API key as anything less than encrypted-at-rest. " +
         "Enable a system keyring (gnome-keyring / KWallet) or run on macOS/Windows.",
     )
   }
-  if (!safeStorage.isEncryptionAvailable() && ALLOW_INSECURE) {
-    console.warn(
-      "[byok] ⚠️  NIGHTJAR_BYOK_ALLOW_INSECURE=1 and no OS keychain — storing via the " +
-        "safeStorage basic_text fallback, which is NOT real encryption. TEST ONLY.",
-    )
-  }
-  const encrypted = safeStorage.encryptString(trimmed) // real cipher on keychain OSes
   const s = readStore()
-  s[providerId] = encrypted.toString("base64")
+  if (canEncrypt) {
+    // Real OS-keychain cipher (macOS Keychain / Windows DPAPI / Linux keyring).
+    s[providerId] = ENC_PREFIX + safeStorage.encryptString(trimmed).toString("base64")
+  } else {
+    // ALLOW_INSECURE && no keychain. safeStorage.encryptString THROWS here
+    // ("Encryption is not available") — it does NOT silently fall back to basic_text on
+    // a box with no OS keyring (calling it unconditionally was the regression that made
+    // the test hatch unusable). So store the key ITSELF with a weak, clearly-labeled
+    // base64 obfuscation (NOT encryption), tagged INSEC_PREFIX so decrypt() never routes
+    // it back through safeStorage.decryptString (which would also throw).
+    console.warn(
+      "[byok] ⚠️  NIGHTJAR_BYOK_ALLOW_INSECURE=1 and no OS keychain — storing the key with " +
+        "base64 obfuscation only, which is NOT real encryption. TEST ONLY; do not store real keys.",
+    )
+    s[providerId] = INSEC_PREFIX + Buffer.from(trimmed, "utf8").toString("base64")
+  }
   writeStore(s)
 }
 
@@ -128,8 +147,15 @@ export function removeKey(providerId: string): void {
   }
 }
 
-function decrypt(b64: string): string | null {
+function decrypt(stored: string): string | null {
   try {
+    if (stored.startsWith(INSEC_PREFIX)) {
+      // ALLOW_INSECURE test-hatch obfuscation (base64, not real encryption) — decode
+      // directly, WITHOUT safeStorage (which would throw on a keychain-less box).
+      return Buffer.from(stored.slice(INSEC_PREFIX.length), "base64").toString("utf8")
+    }
+    // ENC_PREFIX, or a legacy un-prefixed entry from before the scheme tag → real cipher.
+    const b64 = stored.startsWith(ENC_PREFIX) ? stored.slice(ENC_PREFIX.length) : stored
     return safeStorage.decryptString(Buffer.from(b64, "base64"))
   } catch {
     return null
