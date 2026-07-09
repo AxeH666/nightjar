@@ -9,12 +9,14 @@
 import { useEffect } from "react"
 import { useSessions } from "../context/SessionsContext"
 import { useArtifact } from "../context/ArtifactContext"
+import { usePermission } from "../context/PermissionContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { ArtifactPanel } from "../components/ArtifactPanel"
 import { SessionList } from "../components/code/SessionList"
 
 export function CodeScreen() {
   const { slots, sessions, messagesOf, busyOf, send, createImage } = useSessions()
+  const { abortSession } = usePermission()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, syncCodeSession } = useArtifact()
   const id = slots.code
   const title = sessions[id]?.title ?? "Coding session"
@@ -58,6 +60,7 @@ export function CodeScreen() {
               busy={busyOf(id)}
               onSend={(text, { attachments }) => send(id, text, { agent: "coding", attachments })}
               onCreateImage={(prompt) => createImage(id, prompt)}
+              onStop={() => abortSession(id)}
               menu={{ research: false, webSearch: false, createImage: false }}
               emptyHint="Describe what to build — the coding agent writes files, previewed here."
               placeholder="Message the coding agent…  (Enter to send · paste or drop files)"

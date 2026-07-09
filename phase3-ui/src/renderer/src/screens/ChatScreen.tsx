@@ -3,10 +3,12 @@
 // composer's "+" menu that resolves to the research agent at send time (explicit,
 // not AI-guessed). Bound to the chat session slot.
 import { useSessions } from "../context/SessionsContext"
+import { usePermission } from "../context/PermissionContext"
 import { ChatSurface } from "../components/ChatSurface"
 
 export function ChatScreen() {
   const { slots, messagesOf, busyOf, send, createImage } = useSessions()
+  const { abortSession } = usePermission()
   const id = slots.chat
 
   return (
@@ -17,6 +19,7 @@ export function ChatScreen() {
         send(id, text, { agent: research ? "research" : "assistant", attachments })
       }
       onCreateImage={(prompt) => createImage(id, prompt)}
+      onStop={() => abortSession(id)}
       menu={{ research: true, webSearch: true, createImage: true }}
     />
   )

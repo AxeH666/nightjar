@@ -150,11 +150,17 @@ export class OpenCodeClient {
   }
 
   async abort(sessionID: string): Promise<void> {
+    // rule 3: a POST to a wedged/unreachable engine must not hang the Stop control
+    // forever — bound it so the caller's catch runs (busy stays true → Stop stays).
     const res = await fetch(this.url(`/session/${sessionID}/abort`), {
       method: "POST",
       headers: this.headers(),
+      signal: AbortSignal.timeout(10000),
     })
-    if (!res.ok) throw new Error(`POST abort → ${res.status}`)
+    // 404 = the session no longer exists server-side → nothing left to interrupt;
+    // treat as done so the caller clears busy (no soft-wedge). Other failures
+    // (5xx / network / timeout) still throw → busy stays true, Stop stays.
+    if (!res.ok && res.status !== 404) throw new Error(`POST abort → ${res.status}`)
   }
 
   // List all sessions (server returns most-recently-updated first). GET /session.

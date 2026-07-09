@@ -117,6 +117,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
           const list = await client.listAgents()
           setAgents(list)
           const sid = await client.createSession("June session")
+          // NJ-4 hardening (A): a reconnect fired mid-init (e.g. a BYOK key set during
+          // a slow cold model load) aborts this run's signal. Bail before publishing
+          // the session id, so a superseded run can't transiently flip primaryId to a
+          // session it will never subscribe to (the newer run owns the connection).
+          if (ac.signal.aborted) return
           sessionRef.current = sid
           setSessionID(sid) // triggers the per-session artifact reset in ArtifactContext
           setStatus(`connected · ${cfg.opencodeUrl}`)

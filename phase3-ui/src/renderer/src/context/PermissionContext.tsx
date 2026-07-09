@@ -11,7 +11,7 @@
 // Extracted from the former App.tsx monolith (redesign Stage 2); generalized to
 // multi-session in Stage 4 (the ask carries its own sessionID, so abort targets
 // that session, not a single global one).
-import { createContext, useCallback, useContext, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import type { OpenCodeEvent, PermissionAsk, ReplyKind } from "../lib/opencode"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
@@ -21,6 +21,10 @@ interface PermissionValue {
   ask: PermissionAsk | null
   reply: (kind: ReplyKind) => Promise<void>
   abort: () => Promise<void>
+  // Abort a specific session — backs the persistent per-session Stop control (NJ-10),
+  // so a session that's still running/paused (even with no ask shown) is always
+  // interruptible. Keeps busy TRUE on a failed abort so Stop stays available.
+  abortSession: (sessionID: string) => Promise<void>
 }
 
 const Ctx = createContext<PermissionValue | null>(null)
@@ -33,7 +37,7 @@ export function usePermission(): PermissionValue {
 
 export function PermissionProvider({ children }: { children: ReactNode }) {
   const { clientRef, setStatus } = useConnection()
-  const { hasSession, setBusy } = useSessions()
+  const { hasSession, setBusy, sessions } = useSessions()
   // A QUEUE, not a single ask: with multiple sessions (chat + code) two asks can
   // be outstanding at once. A single slot would let the second overwrite the
   // first, leaving the earlier session's request unanswerable (never replied or
@@ -55,7 +59,10 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
         // Surface an ask from ANY of our sessions (chat or code), even one whose
         // tab isn't active — it blocks that session's agent loop indefinitely.
         if (sid && hasSession(sid)) {
-          const a = p as PermissionAsk
+          // Normalize sessionID to the resolved `sid` (the raw event may carry it
+          // nested under info/part), so abortSession(cur.sessionID) and the prune
+          // effect always see a valid id — never undefined.
+          const a = { ...(p as PermissionAsk), sessionID: sid }
           setQueue((q) => (q.some((x) => x.id === a.id) ? q : [...q, a]))
         }
         break
@@ -103,22 +110,50 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
     [queue, clientRef, setStatus, requeueIfPending],
   )
 
-  const abort = useCallback(async () => {
-    const client = clientRef.current
-    const cur = queue[0]
-    if (!cur) return
-    setQueue((q) => q.filter((x) => x.id !== cur.id))
-    if (cur.sessionID) setBusy(cur.sessionID, false)
-    // Unlike reply, abort does NOT re-surface the ask on a failed POST. Aborting a
-    // session resolves its pending permission WITHOUT a permission.replied event
-    // (the server cancels the fiber + silently deletes the pending permission), so
-    // repliedIds can never detect an abort lost-ACK — re-surfacing would risk a
-    // zombie ask for an already-aborted session that masks a live cross-session ask.
-    // abort already cleared busy above, so a failed abort leaves the composer usable
-    // (no hard wedge); a genuinely-undelivered abort is a rare, milder residual.
-    if (client && cur.sessionID) await client.abort(cur.sessionID).catch((err) => setStatus(`abort failed: ${err}`))
-  }, [queue, clientRef, setBusy, setStatus])
+  // Abort a specific session — the persistent per-session Stop control (NJ-10) and
+  // the PermissionPanel's Abort both funnel here (ONE path to verify, rule 6).
+  // Cancels the session server-side and drops ALL its queued asks (an aborted
+  // permission resolves with NO permission.replied event, so nothing else would
+  // clear them, and re-surfacing would risk a zombie for an already-aborted session
+  // masking a live cross-session ask). On a FAILED POST it deliberately leaves busy
+  // TRUE, so the Stop control stays visible + re-clickable — busy now honestly means
+  // "still running/paused server-side" rather than being cleared optimistically.
+  const abortSession = useCallback(
+    async (sessionID: string) => {
+      if (!sessionID) return
+      setQueue((q) => q.filter((x) => x.sessionID !== sessionID))
+      const client = clientRef.current
+      if (!client) return
+      try {
+        await client.abort(sessionID)
+        setBusy(sessionID, false) // clear busy ONLY on a confirmed abort
+      } catch (err) {
+        setStatus(`abort failed: ${err}`) // leave busy TRUE → Stop stays (NJ-10)
+      }
+    },
+    [clientRef, setBusy, setStatus],
+  )
 
-  const value: PermissionValue = { ask, reply, abort }
+  // PermissionPanel's Abort button aborts the ASKING session via the shared path.
+  const abort = useCallback(async () => {
+    const cur = queue[0]
+    if (cur?.sessionID) await abortSession(cur.sessionID)
+  }, [queue, abortSession])
+
+  // NJ-4 hardening (B): a reconnect / slot-switch replaces + GC's sessions, so a
+  // queued ask for a now-gone session is a phantom (unanswerable — reply 404s and
+  // requeueIfPending won't re-surface it). Drop such asks when the session registry
+  // changes. Keyed on the live session set + hasSession (perSessionRefs), and
+  // returns the SAME queue reference when nothing is stale — so it NEVER drops a
+  // still-valid ask and never churns a render. (rule 1: only ever removes asks whose
+  // session genuinely no longer exists.)
+  useEffect(() => {
+    setQueue((q) => {
+      const next = q.filter((x) => hasSession(x.sessionID))
+      return next.length === q.length ? q : next
+    })
+  }, [sessions, hasSession])
+
+  const value: PermissionValue = { ask, reply, abort, abortSession }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
