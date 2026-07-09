@@ -36,10 +36,18 @@ with the observed result.
 
 ## 🔧 FIX IMPLEMENTED — RUNTIME/HARDWARE VERIFY PENDING
 
-_All items below were code-wired in the Phase 0–6 pass (PRs #29–#35). They stay here (not
-in ✅ RESOLVED) until re-triggered on a live stack per the checklist above + CLAUDE.md rule 6.
-The only genuinely un-fixed remainder is **NJ-11 / B3** (the server-side diffusion wall-clock
-cap), a GPU-only follow-up._
+_All items below were code-wired in the Phase 0–6 pass (PRs #29–#35), plus a post-merge
+audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an independent
+13-agent audit of the merged code). They stay here (not in ✅ RESOLVED) until re-triggered
+on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
+remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
+
+## NJ-12 — supervisor: a service that misses its readiness window is frozen "unhealthy" and never re-probed, silently defeating the NJ-6 local-first image fallback — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
+- **Severity:** medium — surfaced by the **post-merge independent audit** of the Phase 0–6 work (a control-flow gap confirmed by code read, not a live repro). GPU-only manifestation, silent, self-heals on app restart.
+- **Symptom:** on a machine where the local diffusion sidecar's ~6GB cold GPU load exceeds `readyTimeoutMs` (180s — contended/cold GPU or slow disk), image generation stays pinned to the **cloud/BYOK** endpoint (or none) even though a fully-working local model is up and serving on :8100 — the exact offline local-first guarantee NJ-6 was built to protect.
+- **Root cause:** in `phase3-ui/src/main/supervisor.ts` `spawn()`, the readiness loop's **timeout path** set the service `"unhealthy"` and returned **without** starting any probe. `beginHealthWatch` — the only thing that flips `unhealthy → healthy` — was reached only from the healthy-within-timeout path, the adopt path, and `restartService` (never invoked for `diffusion-server`; only `opencode-serve` is restarted). So once the model finished loading and began serving, nothing re-probed it: its state stayed `unhealthy` indefinitely, the supervisor status callback's `diffHealthy` never went false→true, and the NJ-6 transition reconcile (`index.ts`) never fired. The `index.ts` comment even explicitly *promised* to cover "a slow ~6GB cold load finishing past the readyTimeout" — the one case it did not.
+- **Fix (PR #37):** the timeout path now starts a new **`beginRecoveryWatch(m)`** — a *passive* recovery probe that flips `unhealthy → healthy` once the service finally answers, then hands off to `beginHealthWatch`. It deliberately does **not** kill/restart on continued misses (unlike `beginHealthWatch`, whose 3-miss SIGKILL would restart the slow load from scratch → a doom loop): the process is alive and may just need more time, and the child's own `--timeout` + its `exit` handler still own the crash-restart (rule 3). It re-checks its guards after each `await` so a `stop()`/`restartService` landing mid-probe is not clobbered, and shares the `healthTimer` slot so both cancel it. General by design — **any** slow-loading managed service now self-heals after a readiness timeout instead of freezing.
+- **To close (rule 6):** on a real **GPU box** where the Z-Image-Turbo cold load exceeds 180s (or force it by lowering the diffusion `readyTimeoutMs`), confirm the sidecar recovers to `healthy` once it starts serving and image gen switches from cloud back to **local** with no app restart.
 
 ## NJ-11 — image endpoint: seeded model was pinned but the resolver probed anyway; local diffusion server has no per-generation wall-clock cap — B13 FIXED / B3 OPEN 2026-07-09
 - **Severity:** low — surfaced while wiring the NJ-6 local-first image backend.
@@ -60,7 +68,8 @@ cap), a GPU-only follow-up._
   of the local diffusion backend (it's GPU-only code — can't be exercised headless, per rule 6).
 
 ## NJ-10 — permission: a genuinely-undelivered abort leaves no in-UI re-abort control (rare) — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
-- **Resolution (PR #31, Phase 2):** a persistent per-session **Stop** control in the composer, backed by `abortSession(id)` in `PermissionContext` — a still-running/paused session is always interruptible even with no ask shown; on a failed abort `busy` stays true so Stop remains, and `client.abort()` is 10s-bounded (a 404 = already gone → clears). **To close (rule 6):** drive a coding edit so the ask fires, simulate a dropped abort, confirm the ask clears, `busy` stays, and the red **Stop** stays clickable.
+- **Resolution (PR #31, Phase 2):** a persistent per-session **Stop** control in the composer, backed by `abortSession(id)` in `PermissionContext` — the session you are **viewing** is always interruptible even with no ask shown; on a failed abort `busy` stays true so Stop remains, and `client.abort()` is 10s-bounded (a 404 = already gone → clears). **To close (rule 6):** drive a coding edit so the ask fires, simulate a dropped abort, confirm the ask clears, `busy` stays, and the red **Stop** stays clickable.
+- **Caveat (audit, not a regression):** the Stop control lives inside each tab's `ChatSurface`, so it renders for the session you are **viewing** but not for a **background** tab's session (its screen is `display:none`). A background session running with no pending ask therefore can't be stopped without switching to its tab — the global permission **Abort** still surfaces for any background *ask*, so only a running-with-no-ask background session is affected. Session-scoped by design (each Stop calls `abortSession(id)` for its own slot); left as-is. Revisit if a global "stop any running session" affordance is wanted.
 - **Severity:** low — only on an actual `POST /session/:id/abort` failure (uncommon
   against the loopback engine), and it does **not** hard-wedge (the composer stays
   usable because `abort()` clears the session's `busy` before the POST).
@@ -191,6 +200,7 @@ cap), a GPU-only follow-up._
 
 ## NJ-5 — BYOK key change can't be applied to an *adopted* opencode-serve — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
 - **Resolution (PR #35, Phase 6):** the supervisor now **captures the external PID at adoption** via a cross-platform `pidOnPort()` (linux `ss`→`lsof`→`fuser`, darwin `lsof`, win32 `netstat`; `execFile` with a 2s timeout + `windowsHide` per rule 3), returning a PID **only when exactly one distinct listener is found** (rule 4 — never an ambiguous kill target). `restartService()`'s adopted branch **re-queries the current listener at restart time** (no stale PID), then SIGTERM→wait→SIGKILL→wait→bail-if-still-held, else re-spawns with the new `NIGHTJAR_BYOK_*` env — so a BYOK change now applies to an adopted engine. **Known tradeoff (rule 7):** restarting an adopted engine we didn't spawn can orphan MCP children it started; documented inline in `supervisor.ts` + the PR. **To close (rule 6):** leave a stray `opencode serve` on :4096, start June, change a BYOK key → confirm the adopted engine restarts and the new key takes effect.
+- **Hardening (PR #37, audit):** the adopted-restart SIGKILL now **re-queries `pidOnPort` immediately before killing** and fires only if the port's sole listener is **still the same PID** — closing a narrow window where an external respawn + OS PID-recycle during the SIGTERM wait could have signalled an innocent process (rule 4). If the PID changed, it skips the kill and the honest "didn't release" surface reports instead.
 - **Severity:** low — only affects the adopt path (a `opencode serve` already on
   :4096 when Nightjar starts, e.g. a leftover/dev instance); the normal path
   where Nightjar spawns the engine is unaffected.
@@ -234,9 +244,16 @@ cap), a GPU-only follow-up._
   never double-connects.
 - **Hardening (PR #31, Phase 2):** the multi-session refactor added a **superseded-run guard**
   so a reconnect that fires after a newer session/subscription has taken over cannot deliver
-  stale SSE events into the live session (plus the stale-ask prune in `PermissionContext`), and
-  `gcSessions` won't abort a still-busy session mid-reconnect. Reconnect is now covered on **both**
-  the BYOK-restart and the crash-restart paths.
+  stale SSE events into the live session, plus the stale-ask prune in `PermissionContext`.
+  Reconnect is now covered on **both** the BYOK-restart and the crash-restart paths.
+- **Correction + hardening (PR #37):** an earlier version of this entry claimed "`gcSessions`
+  won't abort a still-busy session" — that was **backwards**. B9 (`SessionsContext.tsx`)
+  *deliberately* aborts a still-busy **unbound** session before forgetting it, so a mid-turn
+  session dropped by a slot rebind can't wedge un-droppable server-side (it has no Stop control
+  once unbound). That behavior is correct; the doc line was stale. The audit also found B9 read
+  "busy" only from the `sessionsRef` mirror (which can lag a send by one flush) while its sibling
+  B3 reap uses a synchronous `lastSent` belt — B9 now uses the **same belt**, so a session GC'd in
+  the same tick it sent is still aborted, not forgotten mid-turn.
 - **Verification:** ⚠️ **PENDING** — implemented in a headless env with no reachable
   opencode-serve, so the actual kill-engine → auto-resubscribe → working-prompt path was
   NOT driven end-to-end (CLAUDE.md rule 6). Drive it on a live stack before moving this to

@@ -205,6 +205,41 @@ export class Supervisor {
       await sleep(1000)
     }
     this.set(m, "unhealthy", "did not become healthy within timeout")
+    // NJ-12: a service can miss its readiness window yet still be legitimately
+    // loading — diffusion-server's ~6GB cold GPU load can exceed readyTimeoutMs on a
+    // contended/cold GPU. Without a probe here it stays "unhealthy" forever even once
+    // it actually starts serving, silently defeating anything gated on its health (the
+    // NJ-6 local-first image reconcile keys on the diffusion-server healthy transition,
+    // so image gen would stay pinned to cloud while a working local model is up). Start
+    // a PASSIVE recovery probe that only flips unhealthy→healthy once it finally
+    // answers. It deliberately does NOT kill/restart on continued misses (unlike
+    // beginHealthWatch): the process is alive and may just need more time, and killing
+    // it would restart the slow load from scratch — a doom loop. Rule 3 still holds: the
+    // child has its own wall-clock --timeout, and its 'exit' owns the crash-restart.
+    this.beginRecoveryWatch(m)
+  }
+
+  // NJ-12: passive recovery probe for a service that missed its readiness window but is
+  // still alive (slow cold load). Flips it to healthy once it answers, then hands off to
+  // beginHealthWatch. NEVER kills the child (the crash-restart path, driven by the child
+  // 'exit' event, owns that) so it cannot doom-loop a slow loader. Uses the shared
+  // healthTimer slot so stop()/restartService cancel it too. Self-cancels once the
+  // service leaves "unhealthy", the child exits, or a stop lands — and re-checks those
+  // guards AFTER the await so a restart/stop that landed mid-probe is not clobbered.
+  private beginRecoveryWatch(m: Managed) {
+    if (m.healthTimer) clearInterval(m.healthTimer)
+    m.healthTimer = setInterval(async () => {
+      if (m.intentionalStop || m.status.state !== "unhealthy" || !m.child) {
+        if (m.healthTimer) clearInterval(m.healthTimer)
+        m.healthTimer = undefined
+        return
+      }
+      if (await m.def.ready()) {
+        if (m.intentionalStop || m.status.state !== "unhealthy" || !m.child) return
+        this.set(m, "healthy")
+        this.beginHealthWatch(m) // hand off to the normal liveness probe (clears this timer first)
+      }
+    }, 5000)
   }
 
   // Periodic liveness probe; a healthy service that fails repeatedly is restarted.
@@ -306,11 +341,20 @@ export class Supervisor {
       let freeBy = Date.now() + 4000
       while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
       if (await m.def.ready()) {
-        try {
-          process.kill(pid, "SIGKILL")
-        } catch {}
-        freeBy = Date.now() + 4000
-        while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+        // NJ-5 hardening (rule 4): re-query the listener immediately before SIGKILL
+        // rather than reusing the pre-SIGTERM PID. If an external supervisor respawned
+        // the process during the up-to-4s SIGTERM wait AND the OS recycled the PID, the
+        // stale PID could name an innocent process. Only SIGKILL when the port's sole
+        // listener is STILL the same PID; otherwise skip — the "didn't release" surface
+        // below then reports honestly instead of us killing the wrong target.
+        const still = m.def.port ? await pidOnPort(m.def.port) : pid
+        if (still === pid) {
+          try {
+            process.kill(pid, "SIGKILL")
+          } catch {}
+          freeBy = Date.now() + 4000
+          while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+        }
       }
       m.adoptedPid = undefined
       if (await m.def.ready()) {
