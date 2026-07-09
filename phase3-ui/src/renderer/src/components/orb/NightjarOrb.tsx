@@ -61,7 +61,12 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
           {LABELS[state] ?? state}
         </span>
       </div>
-      <VortexOverlay state={state} volume={volume} active={state !== "idle"} />
+      {/* The full-screen overlay takes over only during a REAL voice turn
+          (connecting/listening/speaking). "error" ("voice offline", e.g. the
+          side-channel dropped) is a PASSIVE background status — surfaced by the
+          header mini-orb's color — and must NOT open the input-capturing overlay,
+          which would otherwise block the entire app until voice reconnects. */}
+      <VortexOverlay state={state} volume={volume} active={state !== "idle" && state !== "error"} />
     </>
   )
 }

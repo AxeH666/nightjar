@@ -88,20 +88,35 @@ export async function pullVisionModel(
   model = VISION_MODEL,
   host = OLLAMA_HOST,
 ): Promise<boolean> {
+  // rule 3: a multi-GB pull is legitimately long, so a fixed wall-clock cap is
+  // wrong — but a STALLED stream (Ollama wedged, socket open, bytes stop) must not
+  // hang forever. Guard with an idle timeout reset on every received chunk: no
+  // progress for PULL_IDLE_MS → abort the read so the caller returns false instead
+  // of blocking the vision subsystem indefinitely.
+  const PULL_IDLE_MS = 60000
+  const ac = new AbortController()
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
+  const resetIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => ac.abort(), PULL_IDLE_MS)
+  }
   try {
     const r = await fetch(`${host}/api/pull`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model, stream: true }),
+      signal: ac.signal,
     })
     if (!r.ok || !r.body) return false
     const reader = r.body.getReader()
     const dec = new TextDecoder()
     let buf = ""
     let sawError = false
+    resetIdle()
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
+      resetIdle()
       buf += dec.decode(value, { stream: true })
       let idx: number
       while ((idx = buf.indexOf("\n")) !== -1) {
@@ -125,5 +140,7 @@ export async function pullVisionModel(
     return !sawError && (await hasVisionModel(model, host))
   } catch {
     return false
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer)
   }
 }
