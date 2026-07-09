@@ -243,7 +243,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         // keep running on the engine and, on any permission.asked it later emits, be
         // undroppable — hasSession(id) is now false, and it has no Stop control. Cancel
         // it server-side before forgetting so it can't wedge unanswerable.
-        if (client && sessionsRef.current[id]?.busy) client.abort(id).catch(() => {})
+        // Synchronous belt (audit; mirrors the B3 reap at ~L498): sessionsRef.busy can
+        // lag a send by one flush, so also treat a synchronously-set lastSent as busy —
+        // otherwise a session GC'd in the same tick it sent (before busy flushes into
+        // sessionsRef) would be forgotten un-aborted, the exact wedge B9 prevents. An
+        // extra abort of an already-idle unbound session is a harmless server-side no-op.
+        const busy = sessionsRef.current[id]?.busy || !!perSessionRefs.current.get(id)?.lastSent
+        if (client && busy) client.abort(id).catch(() => {})
         perSessionRefs.current.delete(id)
       }
     }
