@@ -229,8 +229,16 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // which callers update synchronously *before* calling this.
   const gcSessions = useCallback(() => {
     const bound = new Set(Object.values(slotsRef.current).filter(Boolean))
+    const client = clientRef.current
     for (const id of Array.from(perSessionRefs.current.keys())) {
-      if (!bound.has(id)) perSessionRefs.current.delete(id)
+      if (!bound.has(id)) {
+        // B9: a session we're about to FORGET but that's still mid-turn (busy) would
+        // keep running on the engine and, on any permission.asked it later emits, be
+        // undroppable — hasSession(id) is now false, and it has no Stop control. Cancel
+        // it server-side before forgetting so it can't wedge unanswerable.
+        if (client && sessionsRef.current[id]?.busy) client.abort(id).catch(() => {})
+        perSessionRefs.current.delete(id)
+      }
     }
     setSessions((prev) => {
       let changed = false
@@ -421,10 +429,22 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       for (;;) {
         if (cancelled) return
         try {
+          // B3: snapshot whether the CURRENT code session was ever used, so we can
+          // reap it below if not — otherwise every reconnect (BYOK change, SSE drop,
+          // crash-restart) leaves an empty "June coding" session behind, cluttering
+          // the Code list and growing nightjar.codeSessionIds without bound.
+          const prevCodeId = slotsRef.current.code
+          const prevEmpty = !prevCodeId || (sessionsRef.current[prevCodeId]?.messages.length ?? 0) === 0
           const codeId = await client.createSession(DEFAULT_TITLE.code)
           if (!cancelled) {
-            rebindSlot("code", codeId, true)
+            rebindSlot("code", codeId, true) // carries the old transcript into the new session
             markCodeSession(codeId)
+            // Delete the prior code session ONLY if it was empty (a real in-progress
+            // coding conversation is preserved + resumable).
+            if (prevCodeId && prevCodeId !== codeId && prevEmpty) {
+              unmarkCodeSession(prevCodeId)
+              client.deleteSession(prevCodeId).catch(() => {})
+            }
           }
           return
         } catch {
@@ -435,7 +455,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [primaryId, clientRef, rebindSlot, markCodeSession])
+  }, [primaryId, clientRef, rebindSlot, markCodeSession, unmarkCodeSession])
 
   // Validate every session's agent against the live agent list (Bugbot: default
   // agent init removed + the ported #21 mode-revalidation). DEFAULT_AGENT

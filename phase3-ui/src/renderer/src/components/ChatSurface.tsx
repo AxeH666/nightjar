@@ -32,6 +32,7 @@ export function ChatSurface({
   busy,
   onSend,
   onCreateImage,
+  onStop,
   menu = DEFAULT_MENU,
   emptyHint = "Ask June something.",
   placeholder = "Message June…  (Enter to send · paste or drop files)",
@@ -41,6 +42,7 @@ export function ChatSurface({
   busy: boolean
   onSend: (text: string, opts: SendOpts) => void
   onCreateImage: (prompt: string) => void
+  onStop?: () => void
   menu?: { research: boolean; webSearch: boolean; createImage: boolean }
   emptyHint?: string
   placeholder?: string
@@ -209,13 +211,23 @@ export function ChatSurface({
             placeholder={createMode ? "Describe the image to create…" : placeholder}
             className="max-h-40 flex-1 resize-none rounded-lg bg-nightjar-surface px-3 py-2 text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
           />
-          <button
-            onClick={submit}
-            disabled={!canSend}
-            className="rounded-lg bg-nightjar-accent px-4 py-2 font-medium text-nightjar-base disabled:opacity-40 hover:brightness-110"
-          >
-            {createMode ? "Create" : "Send"}
-          </button>
+          {busy && onStop ? (
+            <button
+              onClick={onStop}
+              title="Stop — interrupt this session"
+              className="rounded-lg border border-nightjar-alert bg-nightjar-alert/15 px-4 py-2 font-medium text-nightjar-alert hover:bg-nightjar-alert/25"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              disabled={!canSend}
+              className="rounded-lg bg-nightjar-accent px-4 py-2 font-medium text-nightjar-base disabled:opacity-40 hover:brightness-110"
+            >
+              {createMode ? "Create" : "Send"}
+            </button>
+          )}
         </div>
       </div>
     </div>
