@@ -46,7 +46,7 @@ interface RefBundle {
   lastModel: string // the model the last send used → recovery judged on it, not global (B4)
   // NJ-7: track a Create-Image turn so we can retry ONCE with a stronger directive if
   // the (small local) model finishes the turn without ever calling generate_image.
-  imageGen?: { prompt: string; agent: string; model: string; retried: boolean; sawTool: boolean }
+  imageGen?: { prompt: string; agent: string; model: string; retried: boolean; sawTool: boolean; lastIdleAt?: number }
 }
 const freshRefs = (): RefBundle => ({
   textParts: new Map(),
@@ -414,7 +414,15 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         // retry ONCE with a stronger directive; on the second miss, stop (bounded by
         // `retried` — no loop, rule-3 spirit) and surface a non-silent message.
         const ig = refs.imageGen
-        if (ig?.sawTool) {
+        // Coalesce DUPLICATE idle events for one turn (the server can emit both
+        // turn.idle AND session.idle): without this, the second event would advance
+        // the one-shot state machine again (dispatch-then-immediately-give-up). A real
+        // retry turn's idle arrives seconds later, well past this window.
+        const dupeIdle = ig?.lastIdleAt !== undefined && Date.now() - ig.lastIdleAt < 800
+        if (ig && !dupeIdle) ig.lastIdleAt = Date.now()
+        if (dupeIdle) {
+          // ignore the duplicate
+        } else if (ig?.sawTool) {
           refs.imageGen = undefined // success → done
         } else if (ig && !ig.retried) {
           ig.retried = true
@@ -594,6 +602,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const directive = `Use the generate_image tool to create an image now. Image description: "${prompt}". Call the tool immediately; do not ask follow-up questions.`
       client.promptAsync(sessionId, directive, imgAgent, model).catch((err) => {
         setBusy(sessionId, false)
+        refs.imageGen = undefined // the initial dispatch failed → disarm the retry-once (Bugbot)
         setStatus(`create image failed: ${err?.message ?? err}`)
         // Parity with send(): a synchronous cloud reject should also surface a local-
         // retry offer — as an IMAGE (kind), so the retry re-wraps the directive rather

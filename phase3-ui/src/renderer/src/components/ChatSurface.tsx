@@ -21,12 +21,17 @@ function visionBridge() {
     }
   ).nightjar
 }
-function useVisionReadiness(): boolean {
-  const [ready, setReady] = useState(false)
+// Returns null until the first status resolves (so the composer never false-warns
+// before we know), then true/false. Gated on OLLAMA being up — NOT on a specific
+// model's present/missing: that status is keyed on NIGHTJAR_VISION_MODEL (vision.ts)
+// and can disagree with the analyzer's own model (vision_settings.json). The
+// model-missing case is caught authoritatively by analyze_image's probe + the banner.
+function useVisionReadiness(): boolean | null {
+  const [ready, setReady] = useState<boolean | null>(null)
   useEffect(() => {
     const b = visionBridge()
     if (!b?.getVisionStatus) return
-    const upd = (s: VisionStatus) => setReady(s?.ollama === "running" && s?.model === "present")
+    const upd = (s: VisionStatus) => setReady(s?.ollama === "running")
     b.getVisionStatus().then(upd).catch(() => {})
     return b.onVisionStatus?.(upd)
   }, [])
@@ -128,7 +133,7 @@ export function ChatSurface({
     // ready would silently fail the analyze tool. Warn once (setup + "Send anyway")
     // rather than hard-block or silently error. Clicking "Send anyway" re-enters
     // submit() with visionWarn already true, so it proceeds.
-    if (attachments.some((a) => a.isImage) && isLocalModel(activeModel) && !visionReady && !visionWarn) {
+    if (attachments.some((a) => a.isImage) && isLocalModel(activeModel) && visionReady === false && !visionWarn) {
       setVisionWarn(true)
       return
     }
