@@ -92,6 +92,7 @@ export function nightjarServices(): ServiceDef[] {
       command: BUN,
       args: ["run", "--conditions=browser", OPENCODE_ENTRY, "serve", "--port", "4096", "--hostname", "127.0.0.1"],
       cwd: WORKSPACE,
+      port: 4096, // NJ-5: lets the supervisor capture the PID if this engine is ADOPTED (already on :4096)
       // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
       // config is portable (no hardcoded /home/<user>/...). Pass NIGHTJAR_ROOT
       // through so those substitutions resolve — the app needs no manual setup.
