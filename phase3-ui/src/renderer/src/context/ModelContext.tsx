@@ -21,6 +21,7 @@ import {
   OPENROUTER_FREE_CHOICE,
   type ModelChoice,
 } from "../lib/byok"
+import { capabilities, chatModelToPref, prefToChatModel } from "../lib/capabilities"
 
 // Recovery offers carry the FAILING session's id AND its slot, so the retry
 // resends into that conversation — not always the chat slot (Bugbot #2), and
@@ -76,7 +77,7 @@ export function useModel(): ModelValue {
 
 export function ModelProvider({ children }: { children: ReactNode }) {
   const [choices, setChoices] = useState<ModelChoice[]>([LOCAL_MODEL])
-  const [activeModel, setActiveModel] = useState<string>(LOCAL_MODEL.id)
+  const [activeModel, setActiveModelState] = useState<string>(LOCAL_MODEL.id)
   const [showKeys, setShowKeys] = useState(false)
   const [fallbackOffer, setFallbackOffer] = useState<FallbackOffer | null>(null) // last prompt + its session, if a cloud send failed
   const [rateLimitOffer, setRateLimitOffer] = useState<RateLimitOffer | null>(null)
@@ -87,14 +88,41 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   // mirror is needed here.)
   const choicesRef = useRef<ModelChoice[]>([LOCAL_MODEL])
   const openRouterReadyRef = useRef<boolean>(false)
+  const restoredRef = useRef(false) // first loadModels restores the persisted chat choice exactly once
+
+  // Persist every explicit chat model change so the choice survives an app restart
+  // (nothing per-capability was persisted before). Recovery switches
+  // (fallbackToLocal / acceptOpenRouterSwitch in SessionsContext) route through here
+  // too — persisting them is correct, since the user accepted the switch. Fire-and-
+  // forget: a store failure must never block the in-memory model change.
+  const setActiveModel = useCallback((id: string) => {
+    setActiveModelState(id)
+    capabilities.set("chat", chatModelToPref(id, isLocalModel(id))).catch(() => {})
+  }, [])
 
   const loadModels = useCallback(async () => {
     const providers = (await byok.list()) as Awaited<ReturnType<typeof byok.list>>
     openRouterReadyRef.current = openRouterConfigured(providers)
     const next = modelChoices(providers)
     setChoices(next)
-    // if the active model's provider key was removed, fall back to local
-    setActiveModel((cur) => (next.some((c) => c.id === cur) ? cur : LOCAL_MODEL.id))
+    // First load restores the persisted explicit chat choice (survives restart);
+    // later loads (a key add/remove) only heal a now-invalid selection back to local.
+    let restore: string | null = null
+    if (!restoredRef.current) {
+      restoredRef.current = true
+      try {
+        restore = prefToChatModel((await capabilities.list()).chat)
+      } catch {
+        /* store unavailable → keep whatever's active (local by default) */
+      }
+    }
+    // Honor the restored choice only if still available (its provider key is present);
+    // otherwise fall back to local. Uses the raw setter (functional form) — this is a
+    // reflect/heal, not a user action, so it must NOT re-persist.
+    setActiveModelState((cur) => {
+      const target = restore ?? cur
+      return next.some((c) => c.id === target) ? target : LOCAL_MODEL.id
+    })
   }, [])
   useEffect(() => {
     loadModels()
