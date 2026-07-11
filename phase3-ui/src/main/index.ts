@@ -375,6 +375,7 @@ ipcMain.handle("byok:remove", async (_e, providerId: string) => {
 // per-capability wiring (image reconcile, browser/research/vision engine env, and
 // the engine restart to apply them) lands in later PRs that read these prefs. Kept
 // deliberately free of side effects here so the store round-trips in isolation.
+ipcMain.handle("capabilities:catalog", () => ({ capabilities: capabilities.CAPABILITIES, ui: capabilities.UI_CAPABILITIES }))
 ipcMain.handle("capabilities:list", () => capabilities.listPrefs())
 ipcMain.handle("capabilities:set", (_e, id: string, pref: capabilities.CapabilityPref) => capabilities.setPref(id, pref))
 

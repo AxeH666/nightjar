@@ -33,14 +33,27 @@ export interface CapabilityMeta {
   offlineLabel: string // human label for the local/offline backend
 }
 
-// The capability catalog the UI renders one row per. Order = display order.
+// The capability catalog. `onlineProviders` lists the BYOK provider ids a
+// capability's cloud path can actually route to — the UI only offers configured keys
+// that intersect this list:
+//  • image   — the two image-endpoint providers we seed (dall-e / gpt-image).
+//  • research — OpenAI-COMPATIBLE providers only (DeepResearcher speaks one base_url
+//               + Bearer; Anthropic/Google use different APIs, so they're excluded).
+//  • vision  — vision-capable providers only.
+//  • browser — OpenRouter/OpenAI (what browser-use's resolver handles).
+// `chat` keeps an empty list and is NOT a Capabilities row — it is controlled by the
+// header model switcher (which already persists through this store).
 export const CAPABILITIES: CapabilityMeta[] = [
   { id: "chat", name: "Chat & coding", onlineProviders: [], offlineLabel: "Local · Qwen3-4B" },
   { id: "image", name: "Image generation", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local diffusion (Z-Image)" },
-  { id: "research", name: "Deep research", onlineProviders: [], offlineLabel: "Local · Qwen3-4B" },
-  { id: "vision", name: "Vision (image analysis)", onlineProviders: [], offlineLabel: "Local · gemma3:4b" },
+  { id: "research", name: "Deep research", onlineProviders: ["openai", "openrouter", "groq", "deepseek", "mistral", "xai"], offlineLabel: "Local · Qwen3-4B" },
+  { id: "vision", name: "Vision (image analysis)", onlineProviders: ["openai", "anthropic", "google", "openrouter"], offlineLabel: "Local · gemma3:4b" },
   { id: "browser", name: "Browser agent", onlineProviders: ["openrouter", "openai"], offlineLabel: "Local · Qwen3-4B" },
 ]
+
+// Capabilities rendered as rows in the settings "Capabilities" section (chat is
+// excluded — it lives in the header model switcher).
+export const UI_CAPABILITIES: CapabilityId[] = ["image", "research", "vision", "browser"]
 
 const DEFAULT_PREF: CapabilityPref = { mode: "offline" }
 
