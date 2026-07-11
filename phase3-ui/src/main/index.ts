@@ -391,10 +391,11 @@ ipcMain.handle("capabilities:list", () => capabilities.listPrefs())
 ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.CapabilityPref) => {
   const saved = capabilities.setPref(id, pref)
   if (id === "image") await reconcileImageEndpoint() // seed the newly-chosen image backend
-  // Browser + research are resolved from engine env at MCP-spawn time, so applying their
-  // choice needs an opencode-serve restart to re-inject NIGHTJAR_{BROWSERUSE,RESEARCH}_
-  // PROVIDER (vision joins this list in PR6).
-  if (id === "browser" || id === "research") await supervisor.restartService("opencode-serve", opencodeServeEnv())
+  // Browser, research, and vision are resolved from engine env at MCP-spawn time, so
+  // applying their choice needs an opencode-serve restart to re-inject the
+  // NIGHTJAR_{BROWSERUSE,RESEARCH,VISION}_PROVIDER vars.
+  if (id === "browser" || id === "research" || id === "vision")
+    await supervisor.restartService("opencode-serve", opencodeServeEnv())
   return saved
 })
 

@@ -184,5 +184,14 @@ caps.setPref("research", { mode: "online", providerId: "groq" })
 check("research online/groq → PROVIDER=groq", caps.envForOpencode().NIGHTJAR_RESEARCH_PROVIDER === "groq")
 caps.setPref("research", { mode: "offline" }) // restore
 
+// 13) vision provider env (PR6). Default local; explicit Online names the provider.
+caps.setPref("vision", { mode: "offline" })
+check("vision offline → PROVIDER=local", caps.envForOpencode().NIGHTJAR_VISION_PROVIDER === "local")
+caps.setPref("vision", { mode: "online", providerId: "openrouter" })
+check("vision online/openrouter → PROVIDER=openrouter", caps.envForOpencode().NIGHTJAR_VISION_PROVIDER === "openrouter")
+caps.setPref("vision", { mode: "offline" }) // restore
+// vision allowlist narrowed to OpenAI-compatible providers only
+check("vision onlineProviders = openai/openrouter", eq(caps.CAPABILITIES.find((c: any) => c.id === "vision")?.onlineProviders, ["openai", "openrouter"]))
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
