@@ -16,6 +16,7 @@ mock.module("electron", () => ({ app: { getPath: () => USERDATA } }))
 const caps = await import("./src/main/capabilities")
 const { chatModelToPref, prefToChatModel, resolveActiveModel, availableOnlineProviders, nextOnlineProvider } =
   await import("./src/renderer/src/lib/capabilities")
+const { resolveImageBackend } = await import("./src/main/image-endpoint")
 const { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } = await import("./src/renderer/src/lib/byok")
 
 let failures = 0
@@ -140,6 +141,28 @@ check(
   "every UI capability has ≥1 online provider in its allowlist",
   caps.UI_CAPABILITIES.every((id: string) => (caps.CAPABILITIES.find((c: any) => c.id === id)?.onlineProviders.length ?? 0) > 0),
 )
+
+// 10) resolveImageBackend — PROVES the OpenAI>OpenRouter precedence is gone (PR3).
+const off = { mode: "offline" as const }
+const onOA = { mode: "online" as const, providerId: "openai" }
+const onOR = { mode: "online" as const, providerId: "openrouter" }
+// Offline uses local only, and NEVER cloud even when both keys exist.
+check("offline + local ready → local", resolveImageBackend(off, true, true, true) === "local")
+check("offline + local down → none (no silent cloud)", resolveImageBackend(off, false, true, true) === "none")
+// Online honors EXACTLY the chosen provider.
+check("online openai + key → openai", resolveImageBackend(onOA, false, true, false) === "openai")
+check("online openrouter + key → openrouter", resolveImageBackend(onOR, false, false, true) === "openrouter")
+// THE precedence-removal cases:
+check(
+  "online openrouter wins even when an OpenAI key is present (old precedence gone)",
+  resolveImageBackend(onOR, false, true, true) === "openrouter",
+)
+check(
+  "online openai selected but only OpenRouter key present → none (NO silent fallback)",
+  resolveImageBackend(onOA, false, false, true) === "none",
+)
+check("online openrouter selected but only OpenAI key present → none", resolveImageBackend(onOR, false, true, false) === "none")
+check("online unsupported provider → none", resolveImageBackend({ mode: "online", providerId: "anthropic" }, false, true, true) === "none")
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
