@@ -177,5 +177,12 @@ caps.setPref("browser", { mode: "online" } as any)
 check("browser online w/o provider → PROVIDER=local", caps.envForOpencode().NIGHTJAR_BROWSERUSE_PROVIDER === "local")
 caps.setPref("browser", { mode: "offline" }) // restore
 
+// 12) research provider env (PR5). Default local; explicit Online names the provider.
+caps.setPref("research", { mode: "offline" })
+check("research offline → PROVIDER=local", caps.envForOpencode().NIGHTJAR_RESEARCH_PROVIDER === "local")
+caps.setPref("research", { mode: "online", providerId: "groq" })
+check("research online/groq → PROVIDER=groq", caps.envForOpencode().NIGHTJAR_RESEARCH_PROVIDER === "groq")
+caps.setPref("research", { mode: "offline" }) // restore
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
