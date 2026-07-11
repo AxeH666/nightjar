@@ -39,7 +39,8 @@ export interface CapabilityMeta {
 //  • image   — the two image-endpoint providers we seed (dall-e / gpt-image).
 //  • research — OpenAI-COMPATIBLE providers only (DeepResearcher speaks one base_url
 //               + Bearer; Anthropic/Google use different APIs, so they're excluded).
-//  • vision  — vision-capable providers only.
+//  • vision  — OpenAI-compatible vision endpoints (OpenRouter reaches Claude/Gemini
+//              vision models through its unified API, so no native Anthropic/Google).
 //  • browser — OpenRouter/OpenAI (what browser-use's resolver handles).
 // `chat` keeps an empty list and is NOT a Capabilities row — it is controlled by the
 // header model switcher (which already persists through this store).
@@ -47,7 +48,7 @@ export const CAPABILITIES: CapabilityMeta[] = [
   { id: "chat", name: "Chat & coding", onlineProviders: [], offlineLabel: "Local · Qwen3-4B" },
   { id: "image", name: "Image generation", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local diffusion (Z-Image)" },
   { id: "research", name: "Deep research", onlineProviders: ["openai", "openrouter", "groq", "deepseek", "mistral", "xai"], offlineLabel: "Local · Qwen3-4B" },
-  { id: "vision", name: "Vision (image analysis)", onlineProviders: ["openai", "anthropic", "google", "openrouter"], offlineLabel: "Local · gemma3:4b" },
+  { id: "vision", name: "Vision (image analysis)", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local · gemma3:4b" },
   { id: "browser", name: "Browser agent", onlineProviders: ["openrouter", "openai"], offlineLabel: "Local · Qwen3-4B" },
 ]
 
@@ -133,5 +134,10 @@ export function envForOpencode(): Record<string, string> {
   // NIGHTJAR_RESEARCH_PROVIDER + that provider's NIGHTJAR_BYOK_* key).
   const research = getPref("research")
   out.NIGHTJAR_RESEARCH_PROVIDER = research.mode === "online" && research.providerId ? research.providerId : "local"
+  // Vision (image analysis): same shape — default "local" (Ollama gemma3:4b); an explicit
+  // Online provider routes the analyze_image tool to cloud vision (vision_backend.py reads
+  // NIGHTJAR_VISION_PROVIDER + that provider's NIGHTJAR_BYOK_* key).
+  const vision = getPref("vision")
+  out.NIGHTJAR_VISION_PROVIDER = vision.mode === "online" && vision.providerId ? vision.providerId : "local"
   return out
 }
