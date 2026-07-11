@@ -164,5 +164,18 @@ check(
 check("online openrouter selected but only OpenAI key present → none", resolveImageBackend(onOR, false, true, false) === "none")
 check("online unsupported provider → none", resolveImageBackend({ mode: "online", providerId: "anthropic" }, false, true, true) === "none")
 
+// 11) capabilities.envForOpencode() — the browser silent-cloud fix (PR4). Default
+// must be local; only an explicit Online choice names a provider.
+caps.setPref("browser", { mode: "offline" })
+check("browser offline → PROVIDER=local", caps.envForOpencode().NIGHTJAR_BROWSERUSE_PROVIDER === "local")
+caps.setPref("browser", { mode: "online", providerId: "openrouter" })
+check("browser online/openrouter → PROVIDER=openrouter", caps.envForOpencode().NIGHTJAR_BROWSERUSE_PROVIDER === "openrouter")
+caps.setPref("browser", { mode: "online", providerId: "openai" })
+check("browser online/openai → PROVIDER=openai", caps.envForOpencode().NIGHTJAR_BROWSERUSE_PROVIDER === "openai")
+// online-without-provider is sanitized to offline by the store → PROVIDER=local (no leak)
+caps.setPref("browser", { mode: "online" } as any)
+check("browser online w/o provider → PROVIDER=local", caps.envForOpencode().NIGHTJAR_BROWSERUSE_PROVIDER === "local")
+caps.setPref("browser", { mode: "offline" }) // restore
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

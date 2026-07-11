@@ -27,7 +27,7 @@ const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
 // correct value and break every {env:NIGHTJAR_ROOT} MCP path when the repo isn't
 // literally at ~/nightjar.
 function opencodeServeEnv(): Record<string, string> {
-  return { NIGHTJAR_ROOT: REPO, ...byok.envForOpencode() }
+  return { NIGHTJAR_ROOT: REPO, ...byok.envForOpencode(), ...capabilities.envForOpencode() }
 }
 
 // Roots the renderer is allowed to read TTS audio from (Kokoro writes under the
@@ -391,6 +391,10 @@ ipcMain.handle("capabilities:list", () => capabilities.listPrefs())
 ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.CapabilityPref) => {
   const saved = capabilities.setPref(id, pref)
   if (id === "image") await reconcileImageEndpoint() // seed the newly-chosen image backend
+  // Browser is resolved from engine env at MCP-spawn time, so applying its choice needs
+  // an opencode-serve restart to re-inject NIGHTJAR_BROWSERUSE_PROVIDER (research/vision
+  // will join this list in PR5/PR6).
+  if (id === "browser") await supervisor.restartService("opencode-serve", opencodeServeEnv())
   return saved
 })
 

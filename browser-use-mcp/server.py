@@ -7,16 +7,19 @@ it drives a real (headless) Chromium through its own perception→action loop to
 complete a natural-language task. This SUPPLEMENTS — does not replace — Row-Bot's
 low-level primitives (navigate/click/type by ref) in the `nightjar` MCP.
 
-Model wiring (local-first, BYOK-preferred-for-reliability): Browser Use runs its
-own LLM loop, which is model-demanding. Resolution (see `resolve_model_spec`):
+Model wiring (EXPLICIT, offline by default): Browser Use runs its own model-demanding
+LLM loop. Resolution (see `resolve_model_spec`):
   1. Explicit override  (NIGHTJAR_BROWSERUSE_BASE_URL + _MODEL)
-  2. BYOK OpenRouter    (NIGHTJAR_BYOK_OPENROUTER) — preferred for reliability
-  3. BYOK OpenAI        (NIGHTJAR_BYOK_OPENAI)
-  4. Local llama.cpp    (NIGHTJAR_LLM_ENDPOINT, default the 127.0.0.1:8086 proxy)
-Set NIGHTJAR_BROWSERUSE_PREFER=local to force the local model even when a key exists
-(pure-offline). The local proxy (8086) already carries a wall-clock timeout (rule 3);
-we ALSO bound every run with our own asyncio wall-clock timeout + a max_steps cap,
-because the agent loop is otherwise unbounded.
+  2. NIGHTJAR_BROWSERUSE_PROVIDER — the explicit backend Nightjar sets from the user's
+     browser capability pref: "local" (default), "openai", or "openrouter". Only a
+     deliberate Online choice routes to the cloud (using that provider's NIGHTJAR_BYOK_*
+     key); a selected-but-keyless provider falls back to local.
+  3. Local llama.cpp    (NIGHTJAR_LLM_ENDPOINT, default the 127.0.0.1:8086 proxy)
+A stored BYOK key ALONE never sends browser traffic to the cloud — that was a silent-
+cloud leak that defeated the BYOK scoping guarantee in phase3-ui/src/main/byok.ts. The
+default is local/offline. NIGHTJAR_BROWSERUSE_PREFER=local remains a legacy force-local.
+The local proxy (8086) already carries a wall-clock timeout (rule 3); we ALSO bound
+every run with our own asyncio wall-clock timeout + a max_steps cap.
 
 This tool is high-blast-radius (it operates a real browser), so it is permission
 -gated ("ask") in opencode.json per rule 1 — never auto-approved.
@@ -70,8 +73,13 @@ class ModelSpec:
 
 def resolve_model_spec(env: Optional[Dict[str, str]] = None) -> ModelSpec:
     """Pick the LLM backend from env. Pure (no browser_use import) so it's unit-testable
-    offline. Precedence: explicit override → BYOK OpenRouter → BYOK OpenAI → local
-    llama.cpp. NIGHTJAR_BROWSERUSE_PREFER=local forces local even when a BYOK key exists."""
+    offline. EXPLICIT selection — the DEFAULT is local/offline, and a stored BYOK key
+    does NOT route the browser to the cloud on its own (that was the silent-cloud leak).
+    Order: explicit override → NIGHTJAR_BROWSERUSE_PROVIDER (set by Nightjar from the
+    browser capability pref: "local"|"openai"|"openrouter") → local llama.cpp.
+    NIGHTJAR_BROWSERUSE_PREFER=local is still honored as a legacy force-local. When a
+    cloud provider is selected but its BYOK key is absent, fall back to local (the tool's
+    result line discloses which backend actually ran — never silent)."""
     e = os.environ if env is None else env
 
     base = (e.get("NIGHTJAR_BROWSERUSE_BASE_URL") or "").strip()
@@ -85,26 +93,35 @@ def resolve_model_spec(env: Optional[Dict[str, str]] = None) -> ModelSpec:
         (e.get("NIGHTJAR_LLM_MODEL") or "qwen3-4b-instruct-2507").strip(),
         "sk-noop",
     )
-    if (e.get("NIGHTJAR_BROWSERUSE_PREFER") or "byok").strip().lower() == "local":
-        return local
 
-    or_key = (e.get("NIGHTJAR_BYOK_OPENROUTER") or "").strip()
-    if or_key:
-        return ModelSpec(
-            "openrouter",
-            "https://openrouter.ai/api/v1",
-            (e.get("NIGHTJAR_BROWSERUSE_OPENROUTER_MODEL") or "openai/gpt-4o-mini").strip(),
-            or_key,
-            {"HTTP-Referer": "https://github.com/AxeH666/nightjar", "X-Title": "Nightjar"},
-        )
-    oa_key = (e.get("NIGHTJAR_BYOK_OPENAI") or "").strip()
-    if oa_key:
-        return ModelSpec(
-            "openai",
-            "https://api.openai.com/v1",
-            (e.get("NIGHTJAR_BROWSERUSE_OPENAI_MODEL") or "gpt-4o-mini").strip(),
-            oa_key,
-        )
+    # Explicit backend selection. Absent/unknown → local (offline default). A stored
+    # NIGHTJAR_BYOK_* key ALONE never selects cloud — only this explicit choice does,
+    # which is the whole point of the fix.
+    provider = (e.get("NIGHTJAR_BROWSERUSE_PROVIDER") or "").strip().lower()
+    if (e.get("NIGHTJAR_BROWSERUSE_PREFER") or "").strip().lower() == "local":
+        provider = "local"
+
+    if provider == "openrouter":
+        or_key = (e.get("NIGHTJAR_BYOK_OPENROUTER") or "").strip()
+        if or_key:
+            return ModelSpec(
+                "openrouter",
+                "https://openrouter.ai/api/v1",
+                (e.get("NIGHTJAR_BROWSERUSE_OPENROUTER_MODEL") or "openai/gpt-4o-mini").strip(),
+                or_key,
+                {"HTTP-Referer": "https://github.com/AxeH666/nightjar", "X-Title": "Nightjar"},
+            )
+        return local  # selected but no key → local (disclosed in the tool result line)
+    if provider == "openai":
+        oa_key = (e.get("NIGHTJAR_BYOK_OPENAI") or "").strip()
+        if oa_key:
+            return ModelSpec(
+                "openai",
+                "https://api.openai.com/v1",
+                (e.get("NIGHTJAR_BROWSERUSE_OPENAI_MODEL") or "gpt-4o-mini").strip(),
+                oa_key,
+            )
+        return local
     return local
 
 
