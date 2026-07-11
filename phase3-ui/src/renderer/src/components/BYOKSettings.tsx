@@ -65,11 +65,11 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
         <div className="space-y-4 px-5 py-4">
           {/* privacy framing — local vs cloud */}
           <p className="rounded-md bg-nightjar-surface/60 p-3 text-xs leading-relaxed text-nightjar-text/80">
-            June is <b>local-first</b>: the default <b>Qwen3-4B</b> model runs entirely on your machine —
-            nothing leaves it. Adding a cloud key lets you select that provider's models, but{" "}
-            <b className="text-nightjar-alert">messages sent to a cloud model leave your machine</b>. Keys are used{" "}
-            <b>only</b> for the model you explicitly select — your local voice, vision, and memory stay on-device
-            regardless of which keys are set.
+            June is <b>local-first</b>: every capability runs <b>Offline</b> (on your machine) by default —
+            nothing leaves it. Adding a cloud key lets you set a capability <b>Online</b> below, but{" "}
+            <b className="text-nightjar-alert">data for a capability you set Online leaves your machine</b>. Keys are
+            used <b>only</b> for the capabilities you explicitly set Online — your local <b>voice</b> and <b>memory</b>{" "}
+            always stay on-device regardless of which keys are set.
           </p>
 
           {/* storage mode — must be honest about whether keys are truly encrypted */}

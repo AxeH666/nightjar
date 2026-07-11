@@ -92,6 +92,8 @@ interface Managed {
   healthTimer?: NodeJS.Timeout
   restartTimer?: NodeJS.Timeout // pending crash-restart backoff; tracked so stop()/restartService can cancel it
   adoptedPid?: number // PID of an ADOPTED (not-spawned-by-us) process, so restartService can stop it (NJ-5)
+  restartInFlight?: Promise<void> // single-flight guard: one restart pass at a time per service
+  restartPending?: boolean // a restart was requested mid-pass → run exactly one more with the latest env
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -282,10 +284,37 @@ export class Supervisor {
   // stop it. Blindly spawning here would bind-conflict with (and be shadowed by)
   // that still-running stale process, so the new env (e.g. a BYOK key) would never
   // take effect — silently. We detect that and surface it instead of colliding.
+  // Single-flight + coalesced per service. restartOnce() mutates shared per-service
+  // state (m.child, m.intentionalStop, m.status, m.def.env) across many await points
+  // (port-free polls, SIGTERM waits, spawn), so two concurrent restarts of the SAME
+  // service would interleave and corrupt it — call A kills the child and nulls m.child,
+  // call B then reads m.child===undefined, mis-takes the adopted branch, and both fall
+  // through to spawn() → two processes fighting for the port, a crash-restart storm, or
+  // the engine left down. This is now reachable because byok:set/remove AND
+  // capabilities:set (browser/research/vision) all restart opencode-serve and the UI
+  // never serializes them. Guard it exactly like reconcileImageEndpoint: run passes to
+  // completion, and if a newer request lands mid-pass, run ONE more afterward so the
+  // latest env still wins.
   async restartService(name: string, env?: Record<string, string>): Promise<void> {
     const m = this.managed.find((x) => x.def.name === name)
     if (!m) return
-    if (env) m.def.env = env
+    if (env) m.def.env = env // record the latest env even when we coalesce onto a running pass
+    if (m.restartInFlight) {
+      m.restartPending = true
+      return m.restartInFlight
+    }
+    m.restartInFlight = (async () => {
+      do {
+        m.restartPending = false
+        await this.restartOnce(m)
+      } while (m.restartPending) // a request arrived mid-pass → restart again with the latest env
+    })().finally(() => {
+      m.restartInFlight = undefined
+    })
+    return m.restartInFlight
+  }
+
+  private async restartOnce(m: Managed): Promise<void> {
     if (m.healthTimer) {
       clearInterval(m.healthTimer)
       m.healthTimer = undefined

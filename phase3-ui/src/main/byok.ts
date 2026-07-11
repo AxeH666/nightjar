@@ -14,13 +14,16 @@
 //  - The renderer NEVER receives raw keys: it gets a masked/status list only.
 //    Decryption + injection into the engine happen here in the main process.
 //
-// KEY DELIVERY (scoping-by-construction): we inject each key under a
-// NON-STANDARD env var (`NIGHTJAR_BYOK_<PROVIDER>`), NOT the provider's standard
-// name (OPENAI_API_KEY, …). opencode.json references it via
-// `options.apiKey = "{env:NIGHTJAR_BYOK_<PROVIDER>}"`. Because the *standard*
-// vars are never set, no MCP capability (Row-Bot vision/embeddings, Odysseus)
-// can silently route to a cloud API just because a key exists — they only ever
-// see local endpoints.
+// KEY DELIVERY (scoping-by-construction): we inject each key under a NON-STANDARD env
+// var (`NIGHTJAR_BYOK_<PROVIDER>`), NOT the provider's standard name (OPENAI_API_KEY, …),
+// which opencode.json references via `options.apiKey = "{env:NIGHTJAR_BYOK_<PROVIDER>}"`.
+// Because the *standard* vars are never set, nothing routes to a cloud API by accident.
+// The cloud-capable MCP capabilities (browser/research/vision) DO read these non-standard
+// vars deliberately — but ONLY when the user has set that capability Online with that
+// provider (gated by NIGHTJAR_<CAP>_PROVIDER, default "local"; see main/capabilities.ts).
+// So a stored key ALONE still never routes a capability to the cloud — it's always an
+// explicit per-capability choice, never silent. Purely-local capabilities
+// (voice/embeddings/memory) ignore keys entirely.
 import { safeStorage, app } from "electron"
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { join, dirname } from "node:path"

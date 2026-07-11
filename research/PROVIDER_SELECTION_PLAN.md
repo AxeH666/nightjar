@@ -47,26 +47,30 @@ Per-capability preference: `{ mode: "offline" | "online", providerId?, modelId? 
 
 ---
 
-## Delivery — stacked PRs (user merges each; verify before the next)
+## Delivery — stacked PRs (user merged each; verified before the next)
 
-- [ ] **PR1 — Prefs store + bridge + IPC (+ persist chat selection).** No behavior
-  change beyond chat selection now surviving restart.
-  Files: `phase3-ui/src/main/capabilities.ts` (new), `src/main/index.ts` (IPC),
-  `src/preload/index.ts` (bridge), `src/renderer/src/lib/capabilities.ts` (new),
-  `src/renderer/src/context/ModelContext.tsx` (restore/persist chat).
-  Verify: `bun test-capabilities.ts` (store round-trip + validation) + `typecheck`.
-- [ ] **PR2 — Capabilities UI section** in `BYOKSettings.tsx` (reads/writes prefs; inert).
-- [ ] **PR3 — Image-gen: replace precedence with explicit selection.** Delete the
-  `if (openai) … else if (openrouter)` in `index.ts:128-134` and the local-first
-  override; seed exactly the chosen endpoint; keep the single-row + coalesce machinery.
-- [ ] **PR4 — Browser-use: explicit selection + Offline default** (closes the leak).
-- [ ] **PR5 — Deep research: new cloud path** (provider resolver + `llm_headers` + timeout).
-- [ ] **PR6 — Vision: new cloud tool path** (+ timeout; unify `vision_settings.json`
-  vs `NIGHTJAR_VISION_MODEL` source of truth).
-- [ ] **PR7 — `KNOWN_ISSUES.md` entries + per-capability banner + branding-header fix.**
+- [x] **PR1 (#39) — Prefs store + bridge + IPC (+ persist chat selection).** `capabilities.ts`
+  store, `nightjar.capabilities` bridge, chat-selection restore/persist. (+ Bugbot fixes:
+  first-load restore race + heal-persists-offline.)
+- [x] **PR2 (#40) — Capabilities UI section** in `BYOKSettings.tsx` (Offline/Online toggle
+  + provider dropdown per capability; inert).
+- [x] **PR3 (#41) — Image-gen: precedence removed** → explicit `resolveImageBackend`; seeds
+  only the chosen endpoint; keeps the single-row + coalesce machinery.
+- [x] **PR4 (#42) — Browser-use: explicit selection + Offline default** (silent-cloud leak closed).
+- [x] **PR5 (#43) — Deep research: new cloud path** (`research_backend.py` resolver +
+  `llm_headers` Bearer auth + rule-3 `asyncio.wait_for`).
+- [x] **PR6 (#44) — Vision: new cloud tool path** (`vision_backend.py` + OpenAI-compatible
+  call + timeout; `vision_settings.json` aligned to `NIGHTJAR_VISION_MODEL`).
+- [x] **PR7 (#45) — Close-out:** `KNOWN_ISSUES.md` (NJ-14 feature, NJ-15 latent Odysseus
+  resolver); per-capability cloud banner; corrected stale copy/comments; **+ fixes from an
+  adversarial close-out review** — `restartService` single-flight/coalesce race fix (a new
+  reachable defect) + image seed/unseed failure logging. Branding-header fix downgraded to
+  an odysseus-patch follow-up under NJ-15 (submodule stays a clean mirror).
 
-Each PR is verified per CLAUDE.md rule 6 (re-trigger the real case), noting where a
-GPU / Ollama / real key is required and can't be driven headless.
+Each PR verified per CLAUDE.md rule 6 (re-trigger the real case) — all four backend
+resolvers unit-tested (incl. leak-closed cases), the restart coalescing regression-tested,
+and an 8-agent adversarial review found the leak-closure/consistency dimensions clean.
+Live cloud round-trips (real key) and GPU/Ollama paths need the running stack.
 
 ---
 

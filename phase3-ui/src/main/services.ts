@@ -136,8 +136,10 @@ export function nightjarServices(): ServiceDef[] {
   }
   // Local IMAGE generation (Z-Image-Turbo via diffusers) — added ONLY when the model
   // dir + the GPU venv both exist. Placed LAST + best-effort, like ollama: a slow
-  // ~6GB GPU load must never block the core stack, and its absence just means image
-  // gen falls back to a cloud endpoint (when a BYOK key is set). The supervisor's
+  // ~6GB GPU load must never block the core stack. Its absence means the Offline image
+  // backend simply isn't available — image gen then has NO backend unless the user has
+  // explicitly set Image Online with a provider (there is NO automatic cloud fallback on
+  // mere key presence; see applyImageEndpoint / image-endpoint.ts). The supervisor's
   // readyTimeout wall-clock-gates the load (rule 3 at the process level).
   const imageModel = findImageModel()
   if (imageModel && existsSync(DIFFUSION_PY)) {

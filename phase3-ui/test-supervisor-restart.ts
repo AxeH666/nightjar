@@ -59,11 +59,42 @@ async function testOwned() {
   await sup.stop()
 }
 
+// COALESCING (race fix): concurrent restartService() calls for the SAME service must
+// NOT interleave — that double-spawned / corrupted supervisor state (call A kills the
+// child and nulls m.child; call B then mis-reads the adopted branch and both spawn).
+// Now reachable because byok:set/remove AND capabilities:set (browser/research/vision)
+// all restart opencode-serve and the UI never serializes them. The guard shares one
+// in-flight pass and, if requests land mid-pass, runs exactly ONE more with the latest
+// env. We stub the private restartOnce to observe overlap deterministically.
+async function testCoalesce() {
+  const def: ServiceDef = { name: "svc", command: "sleep", args: ["3600"], ready: async () => true, readyTimeoutMs: 3000 }
+  const sup = new Supervisor([def])
+  let active = 0,
+    maxActive = 0,
+    calls = 0
+  // Replace the real (spawning) pass with an observable stub — restartService looks it
+  // up via `this.restartOnce`, so an instance override is picked up.
+  ;(sup as unknown as { restartOnce: (m: unknown) => Promise<void> }).restartOnce = async () => {
+    calls++
+    active++
+    maxActive = Math.max(maxActive, active)
+    await sleep(150)
+    active--
+  }
+  // 5 concurrent restarts, as a BYOK save + several capability toggles would issue.
+  await Promise.all(Array.from({ length: 5 }, (_, i) => sup.restartService("svc", { NIGHTJAR_BYOK_OPENAI: "k" + i })))
+  check("coalesced: restartOnce never ran concurrently", maxActive === 1, `maxActive=${maxActive}`)
+  check("coalesced: 5 concurrent calls → exactly 2 passes (1 running + 1 coalesced)", calls === 2, `calls=${calls}`)
+  check("coalesced: latest env wins", def.env?.NIGHTJAR_BYOK_OPENAI === "k4", `env=${def.env?.NIGHTJAR_BYOK_OPENAI}`)
+}
+
 async function main() {
   console.log("→ adopted-restart case…")
   await testAdopted()
   console.log("→ owned-restart case…")
   await testOwned()
+  console.log("→ concurrent-restart coalescing…")
+  await testCoalesce()
   await sleep(200)
   console.log(`\n==== restartService: ${pass} passed, ${fail} failed ====`)
   process.exit(fail > 0 ? 1 : 0)
