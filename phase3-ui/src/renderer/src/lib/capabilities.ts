@@ -51,3 +51,24 @@ export function prefToChatModel(pref: CapabilityPref | undefined): string | null
   if (pref?.mode === "online" && pref.providerId && pref.modelId) return `${pref.providerId}/${pref.modelId}`
   return null
 }
+
+// Pure decision for which chat model should be active after the model list (re)loads
+// — extracted so the race/heal rules are unit-testable without React:
+//  • `restore` (the persisted choice) applies ONLY when the user has NOT picked since
+//    the load started (`userSelected` false). This prevents a slow byok.list /
+//    capabilities.list resolving and clobbering a switcher change the user just made.
+//  • a `wanted` model that is no longer available (its provider key was removed) heals
+//    to local; `healToOffline` then signals the caller to PERSIST offline, so
+//    re-adding the key later does not silently restore cloud (explicit-selection).
+export function resolveActiveModel(args: {
+  availableIds: string[]
+  current: string
+  localId: string
+  restore: string | null
+  userSelected: boolean
+}): { resolved: string; healToOffline: boolean } {
+  const { availableIds, current, localId, restore, userSelected } = args
+  const wanted = !userSelected && restore ? restore : current
+  const resolved = availableIds.includes(wanted) ? wanted : localId
+  return { resolved, healToOffline: resolved === localId && wanted !== localId }
+}

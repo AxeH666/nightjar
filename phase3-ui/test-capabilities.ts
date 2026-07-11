@@ -14,7 +14,7 @@ const USERDATA = mkdtempSync(join(tmpdir(), "capability-prefs-test-"))
 mock.module("electron", () => ({ app: { getPath: () => USERDATA } }))
 
 const caps = await import("./src/main/capabilities")
-const { chatModelToPref, prefToChatModel } = await import("./src/renderer/src/lib/capabilities")
+const { chatModelToPref, prefToChatModel, resolveActiveModel } = await import("./src/renderer/src/lib/capabilities")
 const { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } = await import("./src/renderer/src/lib/byok")
 
 let failures = 0
@@ -74,6 +74,52 @@ check(
 check("prefToChatModel round-trips the OpenRouter free id", prefToChatModel(chatModelToPref(OPENROUTER_FREE_CHOICE.id, false)) === OPENROUTER_FREE_CHOICE.id)
 check("prefToChatModel(offline) → null", prefToChatModel({ mode: "offline" }) === null)
 check("prefToChatModel(online w/o model) → null", prefToChatModel({ mode: "online", providerId: "openai" }) === null)
+
+// 8) resolveActiveModel — the model-load decision (Bugbot #1 race + #2 stale heal).
+const LOCAL = "llamacpp/qwen3-4b-instruct-2507"
+const avail = [LOCAL, "openai/gpt-4o", "openrouter/x"]
+// First load, no user pick yet → restore a persisted, still-available cloud choice.
+check(
+  "restore applies when user hasn't picked",
+  eq(resolveActiveModel({ availableIds: avail, current: LOCAL, localId: LOCAL, restore: "openai/gpt-4o", userSelected: false }), {
+    resolved: "openai/gpt-4o",
+    healToOffline: false,
+  }),
+)
+// Bugbot #1: the user changed the switcher while the load was in flight → their pick
+// (reflected in `current`) must win; the persisted `restore` must NOT clobber it.
+check(
+  "user pick during load beats restore",
+  eq(resolveActiveModel({ availableIds: avail, current: "openrouter/x", localId: LOCAL, restore: "openai/gpt-4o", userSelected: true }), {
+    resolved: "openrouter/x",
+    healToOffline: false,
+  }),
+)
+// Bugbot #2: the chosen cloud model's key was removed (no longer available) → heal to
+// local AND flag healToOffline so the caller persists offline (no silent cloud later).
+check(
+  "unavailable cloud choice heals to local + flags persist",
+  eq(resolveActiveModel({ availableIds: [LOCAL], current: "openai/gpt-4o", localId: LOCAL, restore: null, userSelected: true }), {
+    resolved: LOCAL,
+    healToOffline: true,
+  }),
+)
+// First-load restore that points at a now-keyless provider → same heal+persist.
+check(
+  "restore to unavailable provider heals + flags persist",
+  eq(resolveActiveModel({ availableIds: [LOCAL], current: LOCAL, localId: LOCAL, restore: "openai/gpt-4o", userSelected: false }), {
+    resolved: LOCAL,
+    healToOffline: true,
+  }),
+)
+// Staying on local (already local) is not a heal — must NOT spuriously persist.
+check(
+  "local→local is not a heal",
+  eq(resolveActiveModel({ availableIds: avail, current: LOCAL, localId: LOCAL, restore: null, userSelected: true }), {
+    resolved: LOCAL,
+    healToOffline: false,
+  }),
+)
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

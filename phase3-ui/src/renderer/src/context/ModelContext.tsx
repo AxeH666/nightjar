@@ -21,7 +21,7 @@ import {
   OPENROUTER_FREE_CHOICE,
   type ModelChoice,
 } from "../lib/byok"
-import { capabilities, chatModelToPref, prefToChatModel } from "../lib/capabilities"
+import { capabilities, chatModelToPref, prefToChatModel, resolveActiveModel } from "../lib/capabilities"
 
 // Recovery offers carry the FAILING session's id AND its slot, so the retry
 // resends into that conversation — not always the chat slot (Bugbot #2), and
@@ -89,13 +89,17 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const choicesRef = useRef<ModelChoice[]>([LOCAL_MODEL])
   const openRouterReadyRef = useRef<boolean>(false)
   const restoredRef = useRef(false) // first loadModels restores the persisted chat choice exactly once
+  const userSelectedRef = useRef(false) // the user (or a recovery action) has explicitly picked a model this session
 
   // Persist every explicit chat model change so the choice survives an app restart
   // (nothing per-capability was persisted before). Recovery switches
   // (fallbackToLocal / acceptOpenRouterSwitch in SessionsContext) route through here
   // too — persisting them is correct, since the user accepted the switch. Fire-and-
-  // forget: a store failure must never block the in-memory model change.
+  // forget: a store failure must never block the in-memory model change. Setting
+  // userSelectedRef here is what lets a slow first-load restore know NOT to clobber a
+  // switcher change the user made while byok.list/capabilities.list were in flight.
   const setActiveModel = useCallback((id: string) => {
+    userSelectedRef.current = true
     setActiveModelState(id)
     capabilities.set("chat", chatModelToPref(id, isLocalModel(id))).catch(() => {})
   }, [])
@@ -116,13 +120,26 @@ export function ModelProvider({ children }: { children: ReactNode }) {
         /* store unavailable → keep whatever's active (local by default) */
       }
     }
-    // Honor the restored choice only if still available (its provider key is present);
-    // otherwise fall back to local. Uses the raw setter (functional form) — this is a
-    // reflect/heal, not a user action, so it must NOT re-persist.
+    // Decide against the LATEST committed state via the functional updater: restore
+    // applies only if the user hasn't picked during this load (race, Bugbot #1); an
+    // unavailable choice heals to local and flags a persist (Bugbot #2). The persist
+    // runs OUTSIDE the updater to keep the reducer pure.
+    let healToOffline = false
     setActiveModelState((cur) => {
-      const target = restore ?? cur
-      return next.some((c) => c.id === target) ? target : LOCAL_MODEL.id
+      const { resolved, healToOffline: heal } = resolveActiveModel({
+        availableIds: next.map((c) => c.id),
+        current: cur,
+        localId: LOCAL_MODEL.id,
+        restore,
+        userSelected: userSelectedRef.current,
+      })
+      healToOffline = heal
+      return resolved
     })
+    // Involuntary heal (the chosen cloud model's key was removed) → record offline so
+    // re-adding the key later does NOT silently restore cloud. Idempotent; a user's
+    // own pick already persisted via setActiveModel, so this only fires for the heal.
+    if (healToOffline) capabilities.set("chat", { mode: "offline" }).catch(() => {})
   }, [])
   useEffect(() => {
     loadModels()
