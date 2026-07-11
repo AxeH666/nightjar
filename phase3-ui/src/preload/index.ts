@@ -23,6 +23,13 @@ export interface CapabilityPref {
   modelId?: string
 }
 
+export interface CapabilityMeta {
+  id: string
+  name: string
+  onlineProviders: string[]
+  offlineLabel: string
+}
+
 contextBridge.exposeInMainWorld("nightjar", {
   getConfig: (): Promise<{ opencodeUrl: string; sideChannelUrl: string }> =>
     ipcRenderer.invoke("nightjar:config"),
@@ -79,6 +86,7 @@ contextBridge.exposeInMainWorld("nightjar", {
   // only {mode, providerId, modelId}. The main process persists + (in later PRs)
   // applies the choice to the engine.
   capabilities: {
+    catalog: (): Promise<{ capabilities: CapabilityMeta[]; ui: string[] }> => ipcRenderer.invoke("capabilities:catalog"),
     list: (): Promise<Record<string, CapabilityPref>> => ipcRenderer.invoke("capabilities:list"),
     set: (id: string, pref: CapabilityPref): Promise<CapabilityPref> => ipcRenderer.invoke("capabilities:set", id, pref),
   },

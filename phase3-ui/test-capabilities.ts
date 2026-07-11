@@ -14,7 +14,8 @@ const USERDATA = mkdtempSync(join(tmpdir(), "capability-prefs-test-"))
 mock.module("electron", () => ({ app: { getPath: () => USERDATA } }))
 
 const caps = await import("./src/main/capabilities")
-const { chatModelToPref, prefToChatModel, resolveActiveModel } = await import("./src/renderer/src/lib/capabilities")
+const { chatModelToPref, prefToChatModel, resolveActiveModel, availableOnlineProviders, nextOnlineProvider } =
+  await import("./src/renderer/src/lib/capabilities")
 const { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } = await import("./src/renderer/src/lib/byok")
 
 let failures = 0
@@ -119,6 +120,25 @@ check(
     resolved: LOCAL,
     healToOffline: false,
   }),
+)
+
+// 9) Capabilities UI provider-selection helpers (PR2).
+// Intersection preserves the capability's allowlist ORDER, not the configured order.
+check(
+  "availableOnlineProviders intersects + keeps allowlist order",
+  eq(availableOnlineProviders(["openai", "openrouter", "groq"], ["groq", "openai"]), ["openai", "groq"]),
+)
+check("availableOnlineProviders → [] when no key matches", eq(availableOnlineProviders(["openai", "openrouter"], ["anthropic"]), []))
+check("nextOnlineProvider keeps a still-available current", nextOnlineProvider("openrouter", ["openai", "openrouter"]) === "openrouter")
+check("nextOnlineProvider falls back to first available", nextOnlineProvider("openai", ["openrouter", "groq"]) === "openrouter")
+check("nextOnlineProvider(undefined) → first available", nextOnlineProvider(undefined, ["openai"]) === "openai")
+check("nextOnlineProvider(none available) → undefined", nextOnlineProvider("openai", []) === undefined)
+
+// The UI catalog the store exposes must match the UI-row list (chat excluded).
+check("UI_CAPABILITIES excludes chat", eq(caps.UI_CAPABILITIES, ["image", "research", "vision", "browser"]))
+check(
+  "every UI capability has ≥1 online provider in its allowlist",
+  caps.UI_CAPABILITIES.every((id: string) => (caps.CAPABILITIES.find((c: any) => c.id === id)?.onlineProviders.length ?? 0) > 0),
 )
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`)

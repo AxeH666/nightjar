@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { byok, type ByokProviderStatus, type KeyStorageMode } from "../lib/byok"
+import { CapabilitiesSettings } from "./CapabilitiesSettings"
 
 // Modal to manage cloud provider API keys. Keys are stored encrypted-at-rest by
 // the main process (OS keychain); this panel only ever sees masked status.
@@ -143,6 +144,10 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
           <p className="text-[11px] text-nightjar-text/40">
             Saving or removing a key restarts the local engine (a few seconds) so it picks up the change.
           </p>
+
+          {/* Per-capability Online/Offline + provider selection (replaces implicit
+              precedence). Reflects key availability from the same `providers` list. */}
+          <CapabilitiesSettings providers={providers} />
         </div>
       </div>
     </div>
