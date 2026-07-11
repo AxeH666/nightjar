@@ -115,3 +115,18 @@ export function setPref(id: string, pref: CapabilityPref): CapabilityPref {
   writeStore(s)
   return clean
 }
+
+// Engine-env contribution derived from the prefs — merged into opencode-serve's env so
+// its MCP children (which inherit process.env) resolve the EXPLICIT backend instead of
+// auto-routing to the cloud on mere key presence. Recomputed on every restart, so a
+// change to Offline removes the cloud selection. PR4 wires browser; research + vision
+// join here in PR5/PR6.
+export function envForOpencode(): Record<string, string> {
+  const out: Record<string, string> = {}
+  // Browser agent: default "local" (Offline) — a stored BYOK key alone must NOT route
+  // browser traffic to the cloud (the silent-cloud leak). Only an explicit Online
+  // choice names a provider; browser-use's resolver reads NIGHTJAR_BROWSERUSE_PROVIDER.
+  const browser = getPref("browser")
+  out.NIGHTJAR_BROWSERUSE_PROVIDER = browser.mode === "online" && browser.providerId ? browser.providerId : "local"
+  return out
+}
