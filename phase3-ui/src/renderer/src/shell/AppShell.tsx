@@ -15,6 +15,7 @@ import { CoworkScreen } from "../screens/CoworkScreen"
 import { CodeScreen } from "../screens/CodeScreen"
 import { ModelSwitcher } from "../components/ModelSwitcher"
 import { CloudBanner } from "../components/CloudBanner"
+import { CapabilityCloudBanner } from "../components/CapabilityCloudBanner"
 import { HealthStrip } from "../components/HealthStrip"
 import { VisionBanner } from "../components/VisionBanner"
 import { PermissionPanel } from "../components/PermissionPanel"
@@ -23,6 +24,9 @@ import { NightjarOrb } from "../components/orb/NightjarOrb"
 
 export function AppShell() {
   const [tab, setTab] = useState<TabId>("chat")
+  // Bumped when the settings modal closes so the per-capability cloud banner re-reads
+  // the persisted Online/Offline prefs the user may have just changed.
+  const [capsRefresh, setCapsRefresh] = useState(0)
   const { status, services, wsUrl, reconnect, setStatus } = useConnection()
   const {
     choices,
@@ -52,8 +56,11 @@ export function AppShell() {
         </div>
       </header>
 
-      {/* Unmissable cloud-active indicator (privacy). Renders nothing when local. */}
+      {/* Unmissable cloud-active indicators (privacy). Render nothing when local:
+          CloudBanner covers the chat model; CapabilityCloudBanner covers image/vision/
+          research/browser set Online. */}
       <CloudBanner model={activeChoice} onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)} />
+      <CapabilityCloudBanner refresh={capsRefresh} />
       <HealthStrip services={services} />
       <VisionBanner />
 
@@ -116,11 +123,15 @@ export function AppShell() {
       {ask && <PermissionPanel ask={ask} onReply={reply} onAbort={abort} />}
       {showKeys && (
         <BYOKSettings
-          onClose={() => setShowKeys(false)}
+          onClose={() => {
+            setShowKeys(false)
+            setCapsRefresh((n) => n + 1) // re-read capability prefs the user may have changed
+          }}
           onChanged={() => {
             setStatus("applying key — reconnecting…")
             loadModels()
             reconnect()
+            setCapsRefresh((n) => n + 1)
           }}
         />
       )}

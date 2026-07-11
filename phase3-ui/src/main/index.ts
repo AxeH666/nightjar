@@ -45,9 +45,13 @@ const ODYSSEUS_DATA_DIR = join(homedir(), ".nightjar", "odysseus")
 // generation works from the single key entry — no separate seed step. Runs the same
 // phase2-odysseus/seed_image_endpoint.py the CLI uses, passing the decrypted key via
 // env. Best-effort: a failure never blocks storing the key or the engine restart.
-// Resolves TRUE only on a clean (exit-0) seed/unseed; false on spawn error or a
-// non-zero exit — so callers can avoid, e.g., retiring the working cloud rows after a
-// FAILED local seed (which would strand image gen with no backend).
+// Resolves TRUE only on a clean (exit-0) seed/unseed; false on spawn error or a non-zero
+// exit. applyImageEndpoint logs a false result (a failed seed/unseed leaves the DB in a
+// transient state the NEXT reconcile — key change, diffusion health, capability change,
+// or startup — heals). NOTE: under explicit selection we do NOT keep a non-chosen backend
+// alive on a failed seed (the old rationale): retiring the unchosen rows is a PRIVACY
+// guarantee (Offline must never keep a cloud row), so a failed seed yields "no backend"
+// rather than a silent fallback — the honest, safe outcome.
 function runImageSeed(extraEnv: Record<string, string>): Promise<boolean> {
   return new Promise((done) => {
     const py = join(REPO, "phase2-odysseus", "venv", "bin", "python")
@@ -128,36 +132,42 @@ async function applyImageEndpoint(): Promise<void> {
   const localReady = pref.mode === "offline" && !!localDir && (await localImageHealthy())
   const target = resolveImageBackend(pref, localReady, !!byok.getKey("openai"), !!byok.getKey("openrouter"))
 
-  // Seed the chosen backend BEST-EFFORT: a transient seed failure leaves any existing
-  // row of the same name in place (we never delete the target below), so a working
-  // endpoint isn't torn down by a one-off failure.
-  if (target === "local" && localDir) await seedLocalImage(basename(localDir))
+  // Seed the chosen backend. A transient seed failure leaves any existing row of the
+  // same name in place (we never delete the TARGET below); we log it so the transient
+  // no-backend window is diagnosable (a later reconcile re-seeds).
+  let seeded = true
+  if (target === "local" && localDir) seeded = await seedLocalImage(basename(localDir))
   else if (target === "openai") {
     const key = byok.getKey("openai")
-    if (key) await seedOpenAIImage(key)
+    seeded = key ? await seedOpenAIImage(key) : false
   } else if (target === "openrouter") {
     const key = byok.getKey("openrouter")
-    if (key) await seedOpenRouterImage(key)
+    seeded = key ? await seedOpenRouterImage(key) : false
   }
+  if (target !== "none" && !seeded) console.warn(`[image] seed of "${target}" failed — image gen has no backend until the next reconcile`)
 
-  // Retire every backend the user did NOT choose, so EXACTLY the chosen one stays
-  // enabled (and NONE when target === "none"). This is where the old precedence lived;
-  // there is no silent fallback to a non-chosen provider or to local.
+  // Retire every backend the user did NOT choose, so EXACTLY the chosen one stays enabled
+  // (and NONE when target === "none"). This is where the old precedence lived; there is
+  // no silent fallback to a non-chosen provider or to local — retiring the unchosen rows
+  // is the PRIVACY guarantee (Offline never keeps a cloud row), which is why we retire
+  // even when the chosen seed failed. A failed unseed (logged) could rarely leave a stale
+  // row that the next reconcile clears.
   const rows: Array<[ImageBackend, string]> = [
     ["local", IMAGE_LOCAL_NAME],
     ["openai", IMAGE_OPENAI_NAME],
     ["openrouter", IMAGE_OPENROUTER_NAME],
   ]
-  for (const [kind, name] of rows) if (kind !== target) await unseedImage(name)
+  for (const [kind, name] of rows) {
+    if (kind !== target && !(await unseedImage(name))) console.warn(`[image] unseed of "${name}" failed — a stale endpoint may persist until the next reconcile`)
+  }
 }
 
-// Reconcile the one active image endpoint to the current BYOK keys + precedence.
+// Reconcile the one active image endpoint to the current image pref + BYOK keys.
 // Single-flight + coalesced: each pass runs the seed/unseed subprocesses to
 // completion before the next starts (they must not interleave), and if any newer
-// request lands mid-run we run ONE more pass afterward so the latest key state
+// request lands mid-run we run ONE more pass afterward so the latest state
 // always wins. Without this, a fire-and-forget startup reconcile could finish
-// AFTER a newer byok:set/remove and re-apply stale decisions (e.g. tear down the
-// OpenAI row and re-seed OpenRouter while an OpenAI key is stored).
+// AFTER a newer byok:set/remove or capabilities:set and re-apply a stale decision.
 let reconcileInFlight: Promise<void> | null = null
 let reconcilePending = false
 function reconcileImageEndpoint(): Promise<void> {

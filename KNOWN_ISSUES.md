@@ -24,13 +24,13 @@ with the observed result.
 - [ ] **NJ-7** (local vision): with Ollama + `gemma3:4b` running → attach an image + ask about it → analysis works. Stop Ollama → composer **warns** (doesn't silently fail). Text docs (`.md`/`.txt`) work on any model.
 
 **C. Needs a real GPU + `Z-Image-Turbo` pulled:**
-- [ ] **NJ-6** (local-first image): with the model + GPU venv present → generate an image → served **locally/offline**. Stop the diffusion server → falls back to cloud (with a BYOK key set).
+- [ ] **NJ-6 / NJ-14** (offline image): with the model + GPU venv present and **Image = Offline** → generate → served **locally/offline**. Stop the diffusion server → image gen has **no backend** (NOT an auto cloud fallback anymore — NJ-14 removed that); set **Image = Online + a provider** to use cloud explicitly.
 - [ ] **NJ-11 / B3** (diffusion wall-clock cap): the follow-up — add the server-side `--gen-timeout` backstop to `diffusion_server.py` and verify a hung generation is aborted server-side. GPU-only; lands with the NJ-6 hardware check.
 
 **D. Needs a leftover/dev engine (adopt path):**
 - [ ] **NJ-5** (adopted-engine restart): start a stray `opencode serve --port 4096` **before** launching June (so June *adopts* it) → change a BYOK key → confirm June restarts the adopted engine and the new key takes effect. Watch for orphaned MCP children (documented tradeoff).
 
-**Also needs a real key (independent of the above):** NJ-6's **cloud** path was only mock-verified — do a real **paste-OpenAI-key → chat → approve → image** and a real **OpenRouter `sk-or-…`** run once.
+**Also needs a real key (independent of the above):** the **cloud** image path was only mock-verified — with a real key, **set Image = Online** and pick the provider (NJ-14 — no longer auto-wired from key presence), then chat → approve → image, once for a real **OpenAI** key and once for a real **OpenRouter `sk-or-…`** key.
 
 ---
 
@@ -41,6 +41,25 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 13-agent audit of the merged code). They stay here (not in ✅ RESOLVED) until re-triggered
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
+
+## NJ-15 — latent: Odysseus's role-based endpoint resolver (email-AI path) is cloud-capable via settings-pointer / OAuth / Tailscale and leaks "Odysseus" branding on OpenRouter — FLAGGED (dormant; not activated by the provider-selection work) 2026-07-11
+
+- **Severity:** low — **dormant**. Surfaced by the provider-selection audit + close-out review (CLAUDE.md rule 7: flag, don't silently fix or ignore). Not reachable in the shipped config.
+- **What:** `research/odysseus/src/endpoint_resolver.py` has its OWN backend-selection machinery, separate from Nightjar's five capabilities: `resolve_endpoint(role)` picks a `ModelEndpoint` by a settings **pointer** (`{role}_endpoint_id` → `utility_` → caller fallback → `default_`), with fallback **chains** (`*_model_fallbacks`) and a **second** vision resolver (`resolve_vision_fallback_candidates`). It is reached by the `odysseus-email` `ai_draft_email_reply` MCP tool (`email_server.py`), and cloud routing there can come from three mechanisms the capability model doesn't cover: a static DB `api_key`, a **session-backed OAuth** credential (`provider_auth_id` → ChatGPT-subscription / Copilot, `resolve_endpoint_runtime`), and **Tailscale** host remap (`resolve_url` → `tailscale status` fallback). It also hardcodes OpenRouter branding `HTTP-Referer: https://github.com/pewdiepie-archdaemon/odysseus` + `X-OpenRouter-Title: Odysseus` in `_provider_headers`/`build_headers` (identity-rule violation, relates to **NJ-1**).
+- **Why it's dormant (not a live leak):** the assistant agent's permission map denies the AI-email tool (`"*": "deny"`, only `list_emails`/`send_email` allowed), AND Nightjar never seeds `utility_`/`default_endpoint_id` (only `settings.image_model` is seeded), so these resolvers return "no endpoint configured" rather than routing anywhere. It is latent machinery, not an active path.
+- **Mitigation already in place:** Nightjar's new cloud paths (research/vision, PR #43/#44) call `llm_call_async` / OpenAI-compatible endpoints **directly** with pre-set **Nightjar** attribution headers, so they never emit the Odysseus branding and never go through this resolver.
+- **To address (when/if the AI-email path is enabled):** either fix `_provider_headers`'s OpenRouter branding **as an odysseus patch** under `phase2-odysseus/odysseus-patches/` (the submodule stays a clean upstream mirror — do NOT edit `research/odysseus/**` directly), and route the email-AI backend through the same explicit per-capability selection; or keep the tool permission-denied. Confirm on a live stack per rule 6 before enabling.
+
+## NJ-14 — explicit per-capability Online/Offline + provider selection replaces all implicit local-vs-cloud precedence — FIX IMPLEMENTED (runtime-verify pending for live cloud/GPU paths) 2026-07-11
+
+- **Severity:** medium — a cross-cutting behavior change to a safety/privacy surface (PRs #39–#45). Closes a real privacy leak (below) and removes two contradictory hidden precedences.
+- **What changed:** every capability (chat/coding, image, deep research, vision, browser) now runs **Offline/local by default**; going **Online** and picking a provider is an explicit, persisted per-capability choice (BYOK "Capabilities" panel). A stored BYOK key **alone** never routes any capability to the cloud.
+  - **Image gen:** removed the `OpenAI > OpenRouter` precedence (`applyImageEndpoint` now seeds only the explicitly-chosen backend; pure `resolveImageBackend`).
+  - **Browser agent (privacy leak fixed):** previously routed to the cloud whenever ANY OpenRouter/OpenAI key was stored (`PREFER` defaulted to `byok`, MCP inherits `NIGHTJAR_BYOK_*`) — silent cloud egress that defeated the `byok.ts` scoping guarantee. Now defaults to local; only an explicit `NIGHTJAR_BROWSERUSE_PROVIDER` routes cloud.
+  - **Deep research & vision:** gained **new** explicit cloud paths (were local-only / dead-stub), each with a rule-3 wall-clock timeout; vision's `vision_settings.json` is now aligned to `NIGHTJAR_VISION_MODEL` (source-of-truth fix).
+- **Behavior changes to expect (intentional):** (1) **default Offline** — anyone who relied on the old implicit cloud image path picks a provider once; (2) **NJ-6's auto cloud-fallback-when-sidecar-down is removed** — Offline stays Offline (a down local sidecar means image gen has no backend, not a silent cloud call).
+- **Close-out review fixes (this PR, #45):** a `restartService("opencode-serve")` **race** (now that `capabilities:set` for browser/research/vision joins `byok:set/remove` as an un-serialized restart caller) → made single-flight + coalesced like `reconcileImageEndpoint` (regression test in `test-supervisor-restart.ts`); stale comments (`services.ts`, `index.ts`) that described the removed cloud-fallback were corrected. Residual (low): a rare seed/unseed subprocess failure can transiently leave zero (or, if an unseed fails, a stale) image row — logged, and healed by the next reconcile.
+- **To close (rule 6, needs a real key / GPU / Ollama):** for EACH capability set Online→pick a provider→exercise it and confirm the chosen provider is used; set Offline and confirm on-device. Critically: **with an OpenRouter/OpenAI key set but Browser = Offline, run a browser task and confirm it uses the LOCAL model (not cloud)** — the leak is closed. Verified headless so far: all four backend resolvers + the leak-closure/consistency review (0 findings) + the restart coalescing; the live cloud round-trips are not drivable headless.
 
 ## NJ-12 — supervisor: a service that misses its readiness window is frozen "unhealthy" and never re-probed, silently defeating the NJ-6 local-first image fallback — FIX IMPLEMENTED (runtime-verify pending) 2026-07-09
 - **Severity:** medium — surfaced by the **post-merge independent audit** of the Phase 0–6 work (a control-flow gap confirmed by code read, not a live repro). GPU-only manifestation, silent, self-heals on app restart.
