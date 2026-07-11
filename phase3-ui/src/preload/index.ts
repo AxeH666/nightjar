@@ -17,6 +17,12 @@ export interface ByokProviderStatus {
   hasKey: boolean
 }
 
+export interface CapabilityPref {
+  mode: "offline" | "online"
+  providerId?: string
+  modelId?: string
+}
+
 contextBridge.exposeInMainWorld("nightjar", {
   getConfig: (): Promise<{ opencodeUrl: string; sideChannelUrl: string }> =>
     ipcRenderer.invoke("nightjar:config"),
@@ -68,5 +74,12 @@ contextBridge.exposeInMainWorld("nightjar", {
     list: (): Promise<ByokProviderStatus[]> => ipcRenderer.invoke("byok:list"),
     set: (providerId: string, key: string): Promise<void> => ipcRenderer.invoke("byok:set", providerId, key),
     remove: (providerId: string): Promise<void> => ipcRenderer.invoke("byok:remove", providerId),
+  },
+  // Per-capability Online/Offline + provider preference. No secrets cross here —
+  // only {mode, providerId, modelId}. The main process persists + (in later PRs)
+  // applies the choice to the engine.
+  capabilities: {
+    list: (): Promise<Record<string, CapabilityPref>> => ipcRenderer.invoke("capabilities:list"),
+    set: (id: string, pref: CapabilityPref): Promise<CapabilityPref> => ipcRenderer.invoke("capabilities:set", id, pref),
   },
 })

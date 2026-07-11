@@ -21,6 +21,7 @@ import {
   OPENROUTER_FREE_CHOICE,
   type ModelChoice,
 } from "../lib/byok"
+import { capabilities, chatModelToPref, prefToChatModel, resolveActiveModel } from "../lib/capabilities"
 
 // Recovery offers carry the FAILING session's id AND its slot, so the retry
 // resends into that conversation — not always the chat slot (Bugbot #2), and
@@ -76,7 +77,7 @@ export function useModel(): ModelValue {
 
 export function ModelProvider({ children }: { children: ReactNode }) {
   const [choices, setChoices] = useState<ModelChoice[]>([LOCAL_MODEL])
-  const [activeModel, setActiveModel] = useState<string>(LOCAL_MODEL.id)
+  const [activeModel, setActiveModelState] = useState<string>(LOCAL_MODEL.id)
   const [showKeys, setShowKeys] = useState(false)
   const [fallbackOffer, setFallbackOffer] = useState<FallbackOffer | null>(null) // last prompt + its session, if a cloud send failed
   const [rateLimitOffer, setRateLimitOffer] = useState<RateLimitOffer | null>(null)
@@ -87,14 +88,58 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   // mirror is needed here.)
   const choicesRef = useRef<ModelChoice[]>([LOCAL_MODEL])
   const openRouterReadyRef = useRef<boolean>(false)
+  const restoredRef = useRef(false) // first loadModels restores the persisted chat choice exactly once
+  const userSelectedRef = useRef(false) // the user (or a recovery action) has explicitly picked a model this session
+
+  // Persist every explicit chat model change so the choice survives an app restart
+  // (nothing per-capability was persisted before). Recovery switches
+  // (fallbackToLocal / acceptOpenRouterSwitch in SessionsContext) route through here
+  // too — persisting them is correct, since the user accepted the switch. Fire-and-
+  // forget: a store failure must never block the in-memory model change. Setting
+  // userSelectedRef here is what lets a slow first-load restore know NOT to clobber a
+  // switcher change the user made while byok.list/capabilities.list were in flight.
+  const setActiveModel = useCallback((id: string) => {
+    userSelectedRef.current = true
+    setActiveModelState(id)
+    capabilities.set("chat", chatModelToPref(id, isLocalModel(id))).catch(() => {})
+  }, [])
 
   const loadModels = useCallback(async () => {
     const providers = (await byok.list()) as Awaited<ReturnType<typeof byok.list>>
     openRouterReadyRef.current = openRouterConfigured(providers)
     const next = modelChoices(providers)
     setChoices(next)
-    // if the active model's provider key was removed, fall back to local
-    setActiveModel((cur) => (next.some((c) => c.id === cur) ? cur : LOCAL_MODEL.id))
+    // First load restores the persisted explicit chat choice (survives restart);
+    // later loads (a key add/remove) only heal a now-invalid selection back to local.
+    let restore: string | null = null
+    if (!restoredRef.current) {
+      restoredRef.current = true
+      try {
+        restore = prefToChatModel((await capabilities.list()).chat)
+      } catch {
+        /* store unavailable → keep whatever's active (local by default) */
+      }
+    }
+    // Decide against the LATEST committed state via the functional updater: restore
+    // applies only if the user hasn't picked during this load (race, Bugbot #1); an
+    // unavailable choice heals to local and flags a persist (Bugbot #2). The persist
+    // runs OUTSIDE the updater to keep the reducer pure.
+    let healToOffline = false
+    setActiveModelState((cur) => {
+      const { resolved, healToOffline: heal } = resolveActiveModel({
+        availableIds: next.map((c) => c.id),
+        current: cur,
+        localId: LOCAL_MODEL.id,
+        restore,
+        userSelected: userSelectedRef.current,
+      })
+      healToOffline = heal
+      return resolved
+    })
+    // Involuntary heal (the chosen cloud model's key was removed) → record offline so
+    // re-adding the key later does NOT silently restore cloud. Idempotent; a user's
+    // own pick already persisted via setActiveModel, so this only fires for the heal.
+    if (healToOffline) capabilities.set("chat", { mode: "offline" }).catch(() => {})
   }, [])
   useEffect(() => {
     loadModels()

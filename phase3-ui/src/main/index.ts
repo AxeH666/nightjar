@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
 import { nightjarServices, REPO, WORKSPACE, findImageModel } from "./services"
 import * as byok from "./byok"
+import * as capabilities from "./capabilities"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import * as preview from "./preview-server"
 
@@ -367,6 +368,15 @@ ipcMain.handle("byok:remove", async (_e, providerId: string) => {
   if (providerId === "openai" || providerId === "openrouter") await reconcileImageEndpoint()
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
+
+// ── Per-capability provider preferences (Online/Offline + provider) ───────────
+// The single source of truth for the explicit local-vs-cloud + provider choice per
+// capability (chat/image/research/vision/browser). PR1 is PERSISTENCE ONLY — the
+// per-capability wiring (image reconcile, browser/research/vision engine env, and
+// the engine restart to apply them) lands in later PRs that read these prefs. Kept
+// deliberately free of side effects here so the store round-trips in isolation.
+ipcMain.handle("capabilities:list", () => capabilities.listPrefs())
+ipcMain.handle("capabilities:set", (_e, id: string, pref: capabilities.CapabilityPref) => capabilities.setPref(id, pref))
 
 // ── Local vision (Ollama gemma3:4b) — status + auto-pull ──────────────────────
 // nightjar_analyze_image routes to Ollama's vision model (NIGHTJAR_VISION_MODEL @
