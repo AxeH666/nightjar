@@ -128,5 +128,10 @@ export function envForOpencode(): Record<string, string> {
   // choice names a provider; browser-use's resolver reads NIGHTJAR_BROWSERUSE_PROVIDER.
   const browser = getPref("browser")
   out.NIGHTJAR_BROWSERUSE_PROVIDER = browser.mode === "online" && browser.providerId ? browser.providerId : "local"
+  // Deep research: same shape — default "local" (direct llama-server :8085); an explicit
+  // Online provider routes the research LLM to the cloud (research_backend.py reads
+  // NIGHTJAR_RESEARCH_PROVIDER + that provider's NIGHTJAR_BYOK_* key).
+  const research = getPref("research")
+  out.NIGHTJAR_RESEARCH_PROVIDER = research.mode === "online" && research.providerId ? research.providerId : "local"
   return out
 }
