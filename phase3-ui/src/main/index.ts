@@ -225,8 +225,11 @@ function createWindow(): void {
   // raw file. Defense-in-depth belt to the renderer's window-level drop guard: never let
   // a drag/navigation replace our single-page app. (External links open in the browser.)
   win.webContents.on("will-navigate", (e, url) => {
-    const current = process.env.ELECTRON_RENDERER_URL || "file://"
-    if (!url.startsWith(current)) {
+    // Anchor to the ACTUAL current document URL, not a loose "file://" prefix: in a
+    // packaged build ELECTRON_RENDERER_URL is unset, so a "file://" prefix would treat a
+    // dropped file's own file:// path as in-app navigation and fail to block it (Bugbot).
+    // Same-URL navigations (a dev full-reload / HMR) are allowed; anything else is blocked.
+    if (url !== win?.webContents.getURL()) {
       e.preventDefault()
       if (/^https?:\/\//.test(url)) shell.openExternal(url)
     }
