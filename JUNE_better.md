@@ -180,26 +180,59 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 
 **Why it's reliable (the trick):** an LLM writing raw CAD code one-shot produces invalid geometry often; a **see-measure-correct loop** (the model executes code, renders a view, measures, and corrects) raises CAD validity from **~88% → ~100%**. That loop is exactly what `build123d-mcp` exposes as tools.
 
-### Design
+> **⚠️ Upstream-verified corrections (2026-07-14) — these SUPERSEDE the original design below.**
+> The first draft of this section was written from secondary research. Checking the actual
+> upstream sources found three things wrong. The design below is the corrected one.
+>
+> 1. **`build123d-mcp`'s `export` tool CANNOT emit GLB.** Its formats are hard-coded to
+>    `("step","stl","dxf","svg")` (`tools/export.py`), and its sandbox strips `open`/`os`/`pathlib`,
+>    so the model cannot call `export_gltf` itself either. **The "GLB from the mcp `export` tool"
+>    path does not exist.** → We export **STEP** from the sandboxed tool and convert
+>    **STEP → GLB in a trusted, non-sandboxed Nightjar-side converter**. This is *better*: rule-1
+>    containment holds (all model file output still routes through `export`), and the model never
+>    touches the GLB writer.
+> 2. **`yacv` is NOT embeddable.** It is a Vue SPA, `"private": true`, not published to npm, with no
+>    React component or web-component wrapper — iframe-or-fork only. → **"Evaluate yacv first"
+>    resolves to NO. Use three.js**, which is already a `phase3-ui` dependency (the orb uses it).
+> 3. **`build123d.export_gltf` ALREADY preserves the assembly hierarchy** — it builds an OCCT
+>    **XDE/XCAF** document and writes via `RWGltf_CafWriter`, so `Compound` children survive as
+>    separate **named** glTF nodes with per-node colors. → The **"pythonOCC XDE fallback" is
+>    unnecessary; build123d *is* that path.**
+>
+> **Footguns to code against (verified in upstream source):**
+> - `export_gltf` **never raises on write failure** — its `raise RuntimeError` is commented out; it
+>   returns a falsy status instead. **Always check the return value**, or a failed write looks like success.
+> - `cadquery-ocp-novtk` **7.9.3.1.1** ships a **broken macOS wheel** (missing `OCP.GccEnt`) and is
+>   **not yanked** on PyPI. Pin around it: `cadquery-ocp-novtk != 7.9.3.1.1` (upstream does the same).
+> - build123d **0.11 switched from `cadquery-ocp` to `cadquery-ocp-novtk`** — pin the right package.
+> - `build123d-mcp` **re-licensed MIT → Apache-2.0 in May 2026.** Currently clean Apache-2.0
+>   (real LICENSE file read; no branding lock / field-of-use / user gate). **Pin a version and
+>   re-check the license on any upgrade.**
+
+### Design (corrected)
 - **Geometry core:** **build123d** (Apache-2.0) — Python code-CAD over OpenCASCADE.
-- **LLM driver:** [pzfreo/build123d-mcp](https://github.com/pzfreo/build123d-mcp) wired as an **MCP server in OpenCode**, giving the model a tool loop: `execute` (run build123d code) → `render_view` (see it) → `measure` (mass / bbox / clearance / wall-thickness) → `export` (emit a file). The sandbox **blocks fs/subprocess/network**, so **all file output routes through `export`** — never arbitrary writes.
-- **CAD Python env:** a dedicated **Python 3.12** venv via **`uv`** (VTK / `cadquery-ocp` wheels pin to 3.12 — do **not** use 3.13).
-- **Viewer:** a **three.js** viewer in the Electron renderer for exploded-view / drill-down / reassemble, fed **GLB** from the mcp `export` tool. **Evaluate `yacv` (MIT) as a drop-in viewer first** before building bespoke three.js.
-- **Feasibility warnings (tier 1 — no FEA/CFD in v1):** LLM + a **material-property table** (evaluate `pymat-mcp`, MIT) + `measure`'s built-in mass / clearance / wall-thickness → conversational sanity checks ("beeswax wings can't fly"). Physical simulation is out of v1.
-- **Model routing:** the build123d code is written by the **chat/coding model** (follows the global Local/Cloud toggle) — a stronger BYOK model produces better geometry; local Qwen is the offline baseline.
-- **Demo strategy:** open prompting **only for bounded single parts**; **pre-author the complex hero assembly** (a clean **4–8 part** model that explodes convincingly) rather than open-generating a full car live.
-- **Surface:** Chat or a dedicated CAD panel — **not Cowork**.
+- **LLM driver:** [pzfreo/build123d-mcp](https://github.com/pzfreo/build123d-mcp) (**Apache-2.0**, pinned) wired as an **MCP server in OpenCode**, giving the model a tool loop: `execute` (run build123d code) → `render_view` (see it) → `measure` (mass / bbox / clearance / wall-thickness) → `export` (emit a file). The sandbox **blocks fs/subprocess/network** (AST import allowlist + restricted builtins + a 120s wall-clock exec timeout), so **all model file output routes through `export`** — never arbitrary writes.
+- **GLB path (corrected):** model calls `export(format="step")` → a **trusted Nightjar-side converter** (outside the sandbox) runs `build123d.export_gltf(binary=True)` → **GLB with the per-part named node hierarchy intact**, which is what exploded-view needs. The converter **must check `export_gltf`'s return value** (see footgun above) and runs under a **wall-clock timeout** (CLAUDE.md rule 3).
+  - *Rejected alternative:* build123d-mcp's `--viewer-socket` live GLB stream. It does preserve per-part identity (named `UPSERT` frames), but it is **`AF_UNIX` / POSIX-only** (a **Windows dead-end** — see the target-OS decision) and its frames carry **no materials/colors**.
+- **CAD Python env:** a dedicated **Python 3.12** venv via **`uv`**, packaged **cross-platform (Linux + Windows)**. *(For the record: 3.12 is the conservative, best-tested intersection — **not** a hard requirement. OCP/`cadquery-ocp-novtk` ships cp310–cp314 wheels and build123d supports `>=3.10,<3.15`. The real constraint is VTK: cp313 needs VTK ≥ 9.4.)*
+- **Viewer:** a **three.js** viewer in the Electron renderer for exploded-view / drill-down / reassemble, fed the converter's **GLB**. (three.js is already a `phase3-ui` dependency.)
+- **Feasibility warnings (tier 1 — no FEA/CFD in v1):** LLM + a **small static material-property table baked into Nightjar** (~15 materials: density, yield strength) + `measure`'s built-in mass / clearance / wall-thickness → conversational sanity checks ("beeswax wings can't fly"). Physical simulation is out of v1.
+  - *Rejected:* `pymat-mcp` (MIT, and it does expose a nice `to_threejs`/`to_gltf`) — but it's **alpha, 7 stars, single-maintainer**. Not putting that on the critical path for ~15 constants. Revisit post-v1.
+- **Model routing:** the build123d code is written by the **chat/coding model** (follows the global Local/Cloud toggle). **Local `qwen3:8b` will struggle at code-CAD** — the hero demo assumes **Cloud + Anthropic**. Local remains the honest offline baseline; we state its quality plainly rather than hiding it.
+- **Demo strategy:** open prompting **only for bounded single parts**; **pre-author the hero assembly** rather than open-generating a full car live. **Hero = a planetary gearset** (sun / planets / ring / carrier) — a clean 4–8 part model that explodes convincingly.
+- **Surface:** a **dedicated CAD tab**, taking the tab slot vacated by the (v2-deferred) Cowork tab → **Chat / CAD / Code**. Not Cowork, not buried in Chat — the viewer needs the real estate.
 
 ### Files (new)
+- A CAD Python project `phase-cad/`: `uv` pinned to **3.12** + build123d + build123d-mcp (pinned) + the `cadquery-ocp-novtk != 7.9.3.1.1` constraint.
 - CAD MCP wiring in [opencode.json](phase2-odysseus/workspace/opencode.json) (build123d-mcp under its Python-3.12 `uv` env; permission **`ask`** on `execute`/`export` per rule 1).
-- A CAD Python project (e.g. `phase-cad/`): `uv` pinned to **3.12** + build123d + build123d-mcp + ocp/VTK deps.
-- Viewer component in the renderer (three.js or `yacv`) + IPC/preload to receive the exported **GLB** and load it.
+- The trusted **STEP → GLB** converter + its Electron-main IPC (wall-clock timeout per rule 3).
+- three.js viewer component in the renderer + preload/IPC to receive the **GLB** and load it.
 
 ### Verify (rule 6) — verify-before-load-bearing checklist
-- **License:** confirm the **`build123d-mcp` repo license at the pinned commit** (don't trust the current README/HEAD).
-- **Export fidelity:** confirm `export` emits **GLB with the assembly hierarchy intact** (exploded-view needs per-part nodes); if not, fall back to **pythonOCC XDE → GLB**.
-- **Python pin:** confirm the **3.12 pin holds** end-to-end (ocp/VTK import + render succeed).
-- **The loop, live:** drive a real prompt → `execute` → `render_view` → `measure` → `export` → load in the viewer → explode/reassemble. A **bounded single part** must round-trip; the **hero assembly** must explode convincingly.
+- ~~**License:** confirm the `build123d-mcp` repo license at the pinned commit.~~ ✅ **DONE** — real LICENSE file read: **Apache-2.0**, canonical text, no non-standard clauses. (Was MIT until May 2026 — re-check on upgrade.) build123d **Apache-2.0**. Both inbound-compatible with AGPL-3.0-or-later.
+- ~~**Export fidelity:** confirm `export` emits GLB with the hierarchy intact; else fall back to pythonOCC XDE.~~ ✅ **RESOLVED, differently than assumed** — the mcp `export` tool **has no GLB at all**; `build123d.export_gltf` **does** preserve the hierarchy via XDE. Hence the STEP → trusted-converter → GLB design above. **Still to verify live:** that a STEP round-trip preserves per-part **names** into the GLB nodes (the exploded view depends on it).
+- **Python pin:** confirm the **3.12 pin holds** end-to-end on **both Linux and Windows** (ocp/VTK import + render succeed).
+- **The loop, live:** drive a real prompt → `execute` → `render_view` → `measure` → `export(step)` → convert → load in the viewer → explode/reassemble. A **bounded single part** must round-trip; the **planetary-gearset hero** must explode convincingly.
 
 ---
 
@@ -221,6 +254,9 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
   1. **Natural-language → structured-intent parsing layer** — the NL reminder → `{title, when, repeat}` extractor. This is the core new component and needs its own tests (spread of phrasings, timezones, relative times).
   2. **Per-user LLM routing.** The always-on Telegram brain must use a **cloud** model — a sleeping laptop can't run local Qwen to answer a phone message. See the finalized decision below.
 - **Paid-tier LLM (finalized): Option 3 — server-side shared key.** The server uses a single Anthropic/OpenAI key (ours, server-only) to parse paid users' Telegram reminders. Users never receive or paste a key for this; their desktop BYOK key stays local and unchanged. Per-user usage counter + daily cap to prevent abuse. This resolves the server-side-key tension flagged earlier — **user keys never leave their machine.**
+  - **Build decision (2026-07-14): the parser is written PROVIDER-AGNOSTIC behind an LLM interface, against a MOCKED LLM.** The provider (Anthropic or OpenAI) is chosen and the key injected **at deploy time** — no key is needed to build, and none is committed. The parser is fully unit-tested offline; **the live paid parse is therefore NOT verified by us** until the key is injected.
+- **Billing (decision 2026-07-14): Stripe is CUT from v1.** The paid flag ships as a **manual allowlist** — validate demand before building billing. Real billing is a post-v1 item.
+- **Telegram build approach (decision 2026-07-14): MOCK transport now, deploy later.** The bot + server are built and tested against a **mock Telegram transport**; the scheduler, persistence, and parser are verified offline. A **Dockerfile + deploy unit** is handed over; the user supplies the @BotFather token and deploys. **Live Telegram delivery to a phone is explicitly NOT verified by us** — stated plainly, not implied.
 - **Login = Telegram identity** — no passwords; the same Telegram connection is login + reminder channel. Everyone connects Telegram through the server.
 - **Free / paid split:**
   - **Free:** reminders as **local desktop notifications**, **only while the app is open** — a **local scheduler** in the Electron main, no server dependency (this is also where `task_create` gets fixed for the local case).
@@ -239,15 +275,37 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 
 ---
 
+---
+
+## Decision log (2026-07-14) — settled, do not re-litigate
+
+| # | Decision | Consequence |
+|---|---|---|
+| **Target OS** | **Linux + Windows** for v1 (macOS out) | **Locks the CAD GLB path** — the `AF_UNIX` viewer socket is a Windows dead-end, so STEP → trusted converter → GLB it is. Every Python helper spawned from Electron main must be cross-platform. The broken macOS `ocp-novtk` wheel is moot, but we pin around it anyway. |
+| **CAD demo model** | **Cloud + Anthropic** | Local `qwen3:8b` will struggle at code-CAD; the hero demo assumes a strong cloud model. Anthropic is **chat-only** in the capability table — which is exactly what's needed (it writes the build123d code). |
+| **CAD viewer** | **three.js** | Forced — `yacv` is not embeddable. three.js is already a dep. |
+| **CAD material data** | **Bake a static table** | No alpha, 7-star, single-maintainer dep (`pymat-mcp`) on the critical path for ~15 constants. |
+| **CAD surface** | **Dedicated CAD tab** in the slot Cowork vacates → **Chat / CAD / Code** | The viewer needs real estate. |
+| **CAD hero** | **Planetary gearset** (sun / planets / ring / carrier) | Best-exploding bounded 4–8 part assembly. |
+| **Telegram** | **Mock transport now; user deploys later** | Live Telegram delivery **not verified by us**. Dockerfile handed over. |
+| **Server-side key** | **Provider-agnostic parser, mocked LLM** | No key needed to build; injected at deploy. Live paid parse **not verified by us**. |
+| **Billing** | **Stripe cut from v1** — manual paid-flag allowlist | Validate demand first. |
+| **TS unit tests** | **vitest** (devDep in `phase3-ui`) | The repo had no TS test runner; the plan calls for real unit tests on the pure helpers. |
+| **CI** | **None** — BugBot is the only PR check | Intentional; not adding CI. |
+| **Global toggle location** | **Stays in Settings** for v1 (not promoted to the header) | Smaller diff. |
+
+---
+
 ## v1 sequencing (one PR at a time)
 
 1. ~~**Task 4 — file attachment fix** (drag-drop + Browse).~~ ✅ **SHIPPED (PR #46).**
-2. **Task 3 — web search vs deep research split** ← **NEXT.** Lightweight `web_search` tool + `websearch` agent + composer routing.
-3. **Tasks 1 + 2 — global Local/Cloud toggle + Local-mode popup.** Bundled (Task 2's trigger lives in Task 1's toggle).
-4. **Task 5 — Prompt-to-CAD.** The hero feature; larger, gated on the verify-before-load-bearing checklist.
-5. **Task 6 — Telegram scheduling backend.** The always-on server + local scheduler; fixes `task_create` dead rows.
+2. **Task 3 — web search vs deep research split.** Lightweight `web_search` tool + `websearch` agent + composer routing. *(1 PR)*
+3. **Reconcile items** — Cowork gating; park email out of the active agents; `KNOWN_ISSUES` NJ-\* entries. *(3 small PRs — slotted here so they don't collide with later work on the same files.)*
+4. **Tasks 1 + 2 — global Local/Cloud toggle + Local-mode popup.** *(3 PRs: plumbing+helpers+tests → toggle UI + chat hookup + refresh the stale `BYOK_PROVIDERS.defaultModel` table → Local-mode popup + image-unsupported notice.)*
+5. **Task 5 — Prompt-to-CAD.** *(6 PRs: `phase-cad` env → MCP + `cad` agent → STEP→GLB converter → three.js viewer → end-to-end surface → feasibility warnings + hero assembly.)*
+6. **Task 6 — Telegram scheduling backend.** *(4 PRs: fix `task_create` → local scheduler + desktop notifications → NL-intent parser → server + bot + Dockerfile.)*
 
-All **email/communications activations are parked below (v2)** and are **out of the v1 sequence.** Each PR: `typecheck` + `build` + targeted unit tests where there's pure logic (global-mode derivation, web-search helper, NL-intent parser, CAD export checks), **plus the per-task rule-6 live check.** Live cloud / GPU / Ollama / CAD / Telegram paths need the running stack (+ real keys / a bot token).
+All **email/communications activations are parked below (v2)** and are **out of the v1 sequence.** Each PR: `typecheck` + `build` + targeted unit tests where there's pure logic (global-mode derivation, web-search helper, NL-intent parser, CAD export checks), **plus the per-task rule-6 live check.** Live cloud / GPU / Ollama / CAD / Telegram paths need the running stack (+ real keys / a bot token) — **when a path can't be driven headless, say so plainly rather than implying it was verified.**
 
 ---
 
