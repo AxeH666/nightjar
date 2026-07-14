@@ -21,23 +21,58 @@ import asyncio
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Sequence
 
-MAX_RESULTS = 5
-SNIPPET_CHARS = 400  # per-result snippet cap — keeps the single prompt small
-SUMMARY_MAX_TOKENS = 400  # rule 3: a token cap, so one generation can't run away
-DEFAULT_MAX_TIME = 25
+# Prompt size. Measured on a local qwen3:8b (6 GB VRAM → ~31% of the model on CPU), the
+# cost of this tool is DECODE, not prefill: the model emits ~14 tok/s, so GENERATED tokens
+# dominate wall-clock. Trimming the prompt and asking for a shorter answer cut the worst
+# observed call from 40.1s (5 sources x 400 chars, "4 sentences", 558 completion tokens) to
+# 30.0s (4 x 250, "2-3 sentences", 426 tokens) — with the answers still correct and cited.
+MAX_RESULTS = 4
+SNIPPET_CHARS = 250
 
-# Budget floors/caps (seconds). The search is the cheap half; the LLM call gets the rest.
+# rule 3: a token cap, so one generation can't run away.
+#
+# REASONING TOKENS COUNT AGAINST THIS, and they are the bulk of them. A hybrid-reasoning
+# local model (qwen3) still runs a think pass even with `enable_thinking: false` — Ollama
+# just moves it into a separate `reasoning` field (verified: 930 chars of it came back with
+# the flag set). Sizing this is a two-sided trap:
+#   - too LOW  (we shipped 400): reasoning eats the whole budget and the ANSWER is truncated
+#     to nothing — finish_reason "length", empty content, user sees "empty answer".
+#   - too HIGH (we tried 900): at ~14 tok/s a verbose reasoner can decode for 60s+ and blow
+#     the wall clock.
+# 700 clears the worst completion actually observed (558) while bounding decode. The
+# wall-clock timeout below is the real bound; this is the runaway backstop.
+SUMMARY_MAX_TOKENS = 700
+
+# Budget (seconds). These are CEILINGS, not targets — the tool returns as soon as it's done.
+# Set from MEASUREMENT, not guesswork. On the slow local worst case (qwen3:8b, ~31% on CPU,
+# reasoning through every answer) with the trimmed prompt above:
+#
+#   search: 2.4 – 6.3 s
+#   LLM   : 12.5 – 30.0 s   <- the expensive half (decode-bound)
+#
+# The first cut of this tool shipped a 25s total (search 8 / LLM 17). 17s sat right in the
+# MIDDLE of the LLM's real spread, so it passed twice and then failed — flaky by
+# construction, which is exactly how it slipped through. 45s total gives the summarize 35s:
+# clear of the 30.0s worst case with margin, while still bounding the pathological case.
+# If it does blow the budget the tool degrades honestly — it returns the sources it found.
+#
+# This is tuned for the WORST case, not the normal one. Production's local model
+# (qwen3-4b-instruct on llama.cpp — non-thinking, fully GPU-resident) emits no reasoning
+# tokens at all and finishes far inside this.
+DEFAULT_MAX_TIME = 45
 SEARCH_CAP = 10
 SEARCH_MIN = 5
 LLM_MIN = 10
 
+# Brevity here is not a style preference — it is a latency control. The local model is
+# decode-bound (~14 tok/s), so every sentence we don't ask for is ~1s we don't wait.
 SYSTEM_PROMPT = (
     "You are Nightjar, an offline, local-first AI assistant, doing a QUICK web lookup. "
     "Answer the user's question directly from the numbered search results below, in at "
-    "most 4 sentences. Cite the results you used inline as [1], [2], etc. If the results "
-    "do not actually answer the question, say so plainly instead of guessing. Do not pad "
-    "the answer, do not speculate, and do not attempt further research — this is a quick "
-    "lookup, not a report."
+    "most 2-3 short sentences. Cite the results you used inline as [1], [2], etc. Answer "
+    "immediately — do not deliberate at length. If the results do not actually answer the "
+    "question, say so plainly instead of guessing. Do not pad the answer, do not speculate, "
+    "and do not attempt further research — this is a quick lookup, not a report."
 )
 
 # Search/LLM callables the server injects. Declared for readers, not enforced at runtime.
@@ -55,11 +90,16 @@ def strip_reasoning(text: str) -> str:
 def payload_extras(backend: str) -> Dict[str, Any]:
     """Extra chat-completions params for this backend.
 
-    Qwen3 and other hybrid-reasoning models run a <think> pass before answering. For a
-    QUICK lookup that reasoning is pure latency: measured on qwen3:8b via Ollama, the same
-    one-line answer took 25.3s with thinking ON vs 10.2s with it OFF — enough on its own to
-    blow the summarize budget and turn a working lookup back into the timeout this tool
-    exists to fix. `chat_template_kwargs` is the switch llama.cpp and Ollama both honor.
+    Qwen3 and other hybrid-reasoning models run a think pass before answering, which for a
+    QUICK lookup is pure latency. `chat_template_kwargs` is the documented llama.cpp switch
+    for it, and the production local backend (llama.cpp + the non-thinking
+    qwen3-4b-instruct) honors it.
+
+    DO NOT rely on it as a guarantee. Ollama accepts the param but a qwen3 thinking model
+    still reasons through it — verified: 930 chars of `reasoning` came back on a real
+    snippet prompt with this flag set. That is exactly why SUMMARY_MAX_TOKENS is sized to
+    fit reasoning + answer rather than assuming the think pass is gone. This flag is an
+    optimization; the token cap and the wall-clock timeout are the actual safety nets.
 
     LOCAL ONLY. Cloud providers (OpenAI, Groq, …) reject unknown request params with a 400,
     so this must never be sent to them — hence the explicit backend gate rather than
@@ -77,8 +117,25 @@ def split_budget(max_time: int) -> tuple[int, int]:
     0 s timeout (which would fail instantly rather than doing the cheap thing).
     """
     total = max(SEARCH_MIN + LLM_MIN, int(max_time))
-    search_s = min(SEARCH_CAP, max(SEARCH_MIN, total // 3))
+    # Search takes a QUARTER (measured 2.4–6.3s, capped at 10s); the summarize gets the
+    # rest, because that is where the time actually goes (14.8–24.5s).
+    search_s = min(SEARCH_CAP, max(SEARCH_MIN, total // 4))
     return search_s, max(LLM_MIN, total - search_s)
+
+
+def total_budget(max_time: int) -> int:
+    """The wall-clock the stages may ACTUALLY consume — i.e. the FLOORED total.
+
+    The caller's outer wall-clock cap must be derived from this, not from the raw
+    `max_time`. `split_budget` floors a tiny budget up to SEARCH_MIN + LLM_MIN, so an outer
+    cap computed from the raw value can be SHORTER than the stages are allowed to run
+    (e.g. max_time=1 → stages get 15s, a raw outer cap gives 11s). The outer guard would
+    then fire while the search was still in flight and return an empty-source timeout —
+    killing work that was about to succeed. Deriving both from split_budget keeps the two
+    from drifting apart again.
+    """
+    search_s, llm_s = split_budget(max_time)
+    return search_s + llm_s
 
 
 def normalize_results(rows: Sequence[Dict[str, Any]], max_results: int = MAX_RESULTS) -> List[Dict[str, str]]:

@@ -23,7 +23,12 @@ from mcp.server.fastmcp import FastMCP
 
 from research_backend import resolve_research_llm  # pure backend selector (Offline default)
 from src.deep_research import DeepResearcher
-from web_search_backend import DEFAULT_MAX_TIME, payload_extras, run_web_search  # pure; I/O injected
+from web_search_backend import (  # pure orchestrator + budget math; all I/O injected
+    DEFAULT_MAX_TIME,
+    payload_extras,
+    run_web_search,
+    total_budget,
+)
 
 mcp = FastMCP("odysseus-research")
 
@@ -142,7 +147,11 @@ async def web_search(query: str, max_time: int = DEFAULT_MAX_TIME) -> dict:
 
     # rule 3: a HARD outer wall-clock cap over the whole tool, on top of the per-stage
     # timeouts inside run_web_search and the max_tokens cap on the generation itself.
-    hard_cap = int(max_time) + WEB_SEARCH_GRACE
+    # Derived from total_budget (the FLOORED total the stages may actually consume), NOT
+    # from the raw max_time: split_budget floors a tiny budget up to 15s, so a raw cap
+    # would be shorter than the stages are allowed to run (max_time=1 → stages 15s, raw
+    # cap 11s) and this guard would kill work that was about to succeed. (Bugbot)
+    hard_cap = total_budget(int(max_time)) + WEB_SEARCH_GRACE
     try:
         return await asyncio.wait_for(
             run_web_search(
