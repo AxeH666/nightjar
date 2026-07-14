@@ -6,6 +6,17 @@ import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { ChatSurface } from "../components/ChatSurface"
 
+// The composer's armed web tool → the agent that serves it. Research and Web search are
+// two DISTINCT tools: `research` runs the heavy multi-round deep_research pipeline, while
+// `websearch` runs the lightweight web_search tool (one search + one short summarize).
+// They used to collapse to the same `research` agent, which is why a quick lookup ran the
+// full DeepResearcher and timed out on the local model.
+const AGENT_FOR_MODE = {
+  research: "research",
+  websearch: "websearch",
+  none: "assistant",
+} as const
+
 export function ChatScreen() {
   const { slots, messagesOf, busyOf, send, createImage } = useSessions()
   const { abortSession } = usePermission()
@@ -15,8 +26,8 @@ export function ChatScreen() {
     <ChatSurface
       messages={messagesOf(id)}
       busy={busyOf(id)}
-      onSend={(text, { attachments, research }) =>
-        send(id, text, { agent: research ? "research" : "assistant", attachments })
+      onSend={(text, { attachments, mode }) =>
+        send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })
       }
       onCreateImage={(prompt) => createImage(id, prompt)}
       onStop={() => abortSession(id)}

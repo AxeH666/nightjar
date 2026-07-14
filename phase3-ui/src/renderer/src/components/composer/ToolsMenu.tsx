@@ -1,8 +1,10 @@
 // ToolsMenu — the composer's "+" popover (redesign Stage 6). Replaces the loose
 // 📎/🎨 buttons with one menu: Add files, Research, Web search, Create image.
-// Research + Web search are per-MESSAGE toggles (both resolve to the research
-// agent at send time — the only web-capable agent today); the parent decides
-// which items to show (the Code tab hides Research/Web-search).
+// Research + Web search are per-MESSAGE toggles that resolve to two DIFFERENT agents
+// at send time (`research` → the heavy deep_research pipeline; `websearch` → the
+// lightweight web_search tool). They are RADIO-like, not checkboxes: the parent holds a
+// single armed mode, so arming one clears the other. The parent also decides which items
+// to show (the Code tab hides Research/Web-search).
 import { useEffect, useRef, useState } from "react"
 
 export interface ToolsMenuShow {
@@ -74,18 +76,24 @@ export function ToolsMenu({
             <span aria-hidden className="w-4 text-center">📎</span>
             <span className="flex-1">Add files</span>
           </button>
-          {show.research && (
-            <button className={rowClass(active.research)} onClick={onToggleResearch}>
-              <span aria-hidden className="w-4 text-center">🔎</span>
-              <span className="flex-1">Research</span>
-              {active.research && <span aria-hidden>✓</span>}
+          {show.webSearch && (
+            <button className={rowClass(active.webSearch)} onClick={onToggleWebSearch} role="menuitemradio" aria-checked={active.webSearch}>
+              <span aria-hidden className="w-4 text-center">🌐</span>
+              <span className="flex-1">
+                Web search
+                <span className="block text-[11px] text-nightjar-text/40">Quick answer with sources</span>
+              </span>
+              {active.webSearch && <span aria-hidden>✓</span>}
             </button>
           )}
-          {show.webSearch && (
-            <button className={rowClass(active.webSearch)} onClick={onToggleWebSearch}>
-              <span aria-hidden className="w-4 text-center">🌐</span>
-              <span className="flex-1">Web search</span>
-              {active.webSearch && <span aria-hidden>✓</span>}
+          {show.research && (
+            <button className={rowClass(active.research)} onClick={onToggleResearch} role="menuitemradio" aria-checked={active.research}>
+              <span aria-hidden className="w-4 text-center">🔎</span>
+              <span className="flex-1">
+                Research
+                <span className="block text-[11px] text-nightjar-text/40">Full report · slower</span>
+              </span>
+              {active.research && <span aria-hidden>✓</span>}
             </button>
           )}
           {show.createImage && (
