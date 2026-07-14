@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type ClipboardEvent, type DragEvent } from
 import type { ToolCall } from "../lib/opencode"
 import { ToolCallCard } from "./ToolCallCard"
 import { ToolsMenu } from "./composer/ToolsMenu"
-import { type Attachment, pickAttachments, attachmentsFromDataTransfer, fmtSize } from "../lib/attachments"
+import { type Attachment, type AttachmentResult, pickAttachments, attachmentsFromDataTransfer, fmtSize } from "../lib/attachments"
 import { useModel } from "../context/ModelContext"
 import { isLocalModel } from "../lib/byok"
 
@@ -84,6 +84,7 @@ export function ChatSurface({
 }) {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null) // surfaced attach failures (was silently swallowed)
   const [dragOver, setDragOver] = useState(false)
   const [createMode, setCreateMode] = useState(false) // "Create Image" prompt mode
   // Per-message tool toggles from the "+" menu (reset after each send).
@@ -98,24 +99,30 @@ export function ChatSurface({
     endRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, busy])
 
-  const addFiles = (list: Attachment[]) => list.length && setAttachments((prev) => [...prev, ...list])
+  // Append what succeeded; surface any per-file errors instead of silently dropping them
+  // (a swallowed read error was why "Browse → pick → no chip" looked broken).
+  const addResult = (res: AttachmentResult) => {
+    if (res.attachments.length) setAttachments((prev) => [...prev, ...res.attachments])
+    setAttachError(res.errors.length ? res.errors.join(" · ") : null)
+  }
   const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id))
 
   async function browse() {
     if (busy) return
-    addFiles(await pickAttachments())
+    addResult(await pickAttachments())
   }
   function onPaste(e: ClipboardEvent) {
     const dt = e.clipboardData
     const hasFile = !!dt && (dt.files.length > 0 || Array.from(dt.items || []).some((it) => it.kind === "file"))
     if (!hasFile) return // let normal text paste proceed
     e.preventDefault()
-    attachmentsFromDataTransfer(dt).then(addFiles)
+    attachmentsFromDataTransfer(dt).then(addResult)
   }
   function onDrop(e: DragEvent) {
     e.preventDefault()
     setDragOver(false)
-    attachmentsFromDataTransfer(e.dataTransfer).then(addFiles)
+    if (busy) return
+    attachmentsFromDataTransfer(e.dataTransfer).then(addResult)
   }
 
   function submit() {
@@ -140,6 +147,7 @@ export function ChatSurface({
     onSend(t, { attachments, research: tools.research || tools.webSearch })
     setInput("")
     setAttachments([])
+    setAttachError(null)
     setTools({ research: false, webSearch: false })
     setVisionWarn(false)
   }
@@ -147,7 +155,26 @@ export function ChatSurface({
   const canSend = !busy && (createMode ? !!input.trim() : !!input.trim() || attachments.length > 0)
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="relative flex h-full flex-col"
+      // The WHOLE surface is a drop zone (not just the composer bar) — dropping onto the
+      // message area is the natural gesture. The window-level guard (main.tsx) already
+      // stops file:// navigation; this handler processes the files.
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (!dragOver) setDragOver(true)
+      }}
+      onDragLeave={(e) => {
+        // Only clear when the pointer actually leaves the surface (not on child→child moves).
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
+      }}
+      onDrop={onDrop}
+    >
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-nightjar-accent bg-nightjar-accent/10">
+          <span className="rounded-lg bg-nightjar-base/90 px-4 py-2 text-sm font-medium text-nightjar-accent">Drop files to attach</span>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {messages.length === 0 && <div className="mt-20 text-center text-nightjar-text/40">{emptyHint}</div>}
         {messages.map((m) => (
@@ -184,15 +211,13 @@ export function ChatSurface({
         <div ref={endRef} />
       </div>
 
-      <div
-        className={`border-t p-3 ${dragOver ? "border-nightjar-accent bg-nightjar-accent/5" : "border-nightjar-surface"}`}
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (!dragOver) setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-      >
+      <div className="border-t border-nightjar-surface p-3">
+        {attachError && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-nightjar-alert/60 bg-nightjar-alert/10 px-2 py-1 text-xs text-nightjar-alert">
+            <span className="flex-1">{attachError}</span>
+            <button onClick={() => setAttachError(null)} className="hover:underline">dismiss</button>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {attachments.map((a) => (
@@ -260,6 +285,15 @@ export function ChatSurface({
               setTools({ research: false, webSearch: false }) // image mode ignores research toggles
             }}
           />
+          <button
+            onClick={browse}
+            disabled={busy}
+            title="Attach files"
+            aria-label="Attach files"
+            className="rounded-lg border border-nightjar-surface px-2.5 py-2 text-lg leading-none text-nightjar-text/70 hover:bg-nightjar-surface disabled:opacity-40"
+          >
+            📎
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}

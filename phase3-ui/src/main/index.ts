@@ -220,6 +220,17 @@ function createWindow(): void {
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   })
   win.on("ready-to-show", () => win?.show())
+  // A file dropped anywhere the renderer doesn't explicitly handle would otherwise make
+  // Chromium NAVIGATE the window to the file:// URL — replacing the whole app with the
+  // raw file. Defense-in-depth belt to the renderer's window-level drop guard: never let
+  // a drag/navigation replace our single-page app. (External links open in the browser.)
+  win.webContents.on("will-navigate", (e, url) => {
+    const current = process.env.ELECTRON_RENDERER_URL || "file://"
+    if (!url.startsWith(current)) {
+      e.preventDefault()
+      if (/^https?:\/\//.test(url)) shell.openExternal(url)
+    }
+  })
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(join(__dirname, "../renderer/index.html"))
 }
@@ -258,7 +269,10 @@ const MIME_BY_EXT: Record<string, string> = {
   ".json": "application/json", ".csv": "text/csv", ".log": "text/plain",
 }
 const mimeForPath = (p: string): string => MIME_BY_EXT[extname(p).toLowerCase()] || "application/octet-stream"
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024 // 25 MB
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB (raised from 25 MB — a large phone
+// photo could exceed 25 MB and get REJECTED, and pickAttachments used to swallow that
+// error, so Browse looked broken. The renderer now surfaces over-cap errors too.)
+const mb = (n: number): string => (n / (1024 * 1024)).toFixed(0)
 
 // Open the native file dialog; returns absolute paths ([] if cancelled).
 ipcMain.handle("nightjar:pickFiles", async (): Promise<string[]> => {
@@ -282,7 +296,7 @@ ipcMain.handle(
   async (_e, filePath: string): Promise<{ name: string; mime: string; dataUrl: string; size: number; path: string }> => {
     const abs = resolve(String(filePath))
     const buf = await readFile(abs)
-    if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error(`attachment too large (max ${MAX_ATTACHMENT_BYTES} bytes)`)
+    if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error(`file is too large (${mb(buf.byteLength)} MB; max ${mb(MAX_ATTACHMENT_BYTES)} MB)`)
     const mime = mimeForPath(abs)
     return { name: basename(abs), mime, size: buf.byteLength, path: abs, dataUrl: `data:${mime};base64,${buf.toString("base64")}` }
   },
@@ -294,7 +308,7 @@ ipcMain.handle("nightjar:saveAttachment", async (_e, dataUrl: string, name: stri
   const m = /^data:([^;]+);base64,(.*)$/s.exec(String(dataUrl))
   if (!m) throw new Error("saveAttachment: expected a base64 data URL")
   const buf = Buffer.from(m[2], "base64")
-  if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error("attachment too large")
+  if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error(`file is too large (${mb(buf.byteLength)} MB; max ${mb(MAX_ATTACHMENT_BYTES)} MB)`)
   await mkdir(ATTACHMENTS_DIR, { recursive: true })
   const ext = extname(String(name)) || "." + ((m[1].split("/")[1] || "bin").replace("jpeg", "jpg"))
   const abs = join(ATTACHMENTS_DIR, `${randomUUID().slice(0, 12)}${ext}`)
