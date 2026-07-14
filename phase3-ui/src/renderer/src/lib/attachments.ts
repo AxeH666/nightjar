@@ -14,6 +14,18 @@ export interface Attachment {
   isImage: boolean
 }
 
+// Result of a batch attach (Browse / drop / paste): the attachments that succeeded PLUS
+// human-readable errors for the ones that didn't. Errors are SURFACED (shown in the
+// composer) instead of silently dropped — a swallowed read error is exactly why
+// "Browse → pick a file → no chip appears" looked like the feature was broken.
+export interface AttachmentResult {
+  attachments: Attachment[]
+  errors: string[]
+}
+
+const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const baseName = (p: string): string => p.split(/[\\/]/).pop() || p
+
 interface AttachmentBridge {
   pickFiles(): Promise<string[]>
   readAttachment(path: string): Promise<{ name: string; mime: string; dataUrl: string; size: number; path: string }>
@@ -57,25 +69,29 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
 
 // Native "Browse Files" → Attachments. Opens the OS dialog, reads each pick (the
 // browse path IS the on-disk path, so images are already reachable by the vision tool).
-export async function pickAttachments(): Promise<Attachment[]> {
+// A per-file read failure (e.g. over the size cap) is now RETURNED as an error string
+// rather than silently swallowed, so the composer can tell the user why nothing attached.
+export async function pickAttachments(): Promise<AttachmentResult> {
   const b = bridge()
-  if (!b) return []
+  if (!b) return { attachments: [], errors: [] }
   const paths = await b.pickFiles()
-  const out: Attachment[] = []
+  const attachments: Attachment[] = []
+  const errors: string[] = []
   for (const p of paths) {
     try {
       const a = await b.readAttachment(p)
-      out.push({ id: nextId(), name: a.name, mime: a.mime, dataUrl: a.dataUrl, size: a.size, path: a.path, isImage: isImageMime(a.mime) })
-    } catch {
-      /* skip unreadable / too-large */
+      attachments.push({ id: nextId(), name: a.name, mime: a.mime, dataUrl: a.dataUrl, size: a.size, path: a.path, isImage: isImageMime(a.mime) })
+    } catch (e) {
+      errors.push(`Couldn't attach ${baseName(p)}: ${errText(e)}`)
     }
   }
-  return out
+  return { attachments, errors }
 }
 
-// Collect image/file attachments from a paste or drop DataTransfer.
-export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Promise<Attachment[]> {
-  if (!dt) return []
+// Collect image/file attachments from a paste or drop DataTransfer. Per-file failures
+// are surfaced (not swallowed) so a bad file gives a reason instead of a silent no-op.
+export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Promise<AttachmentResult> {
+  if (!dt) return { attachments: [], errors: [] }
   const files: File[] = []
   if (dt.files && dt.files.length) files.push(...Array.from(dt.files))
   else if (dt.items) {
@@ -86,7 +102,16 @@ export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Prom
       }
     }
   }
-  return Promise.all(files.map(fileToAttachment))
+  const attachments: Attachment[] = []
+  const errors: string[] = []
+  for (const f of files) {
+    try {
+      attachments.push(await fileToAttachment(f))
+    } catch (e) {
+      errors.push(`Couldn't attach ${f.name || "file"}: ${errText(e)}`)
+    }
+  }
+  return { attachments, errors }
 }
 
 // Read a generated image (filename parsed from the generate_image tool output) for
