@@ -47,11 +47,12 @@ Local-first desktop app **+ one thin always-on scheduler server** (the *only* ho
   | **Free** | Local **desktop notifications**, **only while the app is open** | a **local scheduler** in the Electron app — no server |
   | **Paid ($7/mo)** | Delivered to your **phone via Telegram, anytime** (laptop closed or not) | the **server** holds the schedule + stays awake |
 
-## Files to reconcile to this plan (separate follow-up PRs — NOT this pass)
+## Files to reconcile to this plan (separate follow-up PRs — one at a time)
 
-- **`phase2-odysseus/workspace/opencode.json`** — agent/permission config: **park** the email tools out of the active agent, add the CAD MCP + `websearch` agent + Telegram wiring.
-- **Cowork-tab gating** — hide/disable the Cowork tab in the v1 build ([TabBar.tsx](phase3-ui/src/renderer/src/shell/TabBar.tsx), [AppShell.tsx](phase3-ui/src/renderer/src/shell/AppShell.tsx), [CoworkScreen.tsx](phase3-ui/src/renderer/src/screens/CoworkScreen.tsx)).
-- **`KNOWN_ISSUES.md` / NJ-\*** — record the `task_create` dead-rows + no-daemon blockers (now Task 6 prerequisites) and the parked email-config caveats.
+- ✅ **`opencode.json` — email parked** (PR #51): email allows removed from `research` + `assistant`, prompts updated so the model never claims to have emailed, and the `odysseus-email` MCP server set `enabled: false`. *(Still to add here: the CAD MCP + `cad` agent — Task 5.)*
+- ✅ **`opencode.json` — `websearch` agent added** (PR #49, Task 3).
+- ✅ **Cowork-tab gating** (PR #50): removed from the tab list **and unmounted** — verified absent from the built bundle, not merely hidden.
+- ✅ **`KNOWN_ISSUES.md` / NJ-\*** (PR #52): **NJ-16** (`task_create` dead rows), **NJ-17** (no scheduler daemon) — both Task-6 prerequisites — **NJ-18** (the build123d empty-GLB footgun), and an update to **NJ-15** for the parked email caveats.
 
 ---
 
@@ -199,9 +200,21 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 >    separate **named** glTF nodes with per-node colors. → The **"pythonOCC XDE fallback" is
 >    unnecessary; build123d *is* that path.**
 >
-> **Footguns to code against (verified in upstream source):**
-> - `export_gltf` **never raises on write failure** — its `raise RuntimeError` is commented out; it
->   returns a falsy status instead. **Always check the return value**, or a failed write looks like success.
+> **Footguns to code against (verified by PROBING the real library, not reading its docs — see `KNOWN_ISSUES.md` NJ-18):**
+> - **`import_step`'s tree cannot be exported to GLB at all.** A re-imported STEP assembly is
+>   *structurally identical* to the original (same labels, same `wrapped`, same volumes, walks
+>   correctly) — and `export_gltf` on it still writes **0 nodes, 0 meshes**. It fails even for a
+>   single re-imported solid, and explicitly calling `.mesh()` first does **not** help (so it is
+>   **not** a tessellation issue). **Mitigation, verified working:** in the trusted converter,
+>   **rebuild the tree** — wrap each imported child's `.wrapped` in a fresh `Solid(...)`, carry its
+>   `.label` over, and assemble a fresh `Compound`. That preserves the per-part names.
+> - **`export_gltf` returns `True` even when it writes an EMPTY GLB.** Its `raise RuntimeError` is
+>   commented out, and the boolean it returns instead is **not** a reliable success signal — it
+>   returned `True` for every empty-output case above. ~~Always check the return value.~~
+>   **Checking the return value is NOT sufficient** (an earlier draft of this doc said it was —
+>   wrong). The converter must **validate the emitted GLB bytes**: parse the JSON chunk and assert
+>   `nodes > 0` and `meshes > 0`. Otherwise a regression ships an empty 3D model that looks like a
+>   clean success.
 > - `cadquery-ocp-novtk` **7.9.3.1.1** ships a **broken macOS wheel** (missing `OCP.GccEnt`) and is
 >   **not yanked** on PyPI. Pin around it: `cadquery-ocp-novtk != 7.9.3.1.1` (upstream does the same).
 > - build123d **0.11 switched from `cadquery-ocp` to `cadquery-ocp-novtk`** — pin the right package.
@@ -212,7 +225,7 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 ### Design (corrected)
 - **Geometry core:** **build123d** (Apache-2.0) — Python code-CAD over OpenCASCADE.
 - **LLM driver:** [pzfreo/build123d-mcp](https://github.com/pzfreo/build123d-mcp) (**Apache-2.0**, pinned) wired as an **MCP server in OpenCode**, giving the model a tool loop: `execute` (run build123d code) → `render_view` (see it) → `measure` (mass / bbox / clearance / wall-thickness) → `export` (emit a file). The sandbox **blocks fs/subprocess/network** (AST import allowlist + restricted builtins + a 120s wall-clock exec timeout), so **all model file output routes through `export`** — never arbitrary writes.
-- **GLB path (corrected):** model calls `export(format="step")` → a **trusted Nightjar-side converter** (outside the sandbox) runs `build123d.export_gltf(binary=True)` → **GLB with the per-part named node hierarchy intact**, which is what exploded-view needs. The converter **must check `export_gltf`'s return value** (see footgun above) and runs under a **wall-clock timeout** (CLAUDE.md rule 3).
+- **GLB path (corrected):** model calls `export(format="step")` → a **trusted Nightjar-side converter** (outside the sandbox) **rebuilds the imported tree** (mandatory — see NJ-18) and runs `build123d.export_gltf(binary=True)` → **GLB with the per-part named node hierarchy intact**, which is what exploded-view needs. The converter **must validate the emitted GLB bytes** (`nodes > 0`, `meshes > 0`) — `export_gltf`'s return value is *not* trustworthy — and runs under a **wall-clock timeout** (CLAUDE.md rule 3).
   - *Rejected alternative:* build123d-mcp's `--viewer-socket` live GLB stream. It does preserve per-part identity (named `UPSERT` frames), but it is **`AF_UNIX` / POSIX-only** (a **Windows dead-end** — see the target-OS decision) and its frames carry **no materials/colors**.
 - **CAD Python env:** a dedicated **Python 3.12** venv via **`uv`**, packaged **cross-platform (Linux + Windows)**. *(For the record: 3.12 is the conservative, best-tested intersection — **not** a hard requirement. OCP/`cadquery-ocp-novtk` ships cp310–cp314 wheels and build123d supports `>=3.10,<3.15`. The real constraint is VTK: cp313 needs VTK ≥ 9.4.)*
 - **Viewer:** a **three.js** viewer in the Electron renderer for exploded-view / drill-down / reassemble, fed the converter's **GLB**. (three.js is already a `phase3-ui` dependency.)
@@ -230,7 +243,8 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 
 ### Verify (rule 6) — verify-before-load-bearing checklist
 - ~~**License:** confirm the `build123d-mcp` repo license at the pinned commit.~~ ✅ **DONE** — real LICENSE file read: **Apache-2.0**, canonical text, no non-standard clauses. (Was MIT until May 2026 — re-check on upgrade.) build123d **Apache-2.0**. Both inbound-compatible with AGPL-3.0-or-later.
-- ~~**Export fidelity:** confirm `export` emits GLB with the hierarchy intact; else fall back to pythonOCC XDE.~~ ✅ **RESOLVED, differently than assumed** — the mcp `export` tool **has no GLB at all**; `build123d.export_gltf` **does** preserve the hierarchy via XDE. Hence the STEP → trusted-converter → GLB design above. **Still to verify live:** that a STEP round-trip preserves per-part **names** into the GLB nodes (the exploded view depends on it).
+- ~~**Export fidelity:** confirm `export` emits GLB with the hierarchy intact; else fall back to pythonOCC XDE.~~ ✅ **RESOLVED, differently than assumed** — the mcp `export` tool **has no GLB at all**; `build123d.export_gltf` **does** preserve the hierarchy via XDE. Hence the STEP → trusted-converter → GLB design above.
+- ~~**Still to verify live:** that a STEP round-trip preserves per-part names into the GLB nodes.~~ ✅ **PROBED AND ANSWERED (2026-07-14) — it does, but ONLY if the tree is rebuilt.** The naive round-trip silently emits an **empty** GLB while reporting success. Rebuilding the tree from the imported `wrapped` handles round-trips correctly and keeps the names (`['planetary_gearset','sun_gear','planet_gear_1']`). See **NJ-18** — this would have shipped an empty 3D model.
 - **Python pin:** confirm the **3.12 pin holds** end-to-end on **both Linux and Windows** (ocp/VTK import + render succeed).
 - **The loop, live:** drive a real prompt → `execute` → `render_view` → `measure` → `export(step)` → convert → load in the viewer → explode/reassemble. A **bounded single part** must round-trip; the **planetary-gearset hero** must explode convincingly.
 
@@ -299,8 +313,8 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 ## v1 sequencing (one PR at a time)
 
 1. ~~**Task 4 — file attachment fix** (drag-drop + Browse).~~ ✅ **SHIPPED (PR #46).**
-2. **Task 3 — web search vs deep research split.** Lightweight `web_search` tool + `websearch` agent + composer routing. *(1 PR)*
-3. **Reconcile items** — Cowork gating; park email out of the active agents; `KNOWN_ISSUES` NJ-\* entries. *(3 small PRs — slotted here so they don't collide with later work on the same files.)*
+2. ~~**Task 3 — web search vs deep research split.**~~ ✅ **SHIPPED (PR #49).** Lightweight `web_search` tool + `websearch` agent + mutually-exclusive composer routing. Live-verified on the local model: 8/8 cited answers, 13–26s (the case that used to time out). Note the budget had to be set from **measurement** — the first cut was flaky by construction, and a hybrid-reasoning local model's *reasoning* tokens count against `max_tokens`, which silently truncated answers to nothing.
+3. ~~**Reconcile items**~~ ✅ **SHIPPED** — Cowork gating (PR #50), email parked (PR #51), `KNOWN_ISSUES` NJ-16/17/18 (PR #52).
 4. **Tasks 1 + 2 — global Local/Cloud toggle + Local-mode popup.** *(3 PRs: plumbing+helpers+tests → toggle UI + chat hookup + refresh the stale `BYOK_PROVIDERS.defaultModel` table → Local-mode popup + image-unsupported notice.)*
 5. **Task 5 — Prompt-to-CAD.** *(6 PRs: `phase-cad` env → MCP + `cad` agent → STEP→GLB converter → three.js viewer → end-to-end surface → feasibility warnings + hero assembly.)*
 6. **Task 6 — Telegram scheduling backend.** *(4 PRs: fix `task_create` → local scheduler + desktop notifications → NL-intent parser → server + bot + Dockerfile.)*
