@@ -1,8 +1,11 @@
-// AppShell — the redesigned frame (Stage 5): wordmark + the three-tab bar +
-// header cluster (model switcher, status, orb), the global privacy/health/offer
-// banners, the active tab's screen, and the global overlays (permission panel +
-// BYOK settings). Replaces the old flat single-screen AppBody. Consumes the
-// context stack; owns only the active-tab state.
+// AppShell — the redesigned frame (Stage 5): wordmark + the tab bar + header
+// cluster (model switcher, status, orb), the global privacy/health/offer banners,
+// the active tab's screen, and the global overlays (permission panel + BYOK
+// settings). Replaces the old flat single-screen AppBody. Consumes the context
+// stack; owns only the active-tab state.
+//
+// v1 ships TWO tabs: Chat and Code. Cowork is deferred to v2 and is neither listed
+// (TabBar) nor mounted (below) — see TabBar for why it's removed rather than disabled.
 import { useState } from "react"
 import { useConnection } from "../context/ConnectionContext"
 import { useModel } from "../context/ModelContext"
@@ -11,7 +14,6 @@ import { usePermission } from "../context/PermissionContext"
 import { LOCAL_MODEL } from "../lib/byok"
 import { TabBar, type TabId } from "./TabBar"
 import { ChatScreen } from "../screens/ChatScreen"
-import { CoworkScreen } from "../screens/CoworkScreen"
 import { CodeScreen } from "../screens/CodeScreen"
 import { ModelSwitcher } from "../components/ModelSwitcher"
 import { CloudBanner } from "../components/CloudBanner"
@@ -104,15 +106,13 @@ export function AppShell() {
       )}
 
       <main className="min-h-0 flex-1">
-        {/* All three tabs stay MOUNTED — visibility toggled via CSS — so switching
-            tabs never unmounts a screen and discards the composer draft (typed text +
-            attached files) or the Code tab's live-preview state (B10). */}
+        {/* Both tabs stay MOUNTED — visibility toggled via CSS — so switching tabs never
+            unmounts a screen and discards the composer draft (typed text + attached files)
+            or the Code tab's live-preview state (B10). */}
         <div className={tab === "chat" ? "h-full" : "hidden"}>
           <ChatScreen />
         </div>
-        <div className={tab === "cowork" ? "h-full" : "hidden"}>
-          <CoworkScreen />
-        </div>
+        {/* Cowork is deferred to v2 and is NOT mounted in the v1 build — see TabBar. */}
         <div className={tab === "code" ? "h-full" : "hidden"}>
           <CodeScreen />
         </div>
