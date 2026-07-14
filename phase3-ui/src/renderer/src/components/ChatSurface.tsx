@@ -49,12 +49,18 @@ export interface UiMessage {
   blocks: UiBlock[]
 }
 
-// Per-message send options. `research` is true if the user armed Research and/or
-// Web search in the "+" menu for this message; the parent screen maps it to the
-// `research` agent (both toggles collapse to it — the only web-capable agent).
+// Which web tool the user armed in the "+" menu for THIS message. Research and Web
+// search are now two DISTINCT tools, not one flag: they used to collapse to
+// `research: tools.research || tools.webSearch` and both route to the heavy
+// multi-round deep_research pipeline, so a quick lookup ran the full DeepResearcher
+// and hit the ~90s cap on the local model. They are mutually exclusive by
+// construction — the state is one value, so no send can mean "both".
+export type ChatMode = "research" | "websearch"
+
+// Per-message send options. The parent screen maps `mode` to an agent.
 export interface SendOpts {
   attachments?: Attachment[]
-  research?: boolean
+  mode?: ChatMode
 }
 
 // Which "+"-menu tool items this surface offers. The Code tab hides
@@ -87,8 +93,10 @@ export function ChatSurface({
   const [attachError, setAttachError] = useState<string | null>(null) // surfaced attach failures (was silently swallowed)
   const [dragOver, setDragOver] = useState(false)
   const [createMode, setCreateMode] = useState(false) // "Create Image" prompt mode
-  // Per-message tool toggles from the "+" menu (reset after each send).
-  const [tools, setTools] = useState({ research: false, webSearch: false })
+  // The per-message web tool armed in the "+" menu (reset after each send). ONE value,
+  // so Research and Web search are mutually exclusive — selecting one clears the other.
+  const [mode, setMode] = useState<ChatMode | null>(null)
+  const armMode = (m: ChatMode) => setMode((cur) => (cur === m ? null : m))
   // NJ-7: warn before sending an image to the text-only local model when local
   // vision (Ollama + gemma3:4b) isn't ready — with a "Send anyway" escape.
   const { activeModel } = useModel()
@@ -144,11 +152,11 @@ export function ChatSurface({
       setVisionWarn(true)
       return
     }
-    onSend(t, { attachments, research: tools.research || tools.webSearch })
+    onSend(t, { attachments, mode: mode ?? undefined })
     setInput("")
     setAttachments([])
     setAttachError(null)
-    setTools({ research: false, webSearch: false })
+    setMode(null)
     setVisionWarn(false)
   }
 
@@ -234,21 +242,14 @@ export function ChatSurface({
             ))}
           </div>
         )}
-        {/* Armed per-message tool chips (explicit, visible before send). */}
-        {(tools.research || tools.webSearch) && !createMode && (
+        {/* The armed per-message tool chip (explicit, visible before send). At most one:
+            Research and Web search are two distinct tools, not a combinable pair. */}
+        {mode && !createMode && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {tools.research && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-nightjar-accent/50 bg-nightjar-accent/10 px-2 py-0.5 text-xs text-nightjar-accent">
-                🔎 Research
-                <button onClick={() => setTools((t) => ({ ...t, research: false }))} title="Remove" className="hover:brightness-125">✕</button>
-              </span>
-            )}
-            {tools.webSearch && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-nightjar-accent/50 bg-nightjar-accent/10 px-2 py-0.5 text-xs text-nightjar-accent">
-                🌐 Web search
-                <button onClick={() => setTools((t) => ({ ...t, webSearch: false }))} title="Remove" className="hover:brightness-125">✕</button>
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1 rounded-full border border-nightjar-accent/50 bg-nightjar-accent/10 px-2 py-0.5 text-xs text-nightjar-accent">
+              {mode === "research" ? "🔎 Research — full report, slower" : "🌐 Web search — quick answer"}
+              <button onClick={() => setMode(null)} title="Remove" className="hover:brightness-125">✕</button>
+            </span>
           </div>
         )}
         {createMode && (
@@ -275,14 +276,14 @@ export function ChatSurface({
         <div className="flex items-end gap-2">
           <ToolsMenu
             show={menu}
-            active={{ research: tools.research, webSearch: tools.webSearch, createImage: createMode }}
+            active={{ research: mode === "research", webSearch: mode === "websearch", createImage: createMode }}
             disabled={busy}
             onAddFiles={browse}
-            onToggleResearch={() => setTools((t) => ({ ...t, research: !t.research }))}
-            onToggleWebSearch={() => setTools((t) => ({ ...t, webSearch: !t.webSearch }))}
+            onToggleResearch={() => armMode("research")}
+            onToggleWebSearch={() => armMode("websearch")}
             onToggleCreateImage={() => {
               setCreateMode((v) => !v)
-              setTools({ research: false, webSearch: false }) // image mode ignores research toggles
+              setMode(null) // image mode ignores the web tools
             }}
           />
           <button
