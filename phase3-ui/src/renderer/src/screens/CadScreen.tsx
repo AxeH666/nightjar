@@ -5,12 +5,14 @@
 // Lives in the tab slot the (v2-deferred) Cowork tab vacated: Chat / CAD / Code.
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
+import { useConnection } from "../context/ConnectionContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { CadViewer } from "../components/CadViewer"
 
 export function CadScreen() {
   const { slots, messagesOf, busyOf, send, createImage, cadModel, cadBusy, cadError, loadCadHero } = useSessions()
   const { abortSession } = usePermission()
+  const { connected } = useConnection()
   const id = slots.cad
 
   return (
@@ -32,6 +34,7 @@ export function CadScreen() {
         <ChatSurface
           messages={messagesOf(id)}
           busy={busyOf(id)}
+          blockedReason={connected && id ? null : "Connecting to the engine…"}
           // CAD is a conversation with the cad agent — no research/web-search/create-image tools.
           onSend={(text, { attachments }) => send(id, text, { agent: "cad", attachments })}
           onCreateImage={(prompt) => createImage(id, prompt)}

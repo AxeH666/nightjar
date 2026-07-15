@@ -42,6 +42,16 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-20 — renderer connection could WEDGE permanently on a half-open socket (no wall-clock timeout on the connect fetches or SSE stream) — FIXED + VERIFIED 2026-07-15
+
+- **Severity:** high — this is the root cause of the reported "can't text CAD / won't reply to 'hey'": the app sat disconnected ("waiting for engine… (Failed to fetch)") for 20+ min while opencode was up and reachable (a headless harness connected to the same engine instantly).
+- **Context / rule 3:** `OpenCodeClient.listAgents`/`createSession`/`subscribe` (`phase3-ui/src/renderer/src/lib/opencode.ts`) had NO wall-clock timeout. Over WSL2/NAT virtual networking a socket can go **half-open** (accepted, then silent — no bytes, no FIN/RST); the awaiting `fetch`/`reader.read()` then hangs FOREVER, so the connect retry loop never fires and the SSE "stream closed → reconnect" never triggers. This is exactly CLAUDE.md rule 3 (every long-running round-trip needs its own wall-clock bound) unmet in the client.
+- **Fix (this pass):**
+  1. `listAgents`/`createSession` → `AbortSignal.timeout(15s)` so a half-open connect rejects and the loop retries.
+  2. `subscribe` → an idle watchdog (30s = 3× opencode's ~10s `/event` heartbeat) that aborts a silent stream so the caller reconnects.
+  3. Renderer UX: a `connected` flag + a manual **↻ Reconnect** button (was only wired to a BYOK key change), a calm "starting the local engine…" message (replacing the scary raw "Failed to fetch"), and the composer now **blocks send while disconnected** (was silently discarding the typed message).
+- **Verification (rule 6):** reproduced both failure modes in a headless Electron harness against a stand-in engine — half-open **connect** recovered at ~18s (15s timeout + retry), half-open **stream** recovered at ~33s (30s watchdog + reconnect); confirmed no reconnect churn against the real 10s-heartbeat opencode; friendlier message + Reconnect button verified appearing while disconnected and clearing on connect; full cold boot connects in ~15s and the assistant replies to "hey".
+
 ## NJ-19 — desktop local scheduler: NL recurring reminders fire at a frozen UTC clock (DST drift) and can use the UTC weekday, not the user's local one — FLAGGED (deferred; fixed in the always-on server) 2026-07-15
 
 - **Severity:** low — affects only *recurring* reminders (`daily`/`weekly`/`monthly`) created from natural language, and only across a DST boundary or when the local→UTC conversion crosses midnight. One-off reminders and same-offset users are unaffected.

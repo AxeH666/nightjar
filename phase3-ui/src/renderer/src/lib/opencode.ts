@@ -13,6 +13,16 @@
 
 export type ReplyKind = "once" | "always" | "reject"
 
+// Rule 3 (CLAUDE.md): every long-running round-trip needs a wall-clock bound, or a
+// half-open socket — accepted, then silent with no FIN/RST, which happens routinely over
+// WSL2/NAT virtual networking — hangs the awaiting fetch FOREVER. Without these, a wedged
+// connect fetch never rejects, so the retry loop never fires and the app sits on a frozen
+// "connecting" state with the engine actually up (the exact stuck state this fixes).
+const CONNECT_TIMEOUT_MS = 15000 // /agent + /session respond in ms; 15s only trips a real hang
+// opencode heartbeats GET /event ~every 10s; seeing NOTHING for this long ⇒ the stream is
+// dead (half-open) → abort so the caller reconnects instead of reading a corpse forever.
+const STREAM_IDLE_TIMEOUT_MS = 30000
+
 export interface AgentInfo {
   name: string
   description?: string
@@ -89,7 +99,7 @@ export class OpenCodeClient {
   }
 
   async listAgents(): Promise<AgentInfo[]> {
-    const res = await fetch(this.url("/agent"), { headers: this.headers() })
+    const res = await fetch(this.url("/agent"), { headers: this.headers(), signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`GET /agent → ${res.status}`)
     const all: AgentInfo[] = await res.json()
     // Selectable Nightjar "modes" only: exclude subagents, hidden agents, AND
@@ -104,6 +114,7 @@ export class OpenCodeClient {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(title ? { title } : {}),
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS), // rule 3: don't let a half-open POST wedge the connect loop
     })
     if (!res.ok) throw new Error(`POST /session → ${res.status}: ${await res.text()}`)
     return (await res.json()).id
@@ -196,34 +207,65 @@ export class OpenCodeClient {
     if (!res.ok) throw new Error(`PATCH /session/${sessionID} → ${res.status}`)
   }
 
-  // Subscribe to the instance-wide SSE stream. `signal` to stop. Callback gets
-  // every event; callers filter by sessionID (the stream is not session-scoped).
-  async subscribe(onEvent: (e: OpenCodeEvent) => void, signal?: AbortSignal): Promise<void> {
-    const res = await fetch(this.url("/event"), { headers: this.headers(), signal })
-    if (!res.ok || !res.body) throw new Error(`GET /event → ${res.status}`)
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ""
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      // SSE frames separated by blank line; each frame has data: lines
-      let idx: number
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const frame = buf.slice(0, idx)
-        buf = buf.slice(idx + 2)
-        const dataLines = frame
-          .split("\n")
-          .filter((l) => l.startsWith("data:"))
-          .map((l) => l.slice(5).trim())
-        if (dataLines.length === 0) continue
-        try {
-          onEvent(JSON.parse(dataLines.join("\n")))
-        } catch {
-          /* heartbeat / non-JSON frame */
+  // Subscribe to the instance-wide SSE stream. `signal` to stop. `onEvent` gets every
+  // event (callers filter by sessionID — the stream is not session-scoped). `onOpen`
+  // fires ONCE the stream is actually established (the GET /event response is in and the
+  // body reader is live) — callers gate their "connected" state on THIS, not on
+  // createSession, so a half-open /event connect can't masquerade as a healthy connection.
+  async subscribe(onEvent: (e: OpenCodeEvent) => void, signal?: AbortSignal, onOpen?: () => void): Promise<void> {
+    // Combine the caller's abort with an internal idle-timeout abort. A half-open SSE
+    // stream (socket accepted, then silent — no bytes, no close) would otherwise hang the
+    // initial `fetch` OR `reader.read()` FOREVER, so the caller's "stream closed →
+    // reconnect" never fires and the app looks connected while the event bus is dead. The
+    // watchdog is armed BEFORE the fetch (so a hung /event CONNECT is bounded too, not just
+    // a silent post-connect stream) and reset on every chunk (opencode heartbeats ~every
+    // 10s); a stream quiet past STREAM_IDLE_TIMEOUT_MS is aborted → this promise rejects →
+    // the caller reconnects (rule 3).
+    const ctrl = new AbortController()
+    const onCallerAbort = () => ctrl.abort()
+    if (signal) {
+      if (signal.aborted) ctrl.abort()
+      else signal.addEventListener("abort", onCallerAbort, { once: true })
+    }
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    const armWatchdog = () => {
+      if (watchdog) clearTimeout(watchdog)
+      watchdog = setTimeout(() => ctrl.abort(), STREAM_IDLE_TIMEOUT_MS)
+    }
+    try {
+      armWatchdog() // bound the CONNECT: a half-open /event that never responds aborts here
+      const res = await fetch(this.url("/event"), { headers: this.headers(), signal: ctrl.signal })
+      if (!res.ok || !res.body) throw new Error(`GET /event → ${res.status}`)
+      const reader = res.body.getReader()
+      onOpen?.() // stream truly established → the caller may now mark itself connected
+      const decoder = new TextDecoder()
+      let buf = ""
+      armWatchdog()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        armWatchdog() // any chunk (event OR heartbeat) proves the stream is alive → reset
+        buf += decoder.decode(value, { stream: true })
+        // SSE frames separated by blank line; each frame has data: lines
+        let idx: number
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx)
+          buf = buf.slice(idx + 2)
+          const dataLines = frame
+            .split("\n")
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).trim())
+          if (dataLines.length === 0) continue
+          try {
+            onEvent(JSON.parse(dataLines.join("\n")))
+          } catch {
+            /* heartbeat / non-JSON frame */
+          }
         }
       }
+    } finally {
+      if (watchdog) clearTimeout(watchdog)
+      signal?.removeEventListener("abort", onCallerAbort)
     }
   }
 }
