@@ -42,7 +42,47 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-18 — upstream (build123d): `export_gltf` reports SUCCESS while writing an EMPTY GLB, and an `import_step` tree cannot be exported at all — FLAGGED + MITIGATION IDENTIFIED (blocks the Task-5 CAD viewer) 2026-07-14
+
+- **Severity:** high **for the CAD feature** (it silently produces an empty 3D model), zero today (no CAD code shipped yet). Found by probing the real library **before** writing the converter, per CLAUDE.md rule 6 — not by reading its docs.
+- **Context:** Task 5's exploded-view viewer needs a **GLB with one named node per part**. `build123d-mcp`'s sandboxed `export` tool **cannot emit GLB** (formats are `step`/`stl`/`dxf`/`svg` only, and the sandbox strips `open`/`os`/`pathlib`), so Nightjar's design is: the model exports **STEP**, and a **trusted Nightjar-side converter** does STEP → GLB via `build123d.export_gltf`. Both halves of that conversion turn out to be booby-trapped.
+- **What (verified on build123d 0.11.1 / cadquery-ocp-novtk, Python 3.12):**
+  1. **`import_step`'s tree is not exportable.** Re-importing a STEP assembly yields a tree that is *structurally identical* to the original — same labels, same `wrapped` handles, same volumes, same solid count, and `PreOrderIter` walks it correctly — yet `export_gltf` on it writes a GLB with **0 nodes and 0 meshes**. It fails even for a **single** re-imported solid. Explicitly calling `.mesh(...)` on every node first does **not** help, so this is **not** a tessellation problem — the imported shape objects themselves cannot be serialized.
+  2. **`export_gltf` returns `True` anyway.** It returned `True` in *every* case, including both empty-output ones. Its `raise RuntimeError` on write failure is commented out in the source, and the boolean it returns instead is **not** a reliable success signal either. **Checking the return value is NOT sufficient** — an earlier note in `JUNE_better.md` claimed it was; that has been corrected.
+- **Mitigation (verified working):** in the trusted converter, **rebuild the tree** from the imported shapes' raw OCCT handles before exporting — wrap each child's `.wrapped` in a fresh `Solid(...)`, carry its `.label` across, and assemble a fresh `Compound`. That round-trips correctly and **preserves the per-part names** the exploded view depends on:
+
+  | approach | GLB nodes |
+  |---|---|
+  | single re-imported solid | 0 |
+  | re-imported tree, as-is | 0 |
+  | re-imported tree + explicit `mesh()` | 0 |
+  | **rebuilt `Compound` from `wrapped` handles** | **✅ `['planetary_gearset','sun_gear','planet_gear_1']`, 2 meshes** |
+
+- **To do (lands with the Task-5 converter PR):** the converter must (a) rebuild the tree as above, and (b) **validate the emitted GLB bytes** — parse the JSON chunk and assert `nodes > 0` and `meshes > 0` — rather than trusting `export_gltf`'s return value. Without (b) a regression here ships an empty 3D model that looks like a success.
+
+---
+
+## NJ-17 — no scheduler daemon: JUNE has no long-lived process that could ever fire a reminder — FLAGGED (Task-6 prerequisite) 2026-07-14
+
+- **Severity:** high for the reminders feature; it is the structural reason NJ-16's dead rows are never noticed.
+- **What:** JUNE has **no long-lived host process**. The MCP servers are **stdio** children of the OpenCode engine (they exist only for the duration of a tool call), and the Electron main process runs **no scheduler/poller**. Odysseus upstream *does* ship a scheduler (`research/odysseus/` even has a `test_scheduler_restart_doublefire.py`), but Nightjar runs only the MCP wrappers — **not** Odysseus's Flask/FastAPI app or its scheduler. So even a correctly-written `next_run` would have nothing to act on it.
+- **Consequence:** "remind me at 1pm" can be *stored* and can never *fire*. Both halves of Task 6 exist precisely to supply this missing daemon: the **local scheduler** in the Electron main (free tier — notifications while the app is open) and the **always-on server** (paid tier — Telegram delivery with the laptop closed).
+- **To do:** Task 6. Closes together with NJ-16.
+
+---
+
+## NJ-16 — `pim_server.task_create` writes DEAD rows: no `next_run`, and nothing polls them — reminders silently never fire — FLAGGED (Task-6 prerequisite) 2026-07-14
+
+- **Severity:** high — it is a **silent** failure. The tool returns `{"id", "name", "schedule"}` and the model cheerfully tells the user the reminder is set. Nothing ever fires.
+- **Root cause:** `phase2-odysseus/servers/pim_server.py` `task_create` inserts a `ScheduledTask` with `status="active"` but writes only `name`/`prompt`/`task_type`/`schedule`/`scheduled_time`. It never computes **`next_run`** — even though `ScheduledTask.next_run` is a real, **indexed** column (`core/database.py`) that exists exactly to be polled. It also leaves `scheduled_date` (the "once" case) and `scheduled_day` (weekly/monthly) `NULL`, so the row does not even carry enough information to derive a fire time later.
+- **Compounding:** nothing polls the table at all (see **NJ-17**), so the dead rows are never surfaced. `task_list` happily lists them as `active`, which makes the failure look like success from every angle.
+- **To do (Task 6, first PR):** compute a real `next_run` on create (for `once`/`daily`/`weekly`/`monthly`, honoring the user's timezone → stored UTC), add `task_due` / `task_mark_fired` so a scheduler can claim and advance jobs, and migrate the existing dead rows. Unit-test the `next_run` math offline. Closes together with NJ-17.
+
+---
+
 ## NJ-15 — latent: Odysseus's role-based endpoint resolver (email-AI path) is cloud-capable via settings-pointer / OAuth / Tailscale and leaks "Odysseus" branding on OpenRouter — FLAGGED (dormant; not activated by the provider-selection work) 2026-07-11
+
+> **Update 2026-07-14 (PR #51 — email parked for v1):** this is now **more** dormant, not less. The entry below notes the path was gated by the assistant agent allowing only `list_emails`/`send_email`; **both of those allows have since been removed**, the research agent's `send_email` allow is gone, and the `odysseus-email` MCP server is `enabled: false` — so the `ai_draft_email_reply` tool that reaches this resolver is unreachable **and its server is not even spawned**. Re-check this entry when email is activated for v2; the caveats below (unconfigured creds, Gmail needing an app password, creds stored in plaintext config rather than encrypted like BYOK keys) are all still open and must be resolved *together* with the permission flips.
 
 - **Severity:** low — **dormant**. Surfaced by the provider-selection audit + close-out review (CLAUDE.md rule 7: flag, don't silently fix or ignore). Not reachable in the shipped config.
 - **What:** `research/odysseus/src/endpoint_resolver.py` has its OWN backend-selection machinery, separate from Nightjar's five capabilities: `resolve_endpoint(role)` picks a `ModelEndpoint` by a settings **pointer** (`{role}_endpoint_id` → `utility_` → caller fallback → `default_`), with fallback **chains** (`*_model_fallbacks`) and a **second** vision resolver (`resolve_vision_fallback_candidates`). It is reached by the `odysseus-email` `ai_draft_email_reply` MCP tool (`email_server.py`), and cloud routing there can come from three mechanisms the capability model doesn't cover: a static DB `api_key`, a **session-backed OAuth** credential (`provider_auth_id` → ChatGPT-subscription / Copilot, `resolve_endpoint_runtime`), and **Tailscale** host remap (`resolve_url` → `tailscale status` fallback). It also hardcodes OpenRouter branding `HTTP-Referer: https://github.com/pewdiepie-archdaemon/odysseus` + `X-OpenRouter-Title: Odysseus` in `_provider_headers`/`build_headers` (identity-rule violation, relates to **NJ-1**).
