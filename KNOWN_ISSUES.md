@@ -72,7 +72,20 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 
 ---
 
-## NJ-16 — `pim_server.task_create` writes DEAD rows: no `next_run`, and nothing polls them — reminders silently never fire — FLAGGED (Task-6 prerequisite) 2026-07-14
+## NJ-16 — `pim_server.task_create` writes DEAD rows: no `next_run`, and nothing polls them — reminders silently never fire — FIX IMPLEMENTED (the dead-rows half; the poller is NJ-17 / Task-6 PR 15) 2026-07-14
+
+> **Update (PR #62):** the **dead-rows half is fixed.** `task_create` now computes a real
+> `next_run` from schedule + time via a pure, unit-tested `schedule_backend.compute_next_run`
+> (once/daily/weekly/monthly, UTC), and rejects an unschedulable request instead of writing a
+> corpse. Added `task_due(now)` (polls the `ix_scheduled_tasks_due` index) and
+> `task_mark_fired(id, now)` (advances a recurring task's `next_run` from its fire slot,
+> completes a `once`), plus a startup migration that heals existing `active`+`next_run IS NULL`
+> rows (backfills `next_run`, or completes a dead past-`once`). Verified offline:
+> `schedule_backend.py` self-test (15 next_run cases) + `test_pim_tasks.py` (migration heal,
+> `task_due`, recurring-advance, once-completes). **Still open:** nothing *polls* `task_due`
+> yet — that's the missing daemon (**NJ-17**), supplied by the local scheduler (Task-6 PR 15,
+> free tier) and the always-on server (Task-6 PR 17, paid). NJ-16 graduates to RESOLVED when a
+> reminder actually fires on a running instance.
 
 - **Severity:** high — it is a **silent** failure. The tool returns `{"id", "name", "schedule"}` and the model cheerfully tells the user the reminder is set. Nothing ever fires.
 - **Root cause:** `phase2-odysseus/servers/pim_server.py` `task_create` inserts a `ScheduledTask` with `status="active"` but writes only `name`/`prompt`/`task_type`/`schedule`/`scheduled_time`. It never computes **`next_run`** — even though `ScheduledTask.next_run` is a real, **indexed** column (`core/database.py`) that exists exactly to be polled. It also leaves `scheduled_date` (the "once" case) and `scheduled_day` (weekly/monthly) `NULL`, so the row does not even carry enough information to derive a fire time later.
