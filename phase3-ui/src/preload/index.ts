@@ -93,11 +93,12 @@ contextBridge.exposeInMainWorld("nightjar", {
     setBulk: (prefs: Record<string, CapabilityPref>): Promise<Record<string, CapabilityPref>> =>
       ipcRenderer.invoke("capabilities:setBulk", prefs),
   },
-  // CAD (Task 5): convert a model-exported STEP file to a viewable GLB.
+  // CAD (Task 5): convert a model-exported STEP file to a viewable GLB, and read its bytes.
   cad: {
     convert: (
       stepPath: string,
     ): Promise<{ ok: boolean; glbPath?: string; parts?: string[]; nodes?: number; meshes?: number; error?: string }> =>
       ipcRenderer.invoke("cad:convert", stepPath),
+    readGlb: (glbPath: string): Promise<Uint8Array | null> => ipcRenderer.invoke("cad:readGlb", glbPath),
   },
 })

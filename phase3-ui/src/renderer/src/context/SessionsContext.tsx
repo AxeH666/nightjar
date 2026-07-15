@@ -19,12 +19,13 @@ import { toolCallFromPart } from "../lib/opencode"
 import type { OpenCodeEvent, FilePart, SessionInfo, MessageWithParts } from "../lib/opencode"
 import { type UiMessage, type UiBlock } from "../components/ChatSurface"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
+import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
 
-export type SlotId = "chat" | "code"
+export type SlotId = "chat" | "code" | "cad"
 
 export interface SessionState {
   id: string
@@ -59,8 +60,8 @@ const freshRefs = (): RefBundle => ({
 })
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding" }
-const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June coding" }
+const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding", cad: "cad" }
+const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June coding", cad: "June CAD" }
 
 // Client-side "kind" tag for sessions. OpenCode has NO per-session kind, so we
 // remember which session ids have served as CODE sessions (created or resumed
@@ -133,6 +134,12 @@ interface SessionsValue {
   setBusy: (sid: string, val: boolean) => void
   // code-session kind registry (Code tab list); persisted client-side
   codeSessionIds: Set<string>
+  // CAD (Task 5): the current converted model for the viewer + whether a conversion is
+  // running. The CAD agent's export tool completing drives these; the CAD screen renders them.
+  cadModel: { glb: ArrayBuffer; parts: string[] } | null
+  cadBusy: boolean
+  cadError: string | null
+  clearCadModel: () => void
   // recovery offers (chat slot)
   fallbackToLocal: () => void
   acceptOpenRouterSwitch: () => void
@@ -153,7 +160,22 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const { onToolCall } = useArtifact()
 
   const [sessions, setSessions] = useState<Record<string, SessionState>>({})
-  const [slots, setSlots] = useState<Record<SlotId, string>>({ chat: "", code: "" })
+  const [slots, setSlots] = useState<Record<SlotId, string>>({ chat: "", code: "", cad: "" })
+  // CAD viewer model + conversion status (Task 5).
+  const [cadModel, setCadModel] = useState<{ glb: ArrayBuffer; parts: string[] } | null>(null)
+  const [cadBusy, setCadBusy] = useState(false)
+  const [cadError, setCadError] = useState<string | null>(null)
+  // Which export tool-calls have already been converted (by callID) — a component-level ref,
+  // NOT per-session, so it survives a reconnect's session rebind (Bugbot: a per-session set is
+  // gc'd, so an export that completed during a reconnect would never build). And a monotonic
+  // generation so, when several exports complete close together, only the latest one's result
+  // (and its busy=false) is applied — a slow older convert can't clobber a newer model.
+  const processedExportsRef = useRef<Set<string>>(new Set())
+  const cadGenRef = useRef(0)
+  const clearCadModel = useCallback(() => {
+    setCadModel(null)
+    setCadError(null)
+  }, [])
   // Persisted set of session ids that have served as CODE sessions (see the
   // module-level helpers). The Code tab filters GET /session down to these.
   const [codeSessionIds, setCodeSessionIds] = useState<Set<string>>(loadCodeSessionIds)
@@ -177,7 +199,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
 
   const perSessionRefs = useRef<Map<string, RefBundle>>(new Map())
   const sessionsRef = useRef<Record<string, SessionState>>({})
-  const slotsRef = useRef<Record<SlotId, string>>({ chat: "", code: "" })
+  const slotsRef = useRef<Record<SlotId, string>>({ chat: "", code: "", cad: "" })
   const agentsRef = useRef(agents) // stable read of the live agent list (for validAgent, without a deps cascade)
   useEffect(() => {
     sessionsRef.current = sessions
@@ -521,6 +543,74 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     }
   }, [primaryId, clientRef, rebindSlot, markCodeSession, unmarkCodeSession])
 
+  // cad slot ← created here on connect, recreated on reconnect (Task 5). Simpler than the
+  // code slot: CAD sessions aren't in any history list, so there's no reaping to do — we just
+  // carry the transcript into the new session on a reconnect.
+  useEffect(() => {
+    if (!primaryId) return
+    const client = clientRef.current
+    if (!client) return
+    let cancelled = false
+    ;(async () => {
+      for (;;) {
+        if (cancelled) return
+        try {
+          const cadId = await client.createSession(DEFAULT_TITLE.cad)
+          if (!cancelled) rebindSlot("cad", cadId, true)
+          return
+        } catch {
+          await sleep(1500)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [primaryId, clientRef, rebindSlot])
+
+  // CAD (Task 5): watch the cad session's MESSAGES (not live SSE) for a completed export tool
+  // call, then convert its STEP → GLB and hand the bytes to the viewer. Watching messages —
+  // which include the transcript carried across a reconnect — means an export that completed
+  // during a reconnect is still picked up (Bugbot). Dedup by callID via a component-level ref
+  // (survives rebind); a generation guard makes the latest export win under concurrency.
+  const cadSid = slots.cad
+  const cadMessages = cadSid ? sessions[cadSid]?.messages : undefined
+  useEffect(() => {
+    if (!cadMessages) return
+    for (const m of cadMessages) {
+      for (const b of m.blocks) {
+        if (b.kind !== "tool") continue
+        const call = b.call
+        if (
+          call.status !== "completed" ||
+          !call.output ||
+          !/build123d_export/i.test(call.tool) ||
+          processedExportsRef.current.has(call.callID)
+        )
+          continue
+        const path = /Exported to (.+?\.step)\b/i.exec(call.output)?.[1]
+        if (!path) continue
+        processedExportsRef.current.add(call.callID)
+        const gen = ++cadGenRef.current
+        setCadBusy(true)
+        setCadError(null)
+        cad
+          .buildModel(path)
+          .then((res) => {
+            if (gen !== cadGenRef.current) return // superseded by a newer export
+            if ("error" in res) setCadError(res.error)
+            else setCadModel({ glb: res.glb, parts: res.parts })
+          })
+          .catch((e) => {
+            if (gen === cadGenRef.current) setCadError(e instanceof Error ? e.message : String(e))
+          })
+          .finally(() => {
+            if (gen === cadGenRef.current) setCadBusy(false)
+          })
+      }
+    }
+  }, [cadMessages])
+
   // Validate every session's agent against the live agent list (Bugbot: default
   // agent init removed + the ported #21 mode-revalidation). DEFAULT_AGENT
   // ("assistant"/"coding") may be absent from listAgents, and a reconnect can
@@ -762,6 +852,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     hasSession,
     setBusy,
     codeSessionIds,
+    cadModel,
+    cadBusy,
+    cadError,
+    clearCadModel,
     fallbackToLocal,
     acceptOpenRouterSwitch,
   }
