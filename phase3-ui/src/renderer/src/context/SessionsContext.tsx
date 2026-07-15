@@ -166,13 +166,18 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const [cadModel, setCadModel] = useState<{ glb: ArrayBuffer; parts: string[] } | null>(null)
   const [cadBusy, setCadBusy] = useState(false)
   const [cadError, setCadError] = useState<string | null>(null)
-  // Which export tool-calls have already been converted (by callID) — a component-level ref,
-  // NOT per-session, so it survives a reconnect's session rebind (Bugbot: a per-session set is
-  // gc'd, so an export that completed during a reconnect would never build). And a monotonic
-  // generation so, when several exports complete close together, only the latest one's result
-  // (and its busy=false) is applied — a slow older convert can't clobber a newer model.
+  // Which export tool-calls have been SUCCESSFULLY shown (or genuinely errored) — by callID, a
+  // component-level ref (survives a reconnect's session rebind; Bugbot). A superseded convert
+  // is deliberately NOT added here, so it stays re-eligible (Bugbot: clicking Load demo mid-
+  // convert must not permanently strand a completed agent export). convertingExportsRef guards
+  // against re-triggering an export that's currently in flight (no re-convert loop). cadGenRef
+  // is a monotonic "latest wins" token so a slow older convert never clobbers a newer model.
   const processedExportsRef = useRef<Set<string>>(new Set())
+  const convertingExportsRef = useRef<Set<string>>(new Set())
   const cadGenRef = useRef(0)
+  // Bumped to re-run the export watcher when nothing else changed (e.g. a demo load failed and
+  // a superseded agent export should now re-surface).
+  const [cadRetryTick, setCadRetryTick] = useState(0)
   const clearCadModel = useCallback(() => {
     setCadModel(null)
     setCadError(null)
@@ -187,11 +192,26 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       .loadHero()
       .then((res) => {
         if (gen !== cadGenRef.current) return
-        if ("error" in res) setCadError(res.error)
-        else setCadModel({ glb: res.glb, parts: res.parts })
+        if ("error" in res) {
+          setCadError(res.error)
+          // The demo failed after superseding any in-flight agent export. Re-run the watcher
+          // so a completed-but-superseded export can re-surface instead of being stranded.
+          setCadRetryTick((t) => t + 1)
+        } else {
+          setCadModel({ glb: res.glb, parts: res.parts })
+          // Demo shown by explicit user choice: mark existing completed exports processed so a
+          // later message tick can't re-surface an old export over the demo the user asked for.
+          const cadId = slotsRef.current.cad
+          for (const m of (cadId && sessionsRef.current[cadId]?.messages) || [])
+            for (const b of m.blocks)
+              if (b.kind === "tool" && b.call.status === "completed" && /build123d_export/i.test(b.call.tool))
+                processedExportsRef.current.add(b.call.callID)
+        }
       })
       .catch((e) => {
-        if (gen === cadGenRef.current) setCadError(e instanceof Error ? e.message : String(e))
+        if (gen !== cadGenRef.current) return
+        setCadError(e instanceof Error ? e.message : String(e))
+        setCadRetryTick((t) => t + 1)
       })
       .finally(() => {
         if (gen === cadGenRef.current) setCadBusy(false)
@@ -606,31 +626,40 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           call.status !== "completed" ||
           !call.output ||
           !/build123d_export/i.test(call.tool) ||
-          processedExportsRef.current.has(call.callID)
+          processedExportsRef.current.has(call.callID) || // already shown / errored
+          convertingExportsRef.current.has(call.callID) // in flight — don't double-convert
         )
           continue
         const path = /Exported to (.+?\.step)\b/i.exec(call.output)?.[1]
         if (!path) continue
-        processedExportsRef.current.add(call.callID)
+        convertingExportsRef.current.add(call.callID)
         const gen = ++cadGenRef.current
         setCadBusy(true)
         setCadError(null)
         cad
           .buildModel(path)
           .then((res) => {
-            if (gen !== cadGenRef.current) return // superseded by a newer export
+            convertingExportsRef.current.delete(call.callID)
+            // Superseded by a newer convert (another export, or a Load-demo click): drop this
+            // result but leave the export re-eligible so it can re-surface if the newer one
+            // fails and the watcher re-runs.
+            if (gen !== cadGenRef.current) return
+            processedExportsRef.current.add(call.callID) // terminal for this export
             if ("error" in res) setCadError(res.error)
             else setCadModel({ glb: res.glb, parts: res.parts })
           })
           .catch((e) => {
-            if (gen === cadGenRef.current) setCadError(e instanceof Error ? e.message : String(e))
+            convertingExportsRef.current.delete(call.callID)
+            if (gen !== cadGenRef.current) return
+            processedExportsRef.current.add(call.callID)
+            setCadError(e instanceof Error ? e.message : String(e))
           })
           .finally(() => {
             if (gen === cadGenRef.current) setCadBusy(false)
           })
       }
     }
-  }, [cadMessages])
+  }, [cadMessages, cadRetryTick])
 
   // Validate every session's agent against the live agent list (Bugbot: default
   // agent init removed + the ported #21 mode-revalidation). DEFAULT_AGENT
