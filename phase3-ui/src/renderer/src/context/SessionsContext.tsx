@@ -389,11 +389,18 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const refs = perSessionRefs.current.get(sid)
       // NJ-7: the model DID call generate_image (any status) → cancel the retry-once.
       if (refs?.imageGen && /generate_image/i.test(call.tool)) refs.imageGen.sawTool = true
-      // CAD: note whether this turn built/rendered a shape and whether it exported (any
-      // status counts — an export in flight still means we shouldn't auto-trigger one).
+      // CAD: note whether this turn built/rendered a shape, and whether it produced a
+      // SUCCESSFUL export. sawExport must match what actually fills the viewer — the watcher
+      // only converts a COMPLETED export with a parseable STEP path. A failed / rejected /
+      // empty export must NOT set sawExport, or it would suppress the auto-export retry and
+      // leave the viewer empty with no recovery (Bugbot). By session.idle every tool call is
+      // terminal, so a still-pending export can't wrongly trip the retry here.
       if (refs?.cadExport) {
-        if (/build123d_export/i.test(call.tool)) refs.cadExport.sawExport = true
-        else if (/build123d_(execute|render_view)/i.test(call.tool)) refs.cadExport.sawBuild = true
+        if (/build123d_export/i.test(call.tool)) {
+          if (call.status === "completed" && /Exported to:?\s*\S[^\n]*?\.step\b/i.test(call.output ?? "")) refs.cadExport.sawExport = true
+        } else if (/build123d_(execute|render_view)/i.test(call.tool)) {
+          refs.cadExport.sawBuild = true
+        }
       }
       updateMessages(sid, (prev) =>
         prev.map((m) => {
