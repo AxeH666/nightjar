@@ -1,5 +1,5 @@
 // Nightjar preload — minimal safe bridge to the renderer.
-import { contextBridge, ipcRenderer } from "electron"
+import { contextBridge, ipcRenderer, webUtils } from "electron"
 
 export interface ServiceStatus {
   name: string
@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld("nightjar", {
     ipcRenderer.invoke("nightjar:readAttachment", path),
   saveAttachment: (dataUrl: string, name: string): Promise<string> =>
     ipcRenderer.invoke("nightjar:saveAttachment", dataUrl, name),
+  // Electron 32 removed File.path. webUtils.getPathForFile is the ONLY way to recover a
+  // dropped/browsed file's real on-disk path — it MUST be called in the preload with the
+  // actual File object. Returns "" for a blob with no backing file (e.g. a pasted
+  // screenshot), so the caller falls back to reading the bytes.
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   readGeneratedImage: (filename: string): Promise<string | null> =>
     ipcRenderer.invoke("nightjar:readGeneratedImage", filename),
   // Live-preview / Artifacts: mirror write/edit content into a per-session sandbox

@@ -42,6 +42,13 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-27 — dropped/browsed files saved a base64 COPY instead of using the real path (File.path removed in Electron 32) — FIXED (real-path branch needs native Windows) 2026-07-15
+
+- **Severity:** low-medium — it worked but wastefully (a saved copy per dropped image), and on native Windows the "proper" path was unavailable because `File.path` was removed in Electron 32.
+- **Fix (`preload/index.ts` + `lib/attachments.ts`):** expose `webUtils.getPathForFile(file)` over the contextBridge — the ONLY Electron 32+ way to recover a dropped/browsed File's on-disk path (it must be called in the preload with the real File). `fileToAttachment` now: a File with a real path → read the ORIGINAL via `readAttachment` (real path for the local vision tool, no saved copy); a blob with no path (pasted screenshot) → `getPathForFile` returns "" → falls back to the FileReader + `saveAttachment` copy. `dragover` `preventDefault` is already in place (main.tsx window guard + the composer's `onDragOver`).
+- **Verified (WSL):** `getPathForFile` is exposed and returns "" for a blob without throwing → the fallback (which the synthetic-drop harness confirms produces a chip) runs. Typecheck (node+web) clean.
+- **Needs native Windows to confirm:** the real-path branch (a real OS-dropped file → non-empty path → `readAttachment`). WSL doesn't deliver OS file drops at all (the WSL DnD limitation), so that branch can't be exercised here; on native Windows DnD it makes the dropped file attach with its real path.
+
 ## NJ-26 — attach file picker opened at the empty Linux $HOME under WSL, hiding the user's Windows files — FIXED (dialog-open needs a GUI to confirm) 2026-07-15
 
 - **Severity:** medium — under WSL the picker opened at the Linux home, where none of the user's real documents/images live, so "Browse" looked like it had nothing to attach.
