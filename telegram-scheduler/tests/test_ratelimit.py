@@ -43,12 +43,14 @@ def test_users_have_independent_windows():
     assert rl.allow(2) is True            # user 2 unaffected
 
 
-def test_idle_users_are_swept_so_memory_is_bounded():
+def test_hits_map_is_lru_bounded_by_max_users():
+    # An HTTP id-rotation flood must not grow _hits without bound: it is hard-capped at max_users
+    # via LRU eviction, and a recently-touched user is never the one evicted.
     clk = FakeClock()
-    rl = RateLimiter(per_minute=5, window_s=60.0, clock=clk, sweep_every=3)
-    rl.allow(1)                # user 1 active at t0
-    clk.advance(61)            # user 1 now idle (its hit aged past the window)
-    rl.allow(2)                # calls=2
-    rl.allow(2)                # calls=3 → triggers a sweep that drops idle user 1
-    assert 1 not in rl._hits
-    assert 2 in rl._hits
+    rl = RateLimiter(per_minute=5, window_s=60.0, clock=clk, max_users=2)
+    rl.allow(1)
+    rl.allow(2)
+    rl.allow(1)                # touch user 1 → user 2 becomes least-recently-used
+    rl.allow(3)                # 3rd distinct user, over the cap → evicts the LRU (user 2)
+    assert set(rl._hits.keys()) == {1, 3}
+    assert len(rl._hits) == 2
