@@ -65,6 +65,34 @@
         "browser-use_run_browser_task": "ask"
       }
     },
+    "cad": {
+      "mode": "primary",
+      "description": "Prompt-to-CAD — build 3D parts with build123d, verify with measure/render, export a model",
+      "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, `row-bot`, or `cad-build123d` (e.g. `cad-build123d_execute`) — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, Row-Bot, or build123d; those are internal building blocks you use, not you. As Nightjar in CAD mode: build 3D parts and assemblies by writing build123d Python with `cad-build123d_execute`. Register every part with `show(shape, \"name\")` so it becomes a named object. Work in a see-measure-correct loop: after any boolean or non-trivial step, call `cad-build123d_measure` (volume / bbox / mass) and `cad-build123d_render_view` to confirm the geometry is correct and non-empty BEFORE moving on — do not assume an operation succeeded. When the model is complete and verified, call `cad-build123d_export` with format 'step' and object_name '*' to emit the whole assembly as a hierarchical STEP with each part named; Nightjar converts that to a viewable 3D model. The execute sandbox blocks filesystem/OS/network access and has a wall-clock timeout — keep each execute focused. Keep the user informed as you build; if a step fails, read the error's fix hints and correct the build123d code — never claim a part is done without a measure/render that confirms it.",
+      "permission": {
+        "*": "deny",
+        "cad-build123d_version": "allow",
+        "cad-build123d_health_check": "allow",
+        "cad-build123d_session_state": "allow",
+        "cad-build123d_measure": "allow",
+        "cad-build123d_render_view": "allow",
+        "cad-build123d_validate": "allow",
+        "cad-build123d_inspect_part": "allow",
+        "cad-build123d_cross_sections": "allow",
+        "cad-build123d_design_audit": "allow",
+        "cad-build123d_analyze_printability": "allow",
+        "cad-build123d_find_holes": "allow",
+        "cad-build123d_last_error": "allow",
+        "cad-build123d_repair_hints": "allow",
+        "cad-build123d_workflow_hints": "allow",
+        "cad-build123d_search_library": "allow",
+        "cad-build123d_execute": "ask",
+        "cad-build123d_export": "ask",
+        "cad-build123d_import_cad_file": "ask",
+        "cad-build123d_load_part": "ask",
+        "cad-build123d_install_skill": "ask"
+      }
+    },
     "coding": {
       "mode": "primary",
       "description": "Local coding agent (reads allowed; edits/shell gated for approval)",
@@ -132,6 +160,13 @@
       "environment": { "ODYSSEUS_REPO": "{env:NIGHTJAR_ROOT}/research/odysseus", "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "{env:HOME}/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
       "enabled": true,
       "timeout": 120000
+    },
+    "cad-build123d": {
+      "type": "local",
+      "command": ["{env:NIGHTJAR_ROOT}/phase-cad/.venv/bin/python", "{env:NIGHTJAR_ROOT}/phase-cad/cad_mcp_server.py"],
+      "environment": { "BUILD123D_IN_PROCESS": "1" },
+      "enabled": true,
+      "timeout": 180000
     }
   }
 }
