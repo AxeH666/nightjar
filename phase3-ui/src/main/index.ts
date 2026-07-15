@@ -15,6 +15,7 @@ import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
+import { startLocalScheduler, stopLocalScheduler } from "./scheduler"
 import * as preview from "./preview-server"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
@@ -505,6 +506,9 @@ ipcMain.handle("cad:loadHero", () => buildHeroModel())
 
 app.whenReady().then(() => {
   createWindow()
+  // Local reminder scheduler (Task 6 free tier): poll for due tasks + fire desktop
+  // notifications while the app is open. Gated on the odysseus venv inside start().
+  startLocalScheduler()
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
   supervisor.setEnv("opencode-serve", opencodeServeEnv())
   // Seed the image endpoint to match the persisted image-capability choice (Offline
@@ -538,6 +542,7 @@ app.on("before-quit", async (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
+  stopLocalScheduler()
   preview.stopServer()
   await supervisor.stop().catch(() => {})
   app.quit()
