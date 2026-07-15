@@ -21,6 +21,8 @@ Consolidated so nothing drifts. Prune as items resolve. (Cross-session copy: the
 
 **Deferred code follow-ups (own PRs):** NJ-19 (scheduler DST/tz), NJ-22 (startup validation of BYOK defaultModel vs `/config/providers`), NJ-23 (per-provider model picker for retired-model "pick another"), NJ-11/B3 (diffusion server-side `--gen-timeout`).
 
+**Design plans (future, not v1):** the **LAB hub + Mechanical/Physics + Chem/Bio labs** design lives in `Lab.md` (repo root) — **design-only, deferred until after the Telegram work** (user, 2026-07-15). Chem's 14-tool set is decided: all kept; the four that conflict with JUNE's constraints (Elementari = Svelte, Catalyst.jl = Julia, Reaktoro = conda/C++, AiZynthFinder = dual-use retrosynthesis) are **kept via wrappers in a later sub-phase**, with lighter pip substitutes for V1. **Physics** (§5.4–5.8) tool stack is verified — V1 is entirely pip/permissive/CPU (SciPy/SymPy/PyBullet/MuJoCo/Pymunk/SfePy/py-pde/rayoptics/hapsira/ikpy); WASM engines (Rapier/Jolt/Ammo) rejected under CSP; heavy solvers (CalculiX/DOLFINx/Meep/OpenMC) conda-wrapped later. Open: `Lab.md` §9.8 (Chem — CSP fork, Ketcher, backend egress, ambiguous names Atom Simulator/MOSAIC, ML/data licenses, `chem_hazard_screen`) plus the **§5.8 Physics `physics_hazard_screen` device-signal ruleset** (the weapons/nuclear *scope* is **settled**: "simulate the phenomenon, not engineer the device" — a 2026-07-15 request to put weapon/explosive/nuclear-**device** design/optimization in scope was **declined and stays declined**, a hard boundary, not negotiable). §8 invariant-6 amended: dual-use is **kept-but-gated** (ask + red-teamed screen + audit + private), not declined at build time.
+
 ---
 
 ## 🧪 MANUAL VERIFICATION CHECKLIST (NJ-4 … NJ-11)
