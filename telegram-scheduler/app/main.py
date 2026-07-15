@@ -8,6 +8,7 @@ Login = Telegram identity: a user's numeric Telegram id IS their account. /start
 from __future__ import annotations
 
 import asyncio
+import hmac
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -32,7 +33,7 @@ class ReminderRequest(BaseModel):
 
 
 def create_app(config: Config, db: Database, scheduler: ReminderScheduler,
-               llm_call: LlmCall, transport: Transport,
+               llm_call: LlmCall,
                rate_limiter: Optional[RateLimiter] = None) -> FastAPI:
     app = FastAPI(title="Nightjar Telegram Scheduler", version="1.0")
 
@@ -41,17 +42,15 @@ def create_app(config: Config, db: Database, scheduler: ReminderScheduler,
         if not config.api_token:
             return
         expected = f"Bearer {config.api_token}"
-        if authorization != expected:
+        # Constant-time compare so the token can't be recovered via response-timing.
+        if not hmac.compare_digest(authorization, expected):
             raise HTTPException(status_code=401, detail="invalid or missing API token")
 
     @app.get("/health")
     def health() -> dict:
-        return {
-            "status": "ok",
-            "llm_provider": config.llm_provider,
-            "transport": type(transport).__name__,
-            "daily_cap": config.daily_cap,
-        }
+        # Liveness only — unauthenticated, so it must not disclose config (provider/caps/transport)
+        # to anyone who can reach the port.
+        return {"status": "ok"}
 
     @app.post("/reminders")
     def create_reminder(req: ReminderRequest, _: None = Depends(require_token)) -> dict:
@@ -157,17 +156,31 @@ def _valid_tz(name: str) -> bool:
         return False
 
 
+def _require_safe_config(config: Config) -> None:
+    """Refuse to serve a real bot with an unauthenticated (open) HTTP API: anyone who could reach
+    the port would be able to inject/read/cancel reminders for any user. Set API_TOKEN, or set
+    ALLOW_OPEN_HTTP=1 to run open intentionally (e.g. behind a trusted private network, port
+    unpublished)."""
+    if config.bot_token and not config.api_token and not config.allow_open_http:
+        raise RuntimeError(
+            "Refusing to start: BOT_TOKEN is set but API_TOKEN is empty, so the HTTP API is OPEN — "
+            "anyone reaching the port could inject/read/cancel reminders for any user. "
+            "Set API_TOKEN, or set ALLOW_OPEN_HTTP=1 to run open intentionally."
+        )
+
+
 async def _serve() -> None:
     import uvicorn
 
     config = load_config()
+    _require_safe_config(config)
     db = Database(config.db_url)
     transport: Transport = TelegramTransport(config.bot_token) if config.bot_token else MockTransport()
     scheduler = ReminderScheduler(config.db_url, delivery=transport.send)
     scheduler.start()
     llm_call = make_llm_call(config)
     rate_limiter = RateLimiter(config.user_rate_per_min)
-    app = create_app(config, db, scheduler, llm_call, transport, rate_limiter=rate_limiter)
+    app = create_app(config, db, scheduler, llm_call, rate_limiter=rate_limiter)
 
     server = uvicorn.Server(uvicorn.Config(app, host=config.http_host, port=config.http_port,
                                            log_level="info"))

@@ -78,10 +78,12 @@ knobs (all in `.env.example`):
 - **`LLM_TIMEOUT_S`** (default `30`) — hard wall-clock timeout per LLM call.
 
 Note: the **bot** is open to anyone who finds it — Telegram authenticates each user's id and the
-caps bound cost, but there is no allowlist. The **HTTP API** is a *trusted-backend* surface: its
-single `API_TOKEN` acts as a superuser (the caller names the `telegram_id`), so keep it secret and
-don't expose the port to untrusted networks. (Bot allowlist + HTTP-exposure hardening land in a
-follow-up PR.)
+caps bound cost, but there is no allowlist (possible future work). The **HTTP API** is a
+*trusted-backend* surface: its single `API_TOKEN` acts as a superuser (the caller names the
+`telegram_id`), so keep it secret and don't publish the port to untrusted networks. The server
+**refuses to start** if `BOT_TOKEN` is set without an `API_TOKEN` (set `ALLOW_OPEN_HTTP=1` to run
+open on purpose); token checks are constant-time; and the bot token is scrubbed from
+delivery-error logs.
 
 ## HTTP API
 
