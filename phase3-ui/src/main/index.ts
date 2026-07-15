@@ -14,7 +14,7 @@ import * as byok from "./byok"
 import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
-import { convertStepToGlb, readGlb } from "./cad"
+import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
 import * as preview from "./preview-server"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
@@ -500,6 +500,8 @@ ipcMain.handle("nightjar:openOllamaDownload", () => shell.openExternal("https://
 ipcMain.handle("cad:convert", (_e, stepPath: string) => convertStepToGlb(stepPath))
 // Read a converted GLB's bytes for the renderer's GLTFLoader.
 ipcMain.handle("cad:readGlb", (_e, glbPath: string) => readGlb(glbPath))
+// Build + convert the pre-authored planetary-gearset hero (the reliable demo).
+ipcMain.handle("cad:loadHero", () => buildHeroModel())
 
 app.whenReady().then(() => {
   createWindow()

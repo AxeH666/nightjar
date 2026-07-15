@@ -9,7 +9,7 @@ import { ChatSurface } from "../components/ChatSurface"
 import { CadViewer } from "../components/CadViewer"
 
 export function CadScreen() {
-  const { slots, messagesOf, busyOf, send, createImage, cadModel, cadBusy, cadError } = useSessions()
+  const { slots, messagesOf, busyOf, send, createImage, cadModel, cadBusy, cadError, loadCadHero } = useSessions()
   const { abortSession } = usePermission()
   const id = slots.cad
 
@@ -17,6 +17,18 @@ export function CadScreen() {
     <div className="flex h-full min-h-0">
       {/* Composer side */}
       <div className="flex min-h-0 w-[42%] min-w-[320px] flex-col border-r border-nightjar-surface">
+        {/* Reliable demo — the pre-authored planetary gearset, built directly (no model). */}
+        <div className="flex items-center gap-2 border-b border-nightjar-surface px-3 py-1.5 text-xs">
+          <span className="text-nightjar-text/50">Prompt-to-CAD</span>
+          <button
+            onClick={loadCadHero}
+            disabled={cadBusy}
+            title="Load the pre-authored planetary-gearset demo"
+            className="ml-auto rounded border border-nightjar-surface px-2 py-0.5 text-nightjar-text/70 hover:bg-nightjar-surface disabled:opacity-40"
+          >
+            ⚙ Load demo
+          </button>
+        </div>
         <ChatSurface
           messages={messagesOf(id)}
           busy={busyOf(id)}

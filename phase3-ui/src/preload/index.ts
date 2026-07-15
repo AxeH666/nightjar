@@ -100,5 +100,7 @@ contextBridge.exposeInMainWorld("nightjar", {
     ): Promise<{ ok: boolean; glbPath?: string; parts?: string[]; nodes?: number; meshes?: number; error?: string }> =>
       ipcRenderer.invoke("cad:convert", stepPath),
     readGlb: (glbPath: string): Promise<Uint8Array | null> => ipcRenderer.invoke("cad:readGlb", glbPath),
+    loadHero: (): Promise<{ ok: boolean; glb?: Uint8Array; parts?: string[]; error?: string }> =>
+      ipcRenderer.invoke("cad:loadHero"),
   },
 })
