@@ -42,6 +42,13 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-23 — Fireworks AI BYOK provider added; serverless catalog rotation caveat + no per-model "pick another" picker — FLAGGED (graceful, follow-up DEFERRED) 2026-07-15
+
+- **Severity:** low — Fireworks chat/research works with a live model id; the caveat only bites when Fireworks retires the pinned model.
+- **Context:** added Fireworks AI (registry id `fireworks-ai`, base URL from models.dev, OpenAI-compatible) as a BYOK provider for **chat + research** across the standard 4 touch-points: `phase3-ui/src/main/byok.ts` (switcher, default `accounts/fireworks/models/gpt-oss-120b`), `phase2-odysseus/workspace/opencode.json` (apiKey env ref), `phase3-ui/src/main/capabilities.ts` (research `onlineProviders`), `phase2-odysseus/servers/research_backend.py` (provider→base_url map). Image/vision intentionally skipped. websearch rides on the chat model (no extra wiring). Verified: the provider + `gpt-oss-120b` load in the live engine (`/config/providers`, 16 models); model-id split preserves the account-scoped path; typecheck + tests pass. **Unverified (rule 6):** a real end-to-end prompt/research run needs the user's Fireworks key.
+- **Caveat (b):** Fireworks' serverless catalog **rotates** — a retired model **404s at prompt time**. That is already handled GRACEFULLY (not a hard crash): a 404 arrives as a `session.error` → `handleSessionError` surfaces the existing "cloud model failed → Retry on local model" offer, and the user can re-pick a provider in the switcher.
+- **Deferred (durable):** the switcher exposes exactly ONE model per provider, so there's no in-app "this model was retired — pick another" flow. A proper fix is a per-provider model dropdown (list `/config/providers` models) + treating a 404 as "model retired" with that picker. Until then, a retired default is re-pinned in code (`byok.ts` + `research_backend.py`), verified against `curl :4096/config/providers`. Ties into NJ-22's durable defaultModel-validation idea.
+
 ## NJ-22 — BYOK default model ids drift out of the bundled models.dev registry (google/xai were dead-on-arrival) — FIXED, durable validation DEFERRED 2026-07-15
 
 - **Severity:** high for the affected providers (100% chat failure), zero for the local-first default path.

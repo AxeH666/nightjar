@@ -34,6 +34,15 @@ RESEARCH_PROVIDERS: Dict[str, Tuple[str, str, str, Dict[str, str]]] = {
     "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat", "NIGHTJAR_BYOK_DEEPSEEK", {}),
     "mistral": ("https://api.mistral.ai/v1", "mistral-large-latest", "NIGHTJAR_BYOK_MISTRAL", {}),
     "xai": ("https://api.x.ai/v1", "grok-2-latest", "NIGHTJAR_BYOK_XAI", {}),
+    # Fireworks AI (OpenAI-compatible). Model id MUST be the account-scoped path. The
+    # serverless catalog rotates — a retired model 404s; keep this pinned to a live id
+    # (verify against `curl :4096/config/providers`).
+    "fireworks-ai": (
+        "https://api.fireworks.ai/inference/v1",
+        "accounts/fireworks/models/gpt-oss-120b",
+        "NIGHTJAR_BYOK_FIREWORKS",
+        {},
+    ),
 }
 
 

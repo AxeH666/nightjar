@@ -47,7 +47,7 @@ export interface CapabilityMeta {
 export const CAPABILITIES: CapabilityMeta[] = [
   { id: "chat", name: "Chat & coding", onlineProviders: [], offlineLabel: "Local · Qwen3-4B" },
   { id: "image", name: "Image generation", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local diffusion (Z-Image)" },
-  { id: "research", name: "Deep research", onlineProviders: ["openai", "openrouter", "groq", "deepseek", "mistral", "xai"], offlineLabel: "Local · Qwen3-4B" },
+  { id: "research", name: "Deep research", onlineProviders: ["openai", "openrouter", "groq", "deepseek", "mistral", "xai", "fireworks-ai"], offlineLabel: "Local · Qwen3-4B" },
   { id: "vision", name: "Vision (image analysis)", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local · gemma3:4b" },
   { id: "browser", name: "Browser agent", onlineProviders: ["openrouter", "openai"], offlineLabel: "Local · Qwen3-4B" },
 ]

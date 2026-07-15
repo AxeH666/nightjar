@@ -57,6 +57,16 @@ export const BYOK_PROVIDERS: ByokProvider[] = [
   { id: "mistral", name: "Mistral", envVar: "NIGHTJAR_BYOK_MISTRAL", defaultModel: "mistral-large-latest", keyHint: "…" },
   { id: "deepseek", name: "DeepSeek", envVar: "NIGHTJAR_BYOK_DEEPSEEK", defaultModel: "deepseek-chat", keyHint: "sk-…" },
   { id: "xai", name: "xAI Grok", envVar: "NIGHTJAR_BYOK_XAI", defaultModel: "grok-4.3", keyHint: "xai-…" },
+  // Fireworks AI — OpenAI-compatible; registry id is "fireworks-ai" and its base URL
+  // (https://api.fireworks.ai/inference/v1) comes from models.dev, so opencode.json only
+  // needs the apiKey env ref (like the others). Model ids are the REQUIRED account-scoped
+  // path "accounts/fireworks/models/<name>"; promptAsync splits on the FIRST "/", so the
+  // choice id "fireworks-ai/accounts/fireworks/models/…" keeps the whole path as the model
+  // (same shape as OpenRouter's "openrouter/openai/gpt-4o"). NB: Fireworks' serverless
+  // catalog ROTATES — a retired model 404s at prompt time (surfaced as the existing
+  // "cloud model failed → retry on local" offer, not a crash); re-pin this against
+  // `curl :4096/config/providers` if gpt-oss-120b is dropped.
+  { id: "fireworks-ai", name: "Fireworks AI", envVar: "NIGHTJAR_BYOK_FIREWORKS", defaultModel: "accounts/fireworks/models/gpt-oss-120b", keyHint: "fw_…" },
 ]
 
 // Optional mock provider for end-to-end testing without burning a real cloud key
