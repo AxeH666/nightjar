@@ -1,0 +1,86 @@
+// Main-process bridge to the trusted STEP → GLB converter (Task 5).
+//
+// The build123d-mcp `export` tool can only emit STEP (no GLB), and its sandbox blocks
+// file writes anyway — so the model produces a STEP file, and THIS converts it to a GLB the
+// three.js viewer loads. The conversion runs OUTSIDE the mcp sandbox (it's Nightjar's own
+// code) via the phase-cad venv, which has build123d. See phase-cad/step_to_glb.py for the
+// two upstream footguns it defends against (NJ-18: rebuild the tree; validate the bytes).
+import { execFile } from "node:child_process"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { REPO } from "./services"
+
+// rule 3: a hard wall-clock cap on the conversion subprocess. build123d meshing on a
+// pathological input could otherwise hang; execFile's `timeout` SIGKILLs it. OCCT tessellation
+// of a normal part is sub-second, so 60s is generous headroom, not a target.
+const CONVERT_TIMEOUT_MS = 60_000
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024 // the converter prints one small JSON line; cap defensively
+
+export interface CadConvertResult {
+  ok: boolean
+  glbPath?: string
+  parts?: string[] // per-part node names (the exploded view keys off these)
+  nodes?: number
+  meshes?: number
+  error?: string
+}
+
+function pyPath(): string {
+  return join(REPO, "phase-cad", ".venv", "bin", "python")
+}
+function converterScript(): string {
+  return join(REPO, "phase-cad", "step_to_glb.py")
+}
+
+// Convert a STEP file to a GLB in a fresh temp dir. Resolves with a structured result
+// (never rejects) so the renderer always gets a clean {ok:false,error} on any failure —
+// a missing venv, a timeout, an empty model, or malformed output.
+export function convertStepToGlb(stepPath: string): Promise<CadConvertResult> {
+  return new Promise((resolve) => {
+    let glbPath: string
+    try {
+      glbPath = join(mkdtempSync(join(tmpdir(), "nightjar-cad-")), "model.glb")
+    } catch (e) {
+      resolve({ ok: false, error: `could not create a temp dir: ${e instanceof Error ? e.message : String(e)}` })
+      return
+    }
+
+    execFile(
+      pyPath(),
+      [converterScript(), stepPath, glbPath],
+      { timeout: CONVERT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, killSignal: "SIGKILL", windowsHide: true },
+      (err, stdout) => {
+        // The converter always prints one JSON line ({ok:true,...} or {ok:false,error}).
+        // Parse that first — it's the authoritative result even when the process exits
+        // non-zero (ok:false is signalled by exit 1). Fall back to the spawn error only
+        // when there's no parseable line (missing interpreter, SIGKILL on timeout, etc.).
+        const line = (stdout || "").trim().split("\n").filter(Boolean).pop()
+        if (line) {
+          try {
+            const parsed = JSON.parse(line) as { ok: boolean; parts?: string[]; nodes?: number; meshes?: number; error?: string; glb?: string }
+            if (parsed.ok) {
+              resolve({ ok: true, glbPath, parts: parsed.parts, nodes: parsed.nodes, meshes: parsed.meshes })
+            } else {
+              resolve({ ok: false, error: parsed.error || "conversion failed" })
+            }
+            return
+          } catch {
+            /* not JSON — fall through to the spawn-error path */
+          }
+        }
+        if (err) {
+          const timedOut = (err as NodeJS.ErrnoException & { killed?: boolean }).killed
+          resolve({
+            ok: false,
+            error: timedOut
+              ? `STEP→GLB conversion timed out after ${CONVERT_TIMEOUT_MS / 1000}s (aborted).`
+              : `STEP→GLB converter failed to run (${err.message}). Is the phase-cad env set up? Run phase-cad/setup.sh.`,
+          })
+          return
+        }
+        resolve({ ok: false, error: "STEP→GLB converter produced no result." })
+      },
+    )
+  })
+}
