@@ -39,6 +39,7 @@ interface ConnectionValue {
   sessionID: string // for render-time consumers (e.g. ArtifactPanel)
   agents: AgentInfo[]
   status: string
+  connected: boolean // true once the SSE stream is live; false while (re)connecting — drives the manual Reconnect affordance
   setStatus: (s: string) => void
   services: ServiceStatus[]
   wsUrl: string
@@ -69,6 +70,7 @@ export function useOpenCodeEvents(handler: (e: OpenCodeEvent) => void): void {
 export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [status, setStatus] = useState<string>("connecting…")
+  const [connected, setConnected] = useState<boolean>(false)
   const [services, setServices] = useState<ServiceStatus[]>([])
   const [wsUrl, setWsUrl] = useState<string>("ws://127.0.0.1:8765")
   const [sessionID, setSessionID] = useState<string>("")
@@ -104,6 +106,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   // be bringing it up, esp. during a cold model load) ----
   useEffect(() => {
     const ac = new AbortController()
+    setConnected(false) // a fresh (re)connect attempt begins — no live stream yet
     ;(async () => {
       const cfg = (await window.nightjar?.getConfig?.()) ?? {
         opencodeUrl: (import.meta as any).env?.VITE_OPENCODE_URL || "http://127.0.0.1:4096",
@@ -125,6 +128,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
           sessionRef.current = sid
           setSessionID(sid) // triggers the per-session artifact reset in ArtifactContext
           setStatus(`connected · ${cfg.opencodeUrl}`)
+          setConnected(true) // stream about to go live → drop the "starting/reconnecting" affordance
           // One subscription; fan out every event to the registered listeners.
           const dispatch = (e: OpenCodeEvent) => listenersRef.current.forEach((l) => l(e))
           // NJ-4: on ANY stream termination — a clean close OR a crash — re-enter
@@ -136,6 +140,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
           // (unmount, or a concurrent BYOK reconnect) — so it never double-connects.
           const reconnectAfterClose = (reason: string) => {
             if (ac.signal.aborted) return
+            setConnected(false) // stream dropped → surface the reconnecting state + manual affordance
             setStatus(reason)
             setTimeout(() => {
               if (!ac.signal.aborted) reconnect()
@@ -147,7 +152,13 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
             .catch((err) => reconnectAfterClose(`stream closed: ${err} — reconnecting…`))
           return
         } catch (err: any) {
-          setStatus(`waiting for engine… (${err?.message ?? err})`)
+          // Cold start: opencode isn't listening until the local model finishes loading,
+          // which can take up to a minute on first launch — the raw "Failed to fetch" read
+          // as a hard error and looked broken. Show a calm, honest progress message (the
+          // loop keeps retrying every 2s and connects the moment the engine is up); keep the
+          // technical detail available on hover for debugging.
+          const hint = attempt < 3 ? "starting the local engine…" : "still starting the local engine — the model can take a minute on first launch…"
+          setStatus(hint)
           await sleep(2000)
         }
       }
@@ -161,6 +172,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     sessionID,
     agents,
     status,
+    connected,
     setStatus,
     services,
     wsUrl,

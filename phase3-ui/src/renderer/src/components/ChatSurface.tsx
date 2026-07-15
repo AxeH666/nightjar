@@ -78,6 +78,7 @@ export function ChatSurface({
   emptyHint = "Ask June something.",
   placeholder = "Message June…  (Enter to send · paste or drop files)",
   assistantLabel = "june",
+  blockedReason = null,
 }: {
   messages: UiMessage[]
   busy: boolean
@@ -92,6 +93,10 @@ export function ChatSurface({
   emptyHint?: string
   placeholder?: string
   assistantLabel?: string
+  // Non-null ⇒ sending is blocked (e.g. the engine isn't connected yet). We KEEP the
+  // typed text + attachments instead of dispatching into the void (which silently
+  // vanished the message), and show this reason.
+  blockedReason?: string | null
 }) {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -141,6 +146,10 @@ export function ChatSurface({
 
   async function submit() {
     if (busy) return
+    // Engine not ready (connecting/reconnecting): do NOT dispatch — send() would early-
+    // return on the missing session and the message would vanish. Keep the draft; the
+    // blocked notice below tells the user why, and the header's Reconnect covers a wedge.
+    if (blockedReason) return
     const t = input.trim()
     if (createMode) {
       if (!t) return
@@ -177,7 +186,7 @@ export function ChatSurface({
     setVisionWarn(false)
   }
 
-  const canSend = !busy && (createMode ? !!input.trim() : !!input.trim() || attachments.length > 0)
+  const canSend = !busy && !blockedReason && (createMode ? !!input.trim() : !!input.trim() || attachments.length > 0)
 
   return (
     <div
@@ -301,6 +310,12 @@ export function ChatSurface({
               Send anyway
             </button>
             <button onClick={() => setVisionWarn(false)} className="text-nightjar-text/50 hover:underline">cancel</button>
+          </div>
+        )}
+        {blockedReason && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-nightjar-accent/30 bg-nightjar-accent/5 px-2 py-1 text-xs text-nightjar-text/60">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-nightjar-accent" />
+            <span>{blockedReason}</span>
           </div>
         )}
         <div className="flex items-end gap-2">

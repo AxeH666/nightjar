@@ -4,6 +4,7 @@
 // not AI-guessed). Bound to the chat session slot.
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
+import { useConnection } from "../context/ConnectionContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { capabilities } from "../lib/capabilities"
 import { isLocalModel } from "../lib/byok"
@@ -24,6 +25,7 @@ const AGENT_FOR_MODE = {
 export function ChatScreen() {
   const { slots, messagesOf, busyOf, send, createImage } = useSessions()
   const { abortSession } = usePermission()
+  const { connected } = useConnection()
   const { activeModel } = useModel()
   const id = slots.chat
 
@@ -31,6 +33,7 @@ export function ChatScreen() {
     <ChatSurface
       messages={messagesOf(id)}
       busy={busyOf(id)}
+      blockedReason={connected ? null : "Connecting to the engine…"}
       onSend={(text, { attachments, mode }) =>
         send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })
       }

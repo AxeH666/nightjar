@@ -10,6 +10,7 @@ import { useEffect } from "react"
 import { useSessions } from "../context/SessionsContext"
 import { useArtifact } from "../context/ArtifactContext"
 import { usePermission } from "../context/PermissionContext"
+import { useConnection } from "../context/ConnectionContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { ArtifactPanel } from "../components/ArtifactPanel"
 import { SessionList } from "../components/code/SessionList"
@@ -17,6 +18,7 @@ import { SessionList } from "../components/code/SessionList"
 export function CodeScreen() {
   const { slots, sessions, messagesOf, busyOf, send, createImage } = useSessions()
   const { abortSession } = usePermission()
+  const { connected } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, syncCodeSession } = useArtifact()
   const id = slots.code
   const title = sessions[id]?.title ?? "Coding session"
@@ -58,6 +60,7 @@ export function CodeScreen() {
             <ChatSurface
               messages={messagesOf(id)}
               busy={busyOf(id)}
+              blockedReason={connected ? null : "Connecting to the engine…"}
               onSend={(text, { attachments }) => send(id, text, { agent: "coding", attachments })}
               onCreateImage={(prompt) => createImage(id, prompt)}
               onStop={() => abortSession(id)}

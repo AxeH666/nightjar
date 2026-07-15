@@ -30,7 +30,7 @@ export function AppShell() {
   // Bumped when the settings modal closes so the per-capability cloud banner re-reads
   // the persisted Online/Offline prefs the user may have just changed.
   const [capsRefresh, setCapsRefresh] = useState(0)
-  const { status, services, wsUrl, reconnect, setStatus } = useConnection()
+  const { status, connected, services, wsUrl, reconnect, setStatus } = useConnection()
   const {
     choices,
     activeModel,
@@ -54,7 +54,18 @@ export function AppShell() {
         <TabBar tab={tab} onChange={setTab} />
         <div className="ml-auto flex items-center gap-3">
           <ModelSwitcher choices={choices} activeId={activeModel} onSelect={setActiveModel} onManageKeys={() => setShowKeys(true)} />
-          <span className="text-xs text-nightjar-text/40">{status}</span>
+          <span className="text-xs text-nightjar-text/40" title={status}>{status}</span>
+          {/* Manual escape hatch: the connect loop auto-retries, but if it ever wedges (or the
+              user just wants to force it), this always-available control re-runs the connect. */}
+          {!connected && (
+            <button
+              onClick={reconnect}
+              title="Retry connecting to the engine"
+              className="rounded border border-nightjar-surface px-2 py-0.5 text-xs text-nightjar-text/70 hover:bg-nightjar-surface"
+            >
+              ↻ Reconnect
+            </button>
+          )}
           <NightjarOrb wsUrl={wsUrl} />
         </div>
       </header>
