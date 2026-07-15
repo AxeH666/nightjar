@@ -31,10 +31,13 @@ import struct
 import sys
 from pathlib import Path
 
+import tempfile
+
 from build123d import Box, Color, Compound, Cylinder, Location, export_gltf, export_step
 from build123d import import_step
 
-OUT = Path(__file__).parent
+# Write artifacts to a temp dir, not the script dir — so a run never litters the repo.
+OUT = Path(tempfile.mkdtemp(prefix="cad-hierarchy-probe-"))
 
 
 def glb_nodes(path: Path):
@@ -100,7 +103,9 @@ print(f"[real path] GLB meshes : {len(g2.get('meshes', []))}")
 from build123d import Solid  # noqa: E402
 
 rebuilt_kids = []
-for c in reimported.children:
+# `or [reimported]` so a single-root STEP with no child list still rebuilds one part
+# rather than an empty Compound (matches smoke_test.py / probe_full_cad_loop.py).
+for c in reimported.children or [reimported]:
     part = Solid(c.wrapped)  # fresh build123d object around the same OCCT shape
     part.label = c.label  # carry the name across — the exploded view keys off it
     rebuilt_kids.append(part)
