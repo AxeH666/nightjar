@@ -117,6 +117,23 @@ export function setPref(id: string, pref: CapabilityPref): CapabilityPref {
   return clean
 }
 
+// Persist SEVERAL capability prefs in ONE store write — the plumbing behind the global
+// Local/Cloud toggle (Task 1). Flipping the whole app cap-by-cap via setPref would write
+// the store (and, in index.ts, restart the engine + reconcile the image endpoint) up to
+// four times; setBulk lets index.ts do ONE reconcile + ONE restart. Every incoming pref is
+// sanitized, and an unknown capability id is rejected (the whole call fails — no partial
+// write) rather than silently dropped. Returns the full, sanitized prefs map so the
+// renderer reflects any coercion.
+export function setBulk(prefs: Record<string, CapabilityPref>): Record<CapabilityId, CapabilityPref> {
+  for (const id of Object.keys(prefs)) {
+    if (!isCapabilityId(id)) throw new Error(`unknown capability: ${id}`)
+  }
+  const s = readStore()
+  for (const [id, pref] of Object.entries(prefs)) s[id] = sanitize(pref)
+  writeStore(s)
+  return listPrefs()
+}
+
 // Engine-env contribution derived from the prefs — merged into opencode-serve's env so
 // its MCP children (which inherit process.env) resolve the EXPLICIT backend instead of
 // auto-routing to the cloud on mere key presence. Recomputed on every restart, so a

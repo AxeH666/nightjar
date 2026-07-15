@@ -89,5 +89,8 @@ contextBridge.exposeInMainWorld("nightjar", {
     catalog: (): Promise<{ capabilities: CapabilityMeta[]; ui: string[] }> => ipcRenderer.invoke("capabilities:catalog"),
     list: (): Promise<Record<string, CapabilityPref>> => ipcRenderer.invoke("capabilities:list"),
     set: (id: string, pref: CapabilityPref): Promise<CapabilityPref> => ipcRenderer.invoke("capabilities:set", id, pref),
+    // Bulk-apply for the global Local/Cloud toggle — one store write + one engine restart.
+    setBulk: (prefs: Record<string, CapabilityPref>): Promise<Record<string, CapabilityPref>> =>
+      ipcRenderer.invoke("capabilities:setBulk", prefs),
   },
 })
