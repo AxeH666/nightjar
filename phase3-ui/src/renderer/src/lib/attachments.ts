@@ -31,6 +31,7 @@ interface AttachmentBridge {
   readAttachment(path: string): Promise<{ name: string; mime: string; dataUrl: string; size: number; path: string }>
   saveAttachment(dataUrl: string, name: string): Promise<string>
   readGeneratedImage(filename: string): Promise<string | null>
+  getPathForFile?(file: File): string // Electron webUtils; "" when the File has no on-disk path
 }
 
 function bridge(): AttachmentBridge | null {
@@ -47,6 +48,22 @@ const nextId = (): string => `att-${Date.now()}-${_seq++}`
 // A pasted/dragged browser File → Attachment. Reads it as a data URL; for images,
 // also saves it to disk (best-effort) so the local vision tool has a path.
 export async function fileToAttachment(file: File): Promise<Attachment> {
+  const b = bridge()
+  // Electron 32 removed File.path; a File backed by a real on-disk file (native drag-drop,
+  // some pastes) exposes its path ONLY via webUtils.getPathForFile. When we have that path,
+  // read the ORIGINAL file just like Browse — the attachment then carries the real path
+  // (the local vision tool needs a path) with no wasteful base64 round-trip and no saved
+  // copy. A blob with no backing file (a pasted screenshot) returns "" → fall through to the
+  // in-memory reader below.
+  const realPath = b?.getPathForFile?.(file) || ""
+  if (realPath) {
+    try {
+      const a = await b!.readAttachment(realPath)
+      return { id: nextId(), name: a.name, mime: a.mime, dataUrl: a.dataUrl, size: a.size, path: a.path, isImage: isImageMime(a.mime) }
+    } catch {
+      /* unreadable / over cap → fall through to the reader (best-effort) */
+    }
+  }
   const dataUrl = await new Promise<string>((res, rej) => {
     const r = new FileReader()
     r.onload = () => res(String(r.result))
@@ -59,7 +76,7 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
   let path: string | undefined
   if (isImage) {
     try {
-      path = await bridge()?.saveAttachment(dataUrl, name)
+      path = await b?.saveAttachment(dataUrl, name)
     } catch {
       /* best-effort: cloud vision still works via the data-URL part */
     }
