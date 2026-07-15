@@ -34,7 +34,7 @@ export function CadScreen() {
         <ChatSurface
           messages={messagesOf(id)}
           busy={busyOf(id)}
-          blockedReason={connected ? null : "Connecting to the engine…"}
+          blockedReason={connected && id ? null : "Connecting to the engine…"}
           // CAD is a conversation with the cad agent — no research/web-search/create-image tools.
           onSend={(text, { attachments }) => send(id, text, { agent: "cad", attachments })}
           onCreateImage={(prompt) => createImage(id, prompt)}

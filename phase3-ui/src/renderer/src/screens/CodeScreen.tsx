@@ -60,7 +60,7 @@ export function CodeScreen() {
             <ChatSurface
               messages={messagesOf(id)}
               busy={busyOf(id)}
-              blockedReason={connected ? null : "Connecting to the engine…"}
+              blockedReason={connected && id ? null : "Connecting to the engine…"}
               onSend={(text, { attachments }) => send(id, text, { agent: "coding", attachments })}
               onCreateImage={(prompt) => createImage(id, prompt)}
               onStop={() => abortSession(id)}

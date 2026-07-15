@@ -207,15 +207,20 @@ export class OpenCodeClient {
     if (!res.ok) throw new Error(`PATCH /session/${sessionID} → ${res.status}`)
   }
 
-  // Subscribe to the instance-wide SSE stream. `signal` to stop. Callback gets
-  // every event; callers filter by sessionID (the stream is not session-scoped).
-  async subscribe(onEvent: (e: OpenCodeEvent) => void, signal?: AbortSignal): Promise<void> {
+  // Subscribe to the instance-wide SSE stream. `signal` to stop. `onEvent` gets every
+  // event (callers filter by sessionID — the stream is not session-scoped). `onOpen`
+  // fires ONCE the stream is actually established (the GET /event response is in and the
+  // body reader is live) — callers gate their "connected" state on THIS, not on
+  // createSession, so a half-open /event connect can't masquerade as a healthy connection.
+  async subscribe(onEvent: (e: OpenCodeEvent) => void, signal?: AbortSignal, onOpen?: () => void): Promise<void> {
     // Combine the caller's abort with an internal idle-timeout abort. A half-open SSE
-    // stream (socket accepted, then silent — no bytes, no close) would otherwise hang
-    // `reader.read()` FOREVER, so the caller's "stream closed → reconnect" never fires and
-    // the app looks connected while the event bus is dead. The watchdog, reset on every
-    // chunk (opencode heartbeats ~every 10s), aborts a stream that goes quiet past
-    // STREAM_IDLE_TIMEOUT_MS → this promise rejects → the caller reconnects (rule 3).
+    // stream (socket accepted, then silent — no bytes, no close) would otherwise hang the
+    // initial `fetch` OR `reader.read()` FOREVER, so the caller's "stream closed →
+    // reconnect" never fires and the app looks connected while the event bus is dead. The
+    // watchdog is armed BEFORE the fetch (so a hung /event CONNECT is bounded too, not just
+    // a silent post-connect stream) and reset on every chunk (opencode heartbeats ~every
+    // 10s); a stream quiet past STREAM_IDLE_TIMEOUT_MS is aborted → this promise rejects →
+    // the caller reconnects (rule 3).
     const ctrl = new AbortController()
     const onCallerAbort = () => ctrl.abort()
     if (signal) {
@@ -228,9 +233,11 @@ export class OpenCodeClient {
       watchdog = setTimeout(() => ctrl.abort(), STREAM_IDLE_TIMEOUT_MS)
     }
     try {
+      armWatchdog() // bound the CONNECT: a half-open /event that never responds aborts here
       const res = await fetch(this.url("/event"), { headers: this.headers(), signal: ctrl.signal })
       if (!res.ok || !res.body) throw new Error(`GET /event → ${res.status}`)
       const reader = res.body.getReader()
+      onOpen?.() // stream truly established → the caller may now mark itself connected
       const decoder = new TextDecoder()
       let buf = ""
       armWatchdog()

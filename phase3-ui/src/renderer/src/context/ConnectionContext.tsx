@@ -127,8 +127,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
           if (ac.signal.aborted) return
           sessionRef.current = sid
           setSessionID(sid) // triggers the per-session artifact reset in ArtifactContext
-          setStatus(`connected · ${cfg.opencodeUrl}`)
-          setConnected(true) // stream about to go live → drop the "starting/reconnecting" affordance
+          // NB: do NOT mark connected / show "connected" here — createSession succeeding does
+          // NOT mean the event bus is live. A half-open GET /event connect could still hang;
+          // claiming connected now would unblock the composer + hide Reconnect AND print
+          // "connected · …" over a dead stream (Bugbot). Both flip only from subscribe()'s
+          // onOpen (stream truly established). Until then the "starting…" status stands.
           // One subscription; fan out every event to the registered listeners.
           const dispatch = (e: OpenCodeEvent) => listenersRef.current.forEach((l) => l(e))
           // NJ-4: on ANY stream termination — a clean close OR a crash — re-enter
@@ -147,7 +150,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
             }, 1000)
           }
           client
-            .subscribe(dispatch, ac.signal)
+            .subscribe(dispatch, ac.signal, () => {
+              // Stream is truly established → NOW we're connected: unblock the composer,
+              // hide Reconnect, and only now print "connected · …". Guard on the run's
+              // signal so a superseded run can't flip it.
+              if (ac.signal.aborted) return
+              setStatus(`connected · ${cfg.opencodeUrl}`)
+              setConnected(true)
+            })
             .then(() => reconnectAfterClose("stream closed — reconnecting…"))
             .catch((err) => reconnectAfterClose(`stream closed: ${err} — reconnecting…`))
           return

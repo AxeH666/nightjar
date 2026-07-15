@@ -33,7 +33,7 @@ export function ChatScreen() {
     <ChatSurface
       messages={messagesOf(id)}
       busy={busyOf(id)}
-      blockedReason={connected ? null : "Connecting to the engine…"}
+      blockedReason={connected && id ? null : "Connecting to the engine…"}
       onSend={(text, { attachments, mode }) =>
         send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })
       }
