@@ -93,4 +93,11 @@ contextBridge.exposeInMainWorld("nightjar", {
     setBulk: (prefs: Record<string, CapabilityPref>): Promise<Record<string, CapabilityPref>> =>
       ipcRenderer.invoke("capabilities:setBulk", prefs),
   },
+  // CAD (Task 5): convert a model-exported STEP file to a viewable GLB.
+  cad: {
+    convert: (
+      stepPath: string,
+    ): Promise<{ ok: boolean; glbPath?: string; parts?: string[]; nodes?: number; meshes?: number; error?: string }> =>
+      ipcRenderer.invoke("cad:convert", stepPath),
+  },
 })

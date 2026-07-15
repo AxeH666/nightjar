@@ -14,6 +14,7 @@ import * as byok from "./byok"
 import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
+import { convertStepToGlb } from "./cad"
 import * as preview from "./preview-server"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
@@ -493,6 +494,10 @@ ipcMain.handle("nightjar:visionInstallModel", async () => {
   return visionState
 })
 ipcMain.handle("nightjar:openOllamaDownload", () => shell.openExternal("https://ollama.com/download"))
+
+// CAD (Task 5): convert a model-exported STEP file to a GLB the three.js viewer loads.
+// Runs the trusted phase-cad converter under a wall-clock timeout (rule 3, in cad.ts).
+ipcMain.handle("cad:convert", (_e, stepPath: string) => convertStepToGlb(stepPath))
 
 app.whenReady().then(() => {
   createWindow()
