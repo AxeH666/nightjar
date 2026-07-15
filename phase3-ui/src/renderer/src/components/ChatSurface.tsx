@@ -5,7 +5,7 @@ import { ToolsMenu } from "./composer/ToolsMenu"
 import { type Attachment, type AttachmentResult, pickAttachments, attachmentsFromDataTransfer, windowsClipboardImageAttachment, fmtSize } from "../lib/attachments"
 import { useModel } from "../context/ModelContext"
 import { isLocalModel } from "../lib/byok"
-import { useIsWSL } from "../lib/platform"
+import { useIsWSL, fetchIsWSL } from "../lib/platform"
 
 // Local-vision readiness (Ollama + gemma3:4b), mirrored from the main process — used
 // to warn before an image is sent to the text-only local model (NJ-7).
@@ -161,12 +161,17 @@ export function ChatSurface({
     e.preventDefault()
     setDragOver(false)
     if (busy) return
-    attachmentsFromDataTransfer(e.dataTransfer).then((res) => {
-      // Under WSL a drop delivers no files/uri-list (the platform doesn't bridge it), so we
-      // get an empty result — surface the browse-instead fallback instead of nothing. If
-      // something WAS delivered (native Windows, or a Linux-side drag), attach it normally.
-      if (isWSL && res.attachments.length === 0 && res.errors.length === 0) setWslDropNotice(true)
-      else addResult(res)
+    attachmentsFromDataTransfer(e.dataTransfer).then(async (res) => {
+      // Something was delivered (native Windows, or a Linux-side drag) → attach normally.
+      if (res.attachments.length || res.errors.length) {
+        addResult(res)
+        return
+      }
+      // Empty drop: under WSL the platform delivered no payload → offer Browse instead of
+      // failing silently. Re-confirm WSL FRESHLY rather than the cached hook value, which
+      // may not have resolved yet if a drop lands right after mount (Bugbot). A non-WSL
+      // empty drop (e.g. dragging plain text) is a genuine no-op, as before.
+      if (isWSL || (await fetchIsWSL())) setWslDropNotice(true)
     })
   }
 
