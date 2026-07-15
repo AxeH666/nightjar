@@ -193,10 +193,22 @@ function reconcileImageEndpoint(): Promise<void> {
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
 
+// Guarded IPC → renderer. During shutdown / window close, a LATE event — a supervised
+// child process exiting (→ Supervisor.onChange), a vision-status push, an image reconcile
+// transition — can fire AFTER the window's webContents has been destroyed. `win?.` only
+// guards NULL: a destroyed BrowserWindow is still a non-null object, so
+// `win.webContents.send()` throws "Object has been destroyed" as an UNCAUGHT main-process
+// exception (the crash dialog). isDestroyed() is the only reliable guard.
+function sendToRenderer(channel: string, ...args: unknown[]): void {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+    win.webContents.send(channel, ...args)
+  }
+}
+
 let lastDiffusionHealthy = false
 const supervisor = new Supervisor(nightjarServices(), (statuses) => {
   latestStatus = statuses
-  win?.webContents.send("nightjar:status", statuses)
+  sendToRenderer("nightjar:status", statuses)
   // The diffusion sidecar can reach (or lose) health AFTER the startup/post-start
   // reconcile passes — a slow ~6GB cold load finishing past the readyTimeout, or a
   // crash-restart. Re-reconcile on either transition so an Offline image capability
@@ -222,6 +234,12 @@ function createWindow(): void {
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   })
   win.on("ready-to-show", () => win?.show())
+  // Null the ref when the window is gone so every `win?.`/sendToRenderer guard short-
+  // circuits cleanly instead of touching a destroyed object (belt to sendToRenderer's
+  // isDestroyed() check; also lets app.activate recreate the window on macOS).
+  win.on("closed", () => {
+    win = null
+  })
   // A file dropped anywhere the renderer doesn't explicitly handle would otherwise make
   // Chromium NAVIGATE the window to the file:// URL — replacing the whole app with the
   // raw file. Defense-in-depth belt to the renderer's window-level drop guard: never let
@@ -455,7 +473,7 @@ ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabili
 let visionState: VisionStatus = { ollama: "installed", model: "unknown", detail: "checking local vision…" }
 function pushVision(s: VisionStatus): void {
   visionState = s
-  win?.webContents.send("nightjar:visionStatus", s)
+  sendToRenderer("nightjar:visionStatus", s)
 }
 // Single-flight guard: startup auto-pull, a "Download gemma3:4b" click, and a
 // double-click can all land here at once. Without this, each would re-probe and

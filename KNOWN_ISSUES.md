@@ -42,6 +42,13 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-24 — main-process crash: `Supervisor.onChange` sent IPC to a DESTROYED window on shutdown ("Object has been destroyed") — FIXED + VERIFIED 2026-07-15
+
+- **Severity:** medium — a scary "A JavaScript error occurred in the main process" dialog on quit / window close; the uncaught exception can leave the sidecar stack half-torn-down.
+- **Context:** during app quit / window close a LATE event — a supervised child process exiting (→ `Supervisor.onChange`), or a vision-status push — fires `win?.webContents.send(...)`. `win?.` guards only NULL; a **destroyed** BrowserWindow is still a non-null object, so `win.webContents.send()` throws `TypeError: Object has been destroyed` as an UNCAUGHT main-process exception. Stack: `ChildProcess._handle.onexit` → child `'exit'` handler → `Supervisor.set` → `emit` → `onChange` → send. Pre-existing (not introduced by the recent connection/BYOK/Fireworks PRs); surfaced when the stack was killed out from under a live window.
+- **Fix (`phase3-ui/src/main/index.ts`):** a `sendToRenderer()` helper guarded by `win && !win.isDestroyed() && !win.webContents.isDestroyed()` (isDestroyed() is the only reliable guard — `win?.` is not), routed BOTH send sites (`nightjar:status`, `nightjar:visionStatus`) through it, and null `win` on the window's `closed` event.
+- **Verified (rule 6):** headless Electron repro — destroy the window, then the OLD `win.webContents.send()` throws "Object has been destroyed" (the exact dialog error); the guarded `sendToRenderer` is a safe no-op on a destroyed AND a null window.
+
 ## NJ-23 — Fireworks AI BYOK provider added; serverless catalog rotation caveat + no per-model "pick another" picker — FLAGGED (graceful, follow-up DEFERRED) 2026-07-15
 
 - **Severity:** low — Fireworks chat/research works with a live model id; the caveat only bites when Fireworks retires the pinned model.
