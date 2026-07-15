@@ -4,6 +4,9 @@ import {
   capabilitySupport,
   deriveGlobalMode,
   imageGenAvailable,
+  imageUnavailableReason,
+  IMAGE_UNSUPPORTED_CLOUD,
+  IMAGE_UNAVAILABLE_LOCAL,
   providerCapabilitySummary,
   type CapabilityPref,
   type CapabilitySupportMeta,
@@ -178,5 +181,20 @@ describe("imageGenAvailable", () => {
   it("undefined pref behaves as offline", () => {
     expect(imageGenAvailable({ imagePref: undefined, localImagePresent: true, catalog: CATALOG })).toBe(true)
     expect(imageGenAvailable({ imagePref: undefined, localImagePresent: false, catalog: CATALOG })).toBe(false)
+  })
+})
+
+describe("imageUnavailableReason", () => {
+  it("returns null when image gen is available (supported cloud provider)", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "online", providerId: "openai" }, localImagePresent: false, catalog: CATALOG })).toBeNull()
+  })
+  it("returns null when image gen is available (local backend present)", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "offline" }, localImagePresent: true, catalog: CATALOG })).toBeNull()
+  })
+  it("online + unsupported provider → the plan's exact 'Current API…' copy", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "online", providerId: "groq" }, localImagePresent: false, catalog: CATALOG })).toBe(IMAGE_UNSUPPORTED_CLOUD)
+  })
+  it("offline + no local backend → points at a cloud provider", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "offline" }, localImagePresent: false, catalog: CATALOG })).toBe(IMAGE_UNAVAILABLE_LOCAL)
   })
 })

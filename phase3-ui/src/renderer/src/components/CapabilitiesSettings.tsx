@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import type { ByokProviderStatus } from "../lib/byok"
 import { isLocalModel, LOCAL_MODEL } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
+import { LocalModeNotice } from "./LocalModeNotice"
 import { capabilities, type CapabilityMeta, type CapabilityPref } from "../lib/capabilities"
 import {
   applyGlobalMode,
@@ -45,6 +46,9 @@ export function CapabilitiesSettings({ providers }: { providers: ByokProviderSta
   // So we block interaction and show a loading line until ready.
   const [ready, setReady] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  // Task 2: the "Switched to Local" limitations popup, shown on every transition INTO
+  // Local. Ephemeral (no localStorage) so it reappears on the next switch.
+  const [showLocalNotice, setShowLocalNotice] = useState(false)
 
   useEffect(() => {
     ;(async () => {
@@ -129,6 +133,9 @@ export function CapabilitiesSettings({ providers }: { providers: ByokProviderSta
   }
 
   function goLocal() {
+    // Task 2: fire the limitations popup only on the TRANSITION into Local — if the app
+    // is already Local (or still loading), a Local click is a no-op and shows nothing.
+    if (mode.kind !== "local" && mode.kind !== "loading") setShowLocalNotice(true)
     void apply({ kind: "local" })
   }
   function goCloud(providerId: string) {
@@ -235,6 +242,8 @@ export function CapabilitiesSettings({ providers }: { providers: ByokProviderSta
           )}
         </>
       )}
+
+      {showLocalNotice && <LocalModeNotice onDismiss={() => setShowLocalNotice(false)} />}
     </div>
   )
 }

@@ -179,3 +179,22 @@ export function imageGenAvailable(args: {
   }
   return localImagePresent
 }
+
+// The exact copy the plan calls for when the chosen cloud provider can't generate images.
+export const IMAGE_UNSUPPORTED_CLOUD = "Current API doesn't support image generation."
+export const IMAGE_UNAVAILABLE_LOCAL =
+  "Image generation isn't available offline yet — switch to a cloud provider that supports it (OpenAI or OpenRouter)."
+
+// A use-time reason string when image generation can't run, or null when it can. Surfaced
+// as an inline notice in the Create-Image flow instead of a silent failure or a dead
+// dispatch. Distinguishes the two "no" cases:
+//   • online with a provider that can't do images → the plan's exact "Current API…" copy;
+//   • offline with no local diffusion backend → point the user at a cloud provider.
+export function imageUnavailableReason(args: {
+  imagePref: CapabilityPref | undefined
+  localImagePresent: boolean
+  catalog: CapabilitySupportMeta[]
+}): string | null {
+  if (imageGenAvailable(args)) return null
+  return args.imagePref?.mode === "online" ? IMAGE_UNSUPPORTED_CLOUD : IMAGE_UNAVAILABLE_LOCAL
+}
