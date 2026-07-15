@@ -6,6 +6,8 @@ import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { capabilities } from "../lib/capabilities"
+import { isLocalModel } from "../lib/byok"
+import { useModel } from "../context/ModelContext"
 import { imageUnavailableReason, type CapabilityId, type CapabilitySupportMeta } from "../lib/globalMode"
 
 // The composer's armed web tool → the agent that serves it. Research and Web search are
@@ -22,6 +24,7 @@ const AGENT_FOR_MODE = {
 export function ChatScreen() {
   const { slots, messagesOf, busyOf, send, createImage } = useSessions()
   const { abortSession } = usePermission()
+  const { activeModel } = useModel()
   const id = slots.chat
 
   return (
@@ -42,7 +45,12 @@ export function ChatScreen() {
           id: c.id as CapabilityId,
           onlineProviders: c.onlineProviders,
         }))
-        return imageUnavailableReason({ imagePref: prefs.image, localImagePresent: false, catalog })
+        // The cloud provider chat is on (or null when Local) — lets the notice say
+        // "Current API doesn't support…" under Cloud+Groq, where image is left offline.
+        const chatProviderId = isLocalModel(activeModel)
+          ? null
+          : activeModel.slice(0, Math.max(0, activeModel.indexOf("/"))) || null
+        return imageUnavailableReason({ imagePref: prefs.image, localImagePresent: false, catalog, chatProviderId })
       }}
       onStop={() => abortSession(id)}
       menu={{ research: true, webSearch: true, createImage: true }}

@@ -112,8 +112,8 @@ export function CapabilitiesSettings({ providers }: { providers: ByokProviderSta
   // engine restart), so we await it FIRST — if it throws, we surface the error and leave
   // chat untouched, rather than moving the header model to a mode the capabilities never
   // reached. setActiveModel only runs after the bulk write has committed.
-  async function apply(target: { kind: "local" } | { kind: "cloud"; providerId: string }) {
-    if (!ready) return
+  async function apply(target: { kind: "local" } | { kind: "cloud"; providerId: string }): Promise<boolean> {
+    if (!ready) return false
     const plan = applyGlobalMode({
       target,
       catalog: supportCatalog,
@@ -125,18 +125,22 @@ export function CapabilitiesSettings({ providers }: { providers: ByokProviderSta
       const saved = await capabilities.setBulk(plan.prefs)
       if (saved && Object.keys(saved).length) setPrefs(saved)
       setActiveModel(plan.chatModelId)
+      return true
     } catch (err) {
       setApplyError(
         `Couldn't apply that switch (${err instanceof Error ? err.message : String(err)}). Nothing was changed.`,
       )
+      return false
     }
   }
 
-  function goLocal() {
-    // Task 2: fire the limitations popup only on the TRANSITION into Local — if the app
-    // is already Local (or still loading), a Local click is a no-op and shows nothing.
-    if (mode.kind !== "local" && mode.kind !== "loading") setShowLocalNotice(true)
-    void apply({ kind: "local" })
+  async function goLocal() {
+    // Task 2: fire the limitations popup only on a SUCCESSFUL transition into Local. If the
+    // app is already Local (or still loading) it's a no-op, and if the switch fails (setBulk
+    // threw) we must NOT show the popup while the mode stayed Cloud/Mixed (Bugbot).
+    const wasTransition = mode.kind !== "local" && mode.kind !== "loading"
+    const ok = await apply({ kind: "local" })
+    if (ok && wasTransition) setShowLocalNotice(true)
   }
   function goCloud(providerId: string) {
     setCloudProvider(providerId)

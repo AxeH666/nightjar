@@ -188,13 +188,23 @@ export const IMAGE_UNAVAILABLE_LOCAL =
 // A use-time reason string when image generation can't run, or null when it can. Surfaced
 // as an inline notice in the Create-Image flow instead of a silent failure or a dead
 // dispatch. Distinguishes the two "no" cases:
-//   • online with a provider that can't do images → the plan's exact "Current API…" copy;
-//   • offline with no local diffusion backend → point the user at a cloud provider.
+//   • the app is on a CLOUD provider that can't do images → the plan's exact "Current
+//     API…" copy. This is the load-bearing case: the global toggle leaves image OFFLINE
+//     for an image-incapable cloud provider (Cloud+Groq), so we must consult the active
+//     chat provider — not just imagePref — to know it's "cloud, unsupported" vs truly local
+//     (Bugbot: the offline imagePref alone can't tell those apart).
+//   • otherwise (genuinely offline, no local diffusion backend) → point at a cloud provider.
 export function imageUnavailableReason(args: {
   imagePref: CapabilityPref | undefined
   localImagePresent: boolean
   catalog: CapabilitySupportMeta[]
+  chatProviderId?: string | null // the cloud provider chat is on, or null when Local
 }): string | null {
   if (imageGenAvailable(args)) return null
-  return args.imagePref?.mode === "online" ? IMAGE_UNSUPPORTED_CLOUD : IMAGE_UNAVAILABLE_LOCAL
+  // On a cloud provider that can't generate images → the "Current API…" message, whether
+  // the reason surfaced as an offline image pref (Cloud+Groq) or an explicit online one.
+  const cloudProvider =
+    (args.imagePref?.mode === "online" && args.imagePref.providerId) || args.chatProviderId || null
+  if (cloudProvider && !capabilitySupport("image", cloudProvider, args.catalog)) return IMAGE_UNSUPPORTED_CLOUD
+  return IMAGE_UNAVAILABLE_LOCAL
 }
