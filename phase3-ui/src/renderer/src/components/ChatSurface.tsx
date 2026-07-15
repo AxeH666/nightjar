@@ -72,6 +72,7 @@ export function ChatSurface({
   busy,
   onSend,
   onCreateImage,
+  onCheckImage,
   onStop,
   menu = DEFAULT_MENU,
   emptyHint = "Ask June something.",
@@ -82,6 +83,10 @@ export function ChatSurface({
   busy: boolean
   onSend: (text: string, opts: SendOpts) => void
   onCreateImage: (prompt: string) => void
+  // Use-time image-availability check. Returns a reason string when image generation
+  // can't run right now (unsupported cloud provider, or offline with no local backend),
+  // or null when it can. Read fresh at Create time so a settings change is reflected.
+  onCheckImage?: () => Promise<string | null> | string | null
   onStop?: () => void
   menu?: { research: boolean; webSearch: boolean; createImage: boolean }
   emptyHint?: string
@@ -93,6 +98,7 @@ export function ChatSurface({
   const [attachError, setAttachError] = useState<string | null>(null) // surfaced attach failures (was silently swallowed)
   const [dragOver, setDragOver] = useState(false)
   const [createMode, setCreateMode] = useState(false) // "Create Image" prompt mode
+  const [imageNotice, setImageNotice] = useState<string | null>(null) // use-time image-unavailable reason
   // The per-message web tool armed in the "+" menu (reset after each send). ONE value,
   // so Research and Web search are mutually exclusive — selecting one clears the other.
   const [mode, setMode] = useState<ChatMode | null>(null)
@@ -133,11 +139,22 @@ export function ChatSurface({
     attachmentsFromDataTransfer(e.dataTransfer).then(addResult)
   }
 
-  function submit() {
+  async function submit() {
     if (busy) return
     const t = input.trim()
     if (createMode) {
       if (!t) return
+      // Use-time gate (Task 1 decision 2): if the current image backend can't generate
+      // (unsupported cloud provider, or offline with no local model), show an inline
+      // notice instead of dispatching a create-image turn that would silently fail.
+      if (onCheckImage) {
+        const reason = await onCheckImage()
+        if (reason) {
+          setImageNotice(reason)
+          return
+        }
+      }
+      setImageNotice(null)
       onCreateImage(t)
       setInput("")
       setCreateMode(false)
@@ -255,7 +272,20 @@ export function ChatSurface({
         {createMode && (
           <div className="mb-2 flex items-center gap-2 text-xs text-nightjar-accent">
             🎨 Create-Image mode — describe the image, then press Create.
-            <button onClick={() => setCreateMode(false)} className="text-nightjar-text/50 hover:underline">cancel</button>
+            <button
+              onClick={() => {
+                setCreateMode(false)
+                setImageNotice(null)
+              }}
+              className="text-nightjar-text/50 hover:underline"
+            >
+              cancel
+            </button>
+          </div>
+        )}
+        {imageNotice && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-nightjar-alert/40 bg-nightjar-alert/10 px-3 py-2 text-xs text-nightjar-text/80">
+            <span>🎨 {imageNotice}</span>
           </div>
         )}
         {visionWarn && (
@@ -284,6 +314,7 @@ export function ChatSurface({
             onToggleCreateImage={() => {
               setCreateMode((v) => !v)
               setMode(null) // image mode ignores the web tools
+              setImageNotice(null)
             }}
           />
           <button

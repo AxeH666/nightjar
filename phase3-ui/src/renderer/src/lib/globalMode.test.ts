@@ -4,6 +4,9 @@ import {
   capabilitySupport,
   deriveGlobalMode,
   imageGenAvailable,
+  imageUnavailableReason,
+  IMAGE_UNSUPPORTED_CLOUD,
+  IMAGE_UNAVAILABLE_LOCAL,
   providerCapabilitySummary,
   type CapabilityPref,
   type CapabilitySupportMeta,
@@ -178,5 +181,29 @@ describe("imageGenAvailable", () => {
   it("undefined pref behaves as offline", () => {
     expect(imageGenAvailable({ imagePref: undefined, localImagePresent: true, catalog: CATALOG })).toBe(true)
     expect(imageGenAvailable({ imagePref: undefined, localImagePresent: false, catalog: CATALOG })).toBe(false)
+  })
+})
+
+describe("imageUnavailableReason", () => {
+  it("returns null when image gen is available (supported cloud provider)", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "online", providerId: "openai" }, localImagePresent: false, catalog: CATALOG })).toBeNull()
+  })
+  it("returns null when image gen is available (local backend present)", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "offline" }, localImagePresent: true, catalog: CATALOG })).toBeNull()
+  })
+  it("online + unsupported provider → the plan's exact 'Current API…' copy", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "online", providerId: "groq" }, localImagePresent: false, catalog: CATALOG })).toBe(IMAGE_UNSUPPORTED_CLOUD)
+  })
+  it("truly offline (Local, no chat provider) → points at a cloud provider", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "offline" }, localImagePresent: false, catalog: CATALOG, chatProviderId: null })).toBe(IMAGE_UNAVAILABLE_LOCAL)
+  })
+  // The Bugbot case: Cloud+Groq leaves image OFFLINE (Groq can't do images), but the app
+  // IS on a cloud provider — the notice must be the "Current API…" copy, not offline guidance.
+  it("Cloud+Groq (image left offline, chat on groq) → 'Current API…' copy", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "offline" }, localImagePresent: false, catalog: CATALOG, chatProviderId: "groq" })).toBe(IMAGE_UNSUPPORTED_CLOUD)
+  })
+  // Cloud+OpenAI supports images → available, so no notice even with an odd offline pref.
+  it("Cloud+OpenAI where image is somehow offline but provider supports it → offline guidance (mixed edge)", () => {
+    expect(imageUnavailableReason({ imagePref: { mode: "offline" }, localImagePresent: false, catalog: CATALOG, chatProviderId: "openai" })).toBe(IMAGE_UNAVAILABLE_LOCAL)
   })
 })
