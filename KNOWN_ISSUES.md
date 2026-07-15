@@ -42,6 +42,13 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-21 — drag-and-drop file attach: added a text/uri-list fallback for Linux/WSLg; NOT verified on real WSLg hardware — FLAGGED (needs a hands-on test) 2026-07-15
+
+- **Severity:** medium (a headline user complaint), but environment-bound.
+- **Context:** the composer's drop handler only read `DataTransfer.files`/`.items` (File objects). Standard browsers deliver those, but WSLg / some Linux desktops deliver a file drop as a `text/uri-list` of `file://` URIs with NO File objects — so the drop silently attached nothing (no chip, no error).
+- **Fix (this pass):** `attachmentsFromDataTransfer` (`phase3-ui/src/renderer/src/lib/attachments.ts`) now, when no File objects arrive, parses `text/uri-list`/`text/plain` file:// URIs and reads them via the main process like Browse. Parser unit-tested; the standard File-object path is unchanged (fallback only fires when `files.length === 0`).
+- **Verification GAP (rule 6):** cannot drive a real OS drag headlessly, so whether WSLg even delivers a uri-list (vs nothing at all) is UNCONFIRMED. If WSLg delivers no drop payload at all, no code fix helps — the reliable attach paths remain **Browse (📎)** and **paste**. Needs the user to drag a file onto the composer and report whether a chip appears.
+
 ## NJ-20 — renderer connection could WEDGE permanently on a half-open socket (no wall-clock timeout on the connect fetches or SSE stream) — FIXED + VERIFIED 2026-07-15
 
 - **Severity:** high — this is the root cause of the reported "can't text CAD / won't reply to 'hey'": the app sat disconnected ("waiting for engine… (Failed to fetch)") for 20+ min while opencode was up and reachable (a headless harness connected to the same engine instantly).
