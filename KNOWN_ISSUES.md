@@ -59,6 +59,7 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   | **rebuilt `Compound` from `wrapped` handles** | **✅ `['planetary_gearset','sun_gear','planet_gear_1']`, 2 meshes** |
 
 - **To do (lands with the Task-5 converter PR):** the converter must (a) rebuild the tree as above, and (b) **validate the emitted GLB bytes** — parse the JSON chunk and assert `nodes > 0` and `meshes > 0` — rather than trusting `export_gltf`'s return value. Without (b) a regression here ships an empty 3D model that looks like a success.
+- **Reproducer (corrected 2026-07-15):** `phase-cad/probes/probe_step_glb_hierarchy.py` (the failure + the fix) and `phase-cad/probes/probe_full_cad_loop.py` (the full mcp `execute → measure → export(step)` → converter loop). **Note:** PR #52 claimed to add these under `research/probes/`, but `research/*` is gitignored (it holds upstream clones), so the file was **silently never committed** — a defect in that PR. They now live under `phase-cad/probes/` (tracked) alongside the CAD env, and the whole pipeline was re-verified headless on 2026-07-15.
 
 ---
 

@@ -1,0 +1,17 @@
+[project]
+name = "nightjar-phase-cad"
+version = "0.1.0"
+description = "Nightjar Prompt-to-CAD (Task 5): build123d code-CAD + build123d-mcp tool loop, driven by the chat model over MCP."
+requires-python = "==3.12.*"
+# Pins verified end-to-end headless on 2026-07-15 (see smoke_test.py / research/probes).
+# Rationale for each pin is in README.md.
+dependencies = [
+  "build123d>=0.11,<0.12",
+  "build123d-mcp==0.3.79",
+]
+
+# cadquery-ocp-novtk 7.9.3.1.1 ships a BROKEN, un-yanked macOS wheel (missing OCP.GccEnt,
+# so `import build123d` fails). Exclude it exactly as upstream build123d-mcp does. macOS is
+# out of v1 scope, but pinning around it costs nothing and protects a future macOS build.
+[tool.uv]
+constraint-dependencies = ["cadquery-ocp-novtk!=7.9.3.1.1"]
