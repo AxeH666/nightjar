@@ -14,6 +14,13 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None or v.strip() == "":
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Config:
     # Telegram: no token → MockTransport (the bot doesn't poll; delivery is recorded in memory).
@@ -39,6 +46,9 @@ class Config:
     # If set, the HTTP reminder endpoints require this bearer token. Unset = open (dev/mock only);
     # a real deploy MUST set it, or anyone could inject reminders for any Telegram id.
     api_token: str = ""
+    # If BOT_TOKEN is set but API_TOKEN is not, the server REFUSES to start (the HTTP API would be
+    # open). Set this to run open on purpose (e.g. behind a trusted private network, port unpublished).
+    allow_open_http: bool = False
 
     @property
     def db_path(self) -> str:
@@ -67,4 +77,5 @@ def load_config() -> Config:
         http_host=os.environ.get("HTTP_HOST", "0.0.0.0").strip() or "0.0.0.0",  # noqa: S104
         http_port=_int("HTTP_PORT", 8080),
         api_token=os.environ.get("API_TOKEN", "").strip(),
+        allow_open_http=_bool("ALLOW_OPEN_HTTP", False),
     )

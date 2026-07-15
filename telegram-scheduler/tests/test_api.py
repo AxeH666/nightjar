@@ -21,7 +21,7 @@ def _make_client(tmp_path, **overrides):
     transport = MockTransport()
     scheduler = ReminderScheduler(config.db_url, delivery=transport.send)
     scheduler.start()
-    app = create_app(config, db, scheduler, make_llm_call(config), transport)
+    app = create_app(config, db, scheduler, make_llm_call(config))
     client = TestClient(app)
     client._scheduler = scheduler  # for teardown
     return client
@@ -34,13 +34,12 @@ def client(tmp_path):
     c._scheduler.shutdown()
 
 
-def test_health(client):
+def test_health_is_minimal(client):
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "ok"
-    assert body["llm_provider"] == "mock"
-    assert body["transport"] == "MockTransport"
+    assert body == {"status": "ok"}          # liveness only — no config disclosure
+    assert "llm_provider" not in body and "daily_cap" not in body
 
 
 def test_post_reminder_schedules(client):

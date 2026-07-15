@@ -33,6 +33,7 @@ class TelegramTransport:
     def __init__(self, bot_token: str, timeout: float = 10.0) -> None:
         if not bot_token:
             raise ValueError("TelegramTransport requires a bot token")
+        self._token = bot_token
         self._url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         self._timeout = timeout
 
@@ -44,5 +45,8 @@ class TelegramTransport:
                               timeout=self._timeout)
             return resp.status_code == 200 and resp.json().get("ok", False)
         except Exception as exc:  # noqa: BLE001 — a failed send must not kill the scheduler thread
-            print(f"[transport] delivery to {chat_id} failed: {exc}")
+            # httpx exceptions can embed the request URL, which contains the bot token — scrub it
+            # so the secret never lands in logs.
+            detail = str(exc).replace(self._token, "***")
+            print(f"[transport] delivery to {chat_id} failed ({type(exc).__name__}): {detail}")
             return False
