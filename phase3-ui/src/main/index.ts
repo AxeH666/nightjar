@@ -397,13 +397,20 @@ ipcMain.handle("nightjar:readWindowsClipboardImage", async (): Promise<string | 
     }
     const child = spawn("powershell.exe", ["-NonInteractive", "-NoProfile", "-Command", PS_CLIPBOARD_IMAGE_CMD], {
       timeout: 8000, // kills a wedged powershell (rule 3)
+      // Discard stderr: Add-Type/warning noise on a full stderr PIPE would block powershell
+      // and starve stdout until the timeout (Bugbot). We only care about stdout's base64.
+      stdio: ["ignore", "pipe", "ignore"],
     })
     child.stdout?.on("data", (b: Buffer) => {
       out += b.toString()
       if (out.length > 200 * 1024 * 1024) { child.kill(); finish(null) } // guard runaway output
     })
     child.on("error", () => finish(null)) // powershell.exe not reachable → graceful no-op
-    child.on("exit", () => {
+    child.on("exit", (code, signal) => {
+      // Trust the output ONLY on a clean exit. A timeout/kill (signal set) or non-zero exit
+      // may have left PARTIAL base64 mid-write — that must become null, not a truncated,
+      // broken data:image/png attachment (Bugbot).
+      if (signal || code !== 0) return finish(null)
       const b64 = out.trim().replace(/\s+/g, "")
       // a real base64 PNG is well over this; anything shorter is empty/garbage → null
       finish(/^[A-Za-z0-9+/=]+$/.test(b64) && b64.length > 100 ? `data:image/png;base64,${b64}` : null)
