@@ -18,6 +18,7 @@ export interface CadPart {
 
 export interface CadSceneController {
   load(glb: ArrayBuffer): Promise<CadPart[]>
+  clear(): void // remove the current model (for glb → null); invalidates any in-flight load
   setExplode(factor: number): void // 0 = assembled; larger = parts pushed radially outward
   setIsolated(name: string | null): void // show only this part (drill-down); null = show all
   setPartVisible(name: string, visible: boolean): void
@@ -78,6 +79,20 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
   let radius = 1
   let explodeFactor = 0
   let raf = 0
+  // Monotonic load token. Each load() captures its value; a load whose token is no longer
+  // current (a newer load started, or clear() ran) must NOT attach its result. Guards the
+  // out-of-order-completion race Bugbot flagged.
+  let loadGen = 0
+
+  function clearModel() {
+    if (modelRoot) {
+      scene.remove(modelRoot)
+      disposeObject(modelRoot)
+      modelRoot = null
+    }
+    parts = []
+    explodeFactor = 0
+  }
 
   function animate() {
     raf = requestAnimationFrame(animate)
@@ -119,18 +134,23 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
   }
 
   async function load(glb: ArrayBuffer): Promise<CadPart[]> {
-    // Clear any previous model.
-    if (modelRoot) {
-      scene.remove(modelRoot)
-      disposeObject(modelRoot)
-      modelRoot = null
-      parts = []
-    }
-    explodeFactor = 0
+    const gen = ++loadGen
 
+    // Parse FIRST — do NOT tear down the current model until we have a valid new scene. On a
+    // parse failure the exception propagates (the caller shows the error) and the previous
+    // model stays on screen, so the viewport never goes blank-but-controls-populated (Bugbot).
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) =>
       new GLTFLoader().parse(glb, "", (g) => resolve(g as unknown as { scene: THREE.Group }), reject),
     )
+
+    // A newer load (or a clear) started while we were parsing → drop this stale result and
+    // dispose it rather than attaching a second model (Bugbot: out-of-order completion).
+    if (gen !== loadGen) {
+      disposeObject(gltf.scene)
+      return []
+    }
+
+    clearModel() // now safe to swap: we hold a parsed scene and we're still the current load
     modelRoot = gltf.scene
     scene.add(modelRoot)
 
@@ -158,6 +178,11 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     return parts.map((p) => ({ name: p.name, visible: true }))
   }
 
+  function clear() {
+    loadGen++ // invalidate any in-flight load so it won't attach after we've cleared
+    clearModel()
+  }
+
   function setExplode(factor: number) {
     explodeFactor = Math.max(0, factor)
     applyExplode()
@@ -179,7 +204,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     renderer.dispose()
   }
 
-  return { load, setExplode, setIsolated, setPartVisible, frameAll, resize, dispose }
+  return { load, clear, setExplode, setIsolated, setPartVisible, frameAll, resize, dispose }
 }
 
 // Free GPU resources for a subtree (geometries + materials) so repeated loads don't leak.

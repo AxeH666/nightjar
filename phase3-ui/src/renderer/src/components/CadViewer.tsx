@@ -34,7 +34,17 @@ export function CadViewer({ glb, busy }: { glb: ArrayBuffer | null; busy?: boole
   // Load a new GLB whenever the bytes change. Reset the explode/isolate UI to assembled.
   useEffect(() => {
     const ctrl = ctrlRef.current
-    if (!ctrl || !glb) return
+    if (!ctrl) return
+    // glb → null: clear the model and the panel so we don't leave a stale model on canvas
+    // with its parts sidebar still showing (Bugbot).
+    if (!glb) {
+      ctrl.clear()
+      setParts([])
+      setExplode(0)
+      setIsolated(null)
+      setError(null)
+      return
+    }
     let cancelled = false
     setError(null)
     ctrl
