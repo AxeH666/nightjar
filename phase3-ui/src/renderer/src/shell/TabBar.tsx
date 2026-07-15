@@ -9,10 +9,11 @@
 //
 // `CoworkScreen.tsx` is kept in the tree for v2 — nothing imports it. The slot it vacates
 // is where the CAD tab lands (Task 5).
-export type TabId = "chat" | "code"
+export type TabId = "chat" | "cad" | "code"
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "chat", label: "Chat" },
+  { id: "cad", label: "CAD" },
   { id: "code", label: "Code" },
 ]
 

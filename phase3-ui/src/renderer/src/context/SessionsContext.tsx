@@ -19,12 +19,13 @@ import { toolCallFromPart } from "../lib/opencode"
 import type { OpenCodeEvent, FilePart, SessionInfo, MessageWithParts } from "../lib/opencode"
 import { type UiMessage, type UiBlock } from "../components/ChatSurface"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
+import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
 
-export type SlotId = "chat" | "code"
+export type SlotId = "chat" | "code" | "cad"
 
 export interface SessionState {
   id: string
@@ -41,6 +42,7 @@ interface RefBundle {
   roleById: Map<string, "user" | "assistant">
   pendingParts: Map<string, any[]>
   loadedImages: Set<string>
+  cadExports: Set<string> // export tool-call IDs already converted (avoid re-processing) — Task 5
   lastSent: string
   lastKind: SendKind // what the last send was (chat|image) → correct retry dispatch (NJ-9)
   lastModel: string // the model the last send used → recovery judged on it, not global (B4)
@@ -53,14 +55,15 @@ const freshRefs = (): RefBundle => ({
   roleById: new Map(),
   pendingParts: new Map(),
   loadedImages: new Set(),
+  cadExports: new Set(),
   lastSent: "",
   lastKind: "chat",
   lastModel: "",
 })
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding" }
-const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June coding" }
+const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding", cad: "cad" }
+const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June coding", cad: "June CAD" }
 
 // Client-side "kind" tag for sessions. OpenCode has NO per-session kind, so we
 // remember which session ids have served as CODE sessions (created or resumed
@@ -133,6 +136,12 @@ interface SessionsValue {
   setBusy: (sid: string, val: boolean) => void
   // code-session kind registry (Code tab list); persisted client-side
   codeSessionIds: Set<string>
+  // CAD (Task 5): the current converted model for the viewer + whether a conversion is
+  // running. The CAD agent's export tool completing drives these; the CAD screen renders them.
+  cadModel: { glb: ArrayBuffer; parts: string[] } | null
+  cadBusy: boolean
+  cadError: string | null
+  clearCadModel: () => void
   // recovery offers (chat slot)
   fallbackToLocal: () => void
   acceptOpenRouterSwitch: () => void
@@ -153,7 +162,15 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const { onToolCall } = useArtifact()
 
   const [sessions, setSessions] = useState<Record<string, SessionState>>({})
-  const [slots, setSlots] = useState<Record<SlotId, string>>({ chat: "", code: "" })
+  const [slots, setSlots] = useState<Record<SlotId, string>>({ chat: "", code: "", cad: "" })
+  // CAD viewer model + conversion status (Task 5).
+  const [cadModel, setCadModel] = useState<{ glb: ArrayBuffer; parts: string[] } | null>(null)
+  const [cadBusy, setCadBusy] = useState(false)
+  const [cadError, setCadError] = useState<string | null>(null)
+  const clearCadModel = useCallback(() => {
+    setCadModel(null)
+    setCadError(null)
+  }, [])
   // Persisted set of session ids that have served as CODE sessions (see the
   // module-level helpers). The Code tab filters GET /session down to these.
   const [codeSessionIds, setCodeSessionIds] = useState<Set<string>>(loadCodeSessionIds)
@@ -177,7 +194,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
 
   const perSessionRefs = useRef<Map<string, RefBundle>>(new Map())
   const sessionsRef = useRef<Record<string, SessionState>>({})
-  const slotsRef = useRef<Record<SlotId, string>>({ chat: "", code: "" })
+  const slotsRef = useRef<Record<SlotId, string>>({ chat: "", code: "", cad: "" })
   const agentsRef = useRef(agents) // stable read of the live agent list (for validAgent, without a deps cascade)
   useEffect(() => {
     sessionsRef.current = sessions
@@ -342,6 +359,32 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
               prev.map((mm) => (mm.id === messageID ? { ...mm, blocks: [...mm.blocks, { kind: "image", src, name: m[1] }] } : mm)),
             )
           })
+        }
+      }
+      // CAD (Task 5): the CAD agent's export tool completed → parse the STEP path it wrote,
+      // convert it to a GLB (trusted, wall-clock-capped, in main), and hand the bytes to the
+      // viewer. Only for a completed export we haven't processed, and only step exports.
+      if (
+        refs &&
+        call.status === "completed" &&
+        call.output &&
+        /cad-build123d_export|build123d_export/i.test(call.tool) &&
+        !refs.cadExports.has(call.callID)
+      ) {
+        const m = /Exported to (.+?\.step)\b/i.exec(call.output)
+        if (m) {
+          refs.cadExports.add(call.callID)
+          const stepPath = m[1]
+          setCadBusy(true)
+          setCadError(null)
+          cad
+            .buildModel(stepPath)
+            .then((res) => {
+              if ("error" in res) setCadError(res.error)
+              else setCadModel({ glb: res.glb, parts: res.parts })
+            })
+            .catch((e) => setCadError(e instanceof Error ? e.message : String(e)))
+            .finally(() => setCadBusy(false))
         }
       }
       // Delegate live-preview mirroring to ArtifactContext (keyed by this session).
@@ -520,6 +563,31 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       cancelled = true
     }
   }, [primaryId, clientRef, rebindSlot, markCodeSession, unmarkCodeSession])
+
+  // cad slot ← created here on connect, recreated on reconnect (Task 5). Simpler than the
+  // code slot: CAD sessions aren't in any history list, so there's no reaping to do — we just
+  // carry the transcript into the new session on a reconnect.
+  useEffect(() => {
+    if (!primaryId) return
+    const client = clientRef.current
+    if (!client) return
+    let cancelled = false
+    ;(async () => {
+      for (;;) {
+        if (cancelled) return
+        try {
+          const cadId = await client.createSession(DEFAULT_TITLE.cad)
+          if (!cancelled) rebindSlot("cad", cadId, true)
+          return
+        } catch {
+          await sleep(1500)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [primaryId, clientRef, rebindSlot])
 
   // Validate every session's agent against the live agent list (Bugbot: default
   // agent init removed + the ported #21 mode-revalidation). DEFAULT_AGENT
@@ -762,6 +830,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     hasSession,
     setBusy,
     codeSessionIds,
+    cadModel,
+    cadBusy,
+    cadError,
+    clearCadModel,
     fallbackToLocal,
     acceptOpenRouterSwitch,
   }

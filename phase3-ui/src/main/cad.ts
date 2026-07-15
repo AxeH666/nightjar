@@ -7,6 +7,7 @@
 // two upstream footguns it defends against (NJ-18: rebuild the tree; validate the bytes).
 import { execFile } from "node:child_process"
 import { mkdtempSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { REPO } from "./services"
@@ -24,6 +25,18 @@ export interface CadConvertResult {
   nodes?: number
   meshes?: number
   error?: string
+}
+
+// Read a converted GLB off disk so the renderer can load it via GLTFLoader.parse — the
+// renderer can't fetch an arbitrary file:// path (CSP + Electron blocks file navigation), so
+// the bytes come over IPC. Returns a Uint8Array (structured-clonable to the renderer).
+export async function readGlb(glbPath: string): Promise<Uint8Array | null> {
+  try {
+    const buf = await readFile(glbPath)
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  } catch {
+    return null
+  }
 }
 
 function pyPath(): string {
