@@ -18,6 +18,11 @@ const POLL_INTERVAL_MS = 60_000 // once a minute — reminders are minute-granul
 const POLL_TIMEOUT_MS = 20_000 // rule 3: a poll subprocess that hangs is killed
 
 let timer: ReturnType<typeof setInterval> | null = null
+let initialTimer: ReturnType<typeof setTimeout> | null = null
+// The poller CLAIMS due tasks (marks them fired) before we can show a notification, so once
+// we've stopped we must not process a late poll result — the task is already advanced in the
+// DB and a notification after shutdown is wrong. Guards the in-flight execFile callback.
+let stopped = false
 
 function pyPath(): string {
   return join(REPO, "phase2-odysseus", "venv", "bin", "python")
@@ -44,6 +49,7 @@ function runPoll(): void {
       env: { ...process.env, NIGHTJAR_ROOT: REPO },
     },
     (err, stdout) => {
+      if (stopped) return // shutting down — the claimed tasks are already advanced; don't notify
       if (err) {
         // A failed poll is non-fatal — log and try again next interval. Don't spam notifications.
         console.warn("[scheduler] poll failed:", err.message)
@@ -64,7 +70,6 @@ function runPoll(): void {
         return
       }
       for (const task of due) {
-        if (!Notification.isSupported()) break
         new Notification({
           title: task.name || "June reminder",
           body: task.prompt || task.name || "You have a reminder.",
@@ -82,14 +87,27 @@ export function startLocalScheduler(): void {
     console.warn("[scheduler] odysseus venv missing — local reminders disabled")
     return
   }
+  // Don't poll if we can't deliver: the poller CLAIMS (marks fired) the tasks it returns, so
+  // polling with no way to show a notification would silently advance/complete due reminders
+  // with nothing shown to the user (Bugbot). The paid server path delivers when we can't.
+  if (!Notification.isSupported()) {
+    console.warn("[scheduler] desktop notifications unavailable — local reminders disabled")
+    return
+  }
+  stopped = false
   // A short initial delay so it doesn't race window/service startup; then every minute.
   timer = setInterval(runPoll, POLL_INTERVAL_MS)
-  setTimeout(runPoll, 5_000)
+  initialTimer = setTimeout(runPoll, 5_000)
 }
 
 export function stopLocalScheduler(): void {
+  stopped = true
   if (timer) {
     clearInterval(timer)
     timer = null
+  }
+  if (initialTimer) {
+    clearTimeout(initialTimer)
+    initialTimer = null
   }
 }

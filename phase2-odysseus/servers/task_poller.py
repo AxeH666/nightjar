@@ -33,7 +33,12 @@ def main() -> int:
         for t in due:
             # Mark fired at the task's due time (its next_run), not wall-clock, so a recurring
             # task advances from its slot. task_due returned next_run in each row.
-            pim.task_mark_fired(t["id"], now=t.get("next_run", now_iso))
+            res = pim.task_mark_fired(t["id"], now=t.get("next_run", now_iso))
+            # Only surface a task we actually CLAIMED. If mark_fired errored (the row vanished,
+            # a bad timestamp), the DB wasn't updated — don't notify for it, and let it be
+            # reconsidered next poll rather than showing a reminder that isn't recorded as fired.
+            if "error" in res:
+                continue
             claimed.append({"id": t["id"], "name": t["name"], "prompt": t.get("prompt", ""),
                             "schedule": t["schedule"]})
         print(json.dumps({"due": claimed}))
