@@ -17,7 +17,7 @@ import type { ServiceStatus } from "../components/HealthStrip"
 declare global {
   interface Window {
     nightjar?: {
-      getConfig(): Promise<{ opencodeUrl: string; sideChannelUrl?: string }>
+      getConfig(): Promise<{ opencodeUrl: string; sideChannelUrl?: string; isWSL?: boolean }>
       getStatus?(): Promise<ServiceStatus[]>
       onStatus?(cb: (s: ServiceStatus[]) => void): () => void
       readAudio?(path: string): Promise<ArrayBuffer>
