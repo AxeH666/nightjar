@@ -88,10 +88,46 @@ export async function pickAttachments(): Promise<AttachmentResult> {
   return { attachments, errors }
 }
 
+// Parse a text/uri-list (or a plain-text list of file:// URIs / absolute paths) into
+// local disk paths. WSLg and some Linux desktops deliver a file DROP as a uri-list with
+// NO File objects on the DataTransfer — without this fallback such drops silently attach
+// nothing (a big reason "drag-and-drop doesn't work" on Linux). Remote hosts (file://host/…)
+// are skipped since we can't read them locally.
+function uriListToPaths(uriList: string): string[] {
+  const paths: string[] = []
+  for (const raw of uriList.split(/[\r\n]+/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith("#")) continue // uri-list comments begin with '#'
+    if (/^file:\/\//i.test(line)) {
+      try {
+        const u = new URL(line)
+        if (!u.host || u.host === "localhost") paths.push(decodeURIComponent(u.pathname))
+      } catch {
+        /* not a parseable URI — skip */
+      }
+    } else if (line.startsWith("/")) {
+      paths.push(line) // some sources drop a bare absolute path as plain text
+    }
+  }
+  return paths
+}
+
+// Read a known disk path into an Attachment via the main process — the same path the
+// native "Browse" flow uses (readAttachment gives name/mime/size + an on-disk path for
+// the vision tool). Used for drops delivered as uri-list paths.
+async function pathToAttachment(path: string): Promise<Attachment> {
+  const b = bridge()
+  if (!b) throw new Error("attachment bridge unavailable")
+  const a = await b.readAttachment(path)
+  return { id: nextId(), name: a.name, mime: a.mime, dataUrl: a.dataUrl, size: a.size, path: a.path, isImage: isImageMime(a.mime) }
+}
+
 // Collect image/file attachments from a paste or drop DataTransfer. Per-file failures
 // are surfaced (not swallowed) so a bad file gives a reason instead of a silent no-op.
 export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Promise<AttachmentResult> {
   if (!dt) return { attachments: [], errors: [] }
+  // Read everything off the DataTransfer SYNCHRONOUSLY: it is only valid during the
+  // event that delivered it, so any await below would invalidate .files/.items/getData.
   const files: File[] = []
   if (dt.files && dt.files.length) files.push(...Array.from(dt.files))
   else if (dt.items) {
@@ -102,6 +138,10 @@ export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Prom
       }
     }
   }
+  // Fallback ONLY when no File objects arrived (so the standard paste/drop path is
+  // unchanged): a uri-list of dropped file paths, read via the main process like Browse.
+  const uriPaths = files.length === 0 ? uriListToPaths(dt.getData?.("text/uri-list") || dt.getData?.("text/plain") || "") : []
+
   const attachments: Attachment[] = []
   const errors: string[] = []
   for (const f of files) {
@@ -109,6 +149,13 @@ export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Prom
       attachments.push(await fileToAttachment(f))
     } catch (e) {
       errors.push(`Couldn't attach ${f.name || "file"}: ${errText(e)}`)
+    }
+  }
+  for (const p of uriPaths) {
+    try {
+      attachments.push(await pathToAttachment(p))
+    } catch (e) {
+      errors.push(`Couldn't attach ${baseName(p)}: ${errText(e)}`)
     }
   }
   return { attachments, errors }
