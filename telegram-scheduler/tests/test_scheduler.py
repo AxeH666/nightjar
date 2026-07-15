@@ -3,6 +3,7 @@ on the right slot, and — the load-bearing property — reminders SURVIVE A RES
 jobstore (a reminder set today must still fire after the server bounces)."""
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.nl_intent import ReminderIntent
 from app.scheduler import ReminderScheduler, set_delivery
@@ -44,6 +45,38 @@ def test_weekly_trigger_lands_on_the_right_weekday(tmp_path):
         job = sched.scheduler.get_job(job_id)
         assert job.next_run_time.weekday() == 4  # NOT off-by-a-day from APScheduler's int convention
         assert job.next_run_time.hour == 9
+    finally:
+        sched.shutdown()
+
+
+def test_recurring_daily_fires_at_local_wallclock_dst_aware(tmp_path):
+    """A daily reminder must keep firing at the user's LOCAL clock time (so it doesn't drift an
+    hour at DST), which means the cron is expressed in the user's tz, not frozen UTC."""
+    sched = ReminderScheduler(_db_url(tmp_path), delivery=MockTransport().send)
+    sched.start()
+    try:
+        ny = ZoneInfo("America/New_York")
+        when_utc = datetime(2026, 7, 20, 12, 0)  # 08:00 EDT (summer) == 12:00 UTC
+        jid = sched.schedule(user_id=3, chat_id=3,
+                             intent=_intent("meds", when_utc, repeat="daily"), tz_name="America/New_York")
+        local = sched.scheduler.get_job(jid).next_run_time.astimezone(ny)
+        assert (local.hour, local.minute) == (8, 0)  # 8am LOCAL every day, not a fixed UTC hour
+    finally:
+        sched.shutdown()
+
+
+def test_weekly_uses_local_weekday_not_utc(tmp_path):
+    """11pm Friday in New York is Saturday in UTC — the reminder must land on the LOCAL weekday
+    the user asked for (Friday), not the UTC one."""
+    sched = ReminderScheduler(_db_url(tmp_path), delivery=MockTransport().send)
+    sched.start()
+    try:
+        ny = ZoneInfo("America/New_York")
+        when_utc = datetime(2026, 7, 18, 3, 0)  # Sat 03:00 UTC == Fri 23:00 EDT
+        jid = sched.schedule(user_id=4, chat_id=4,
+                             intent=_intent("call", when_utc, repeat="weekly"), tz_name="America/New_York")
+        local = sched.scheduler.get_job(jid).next_run_time.astimezone(ny)
+        assert local.weekday() == 4 and local.hour == 23  # Friday 23:00 local, not Saturday UTC
     finally:
         sched.shutdown()
 

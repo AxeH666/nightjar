@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Callable, List, Optional
+from zoneinfo import ZoneInfo
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -22,6 +23,14 @@ from .nl_intent import ReminderIntent
 # datetime.weekday(): 0=Mon..6=Sun. Pass names to CronTrigger to avoid APScheduler's integer
 # weekday convention (which is not the crontab 0=Sunday one), which is an easy off-by-a-day bug.
 _WEEKDAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _tz_ok(name: str) -> bool:
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 # Module-global delivery hook, resolved at FIRE time (not capture time) so jobs restored from the
 # store after a restart reconnect to the live transport. Set via set_delivery() at startup.
@@ -63,27 +72,35 @@ class ReminderScheduler:
     def shutdown(self) -> None:
         self.scheduler.shutdown(wait=False)
 
-    def schedule(self, user_id: int, chat_id: int, intent: ReminderIntent) -> str:
-        """Schedule `intent` for `user_id`/`chat_id`; returns the job id. once → a one-shot at
-        when_utc; daily/weekly/monthly → a recurring cron trigger at the same UTC clock time."""
+    def schedule(self, user_id: int, chat_id: int, intent: ReminderIntent,
+                 tz_name: str = "UTC") -> str:
+        """Schedule `intent` for `user_id`/`chat_id`; returns the job id. once → a one-shot at the
+        exact when_utc instant; daily/weekly/monthly → a recurring cron in the USER'S timezone so
+        it keeps firing at the intended LOCAL wall-clock time (DST-correct) and on the intended
+        local weekday/day — not drifting an hour at DST or landing on the UTC weekday (Bugbot)."""
         job_id = f"rem:{user_id}:{uuid.uuid4().hex[:12]}"
-        self.scheduler.add_job(_fire, self._trigger(intent), args=[chat_id, intent.title],
+        self.scheduler.add_job(_fire, self._trigger(intent, tz_name), args=[chat_id, intent.title],
                                id=job_id, replace_existing=False)
         return job_id
 
-    def _trigger(self, intent: ReminderIntent):
-        when = intent.when_utc  # naive UTC
+    def _trigger(self, intent: ReminderIntent, tz_name: str = "UTC"):
         repeat = intent.repeat
         if repeat == "once":
-            return DateTrigger(run_date=when, timezone="UTC")
+            # A one-off is a fixed instant; UTC is exactly right and has no DST ambiguity.
+            return DateTrigger(run_date=intent.when_utc, timezone="UTC")
+
+        # Recurring: express the trigger in the user's LOCAL wall-clock so APScheduler re-derives
+        # the UTC fire time each occurrence (handling DST) instead of freezing one UTC clock time.
+        tz = tz_name if _tz_ok(tz_name) else "UTC"
+        local = intent.when_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz))
         if repeat == "daily":
-            return CronTrigger(hour=when.hour, minute=when.minute, timezone="UTC")
+            return CronTrigger(hour=local.hour, minute=local.minute, timezone=tz)
         if repeat == "weekly":
-            return CronTrigger(day_of_week=_WEEKDAY_NAMES[when.weekday()],
-                               hour=when.hour, minute=when.minute, timezone="UTC")
+            return CronTrigger(day_of_week=_WEEKDAY_NAMES[local.weekday()],
+                               hour=local.hour, minute=local.minute, timezone=tz)
         if repeat == "monthly":
-            day = intent.scheduled_day or min(when.day, 28)  # clamp so every month has the day
-            return CronTrigger(day=day, hour=when.hour, minute=when.minute, timezone="UTC")
+            day = min(local.day, 28)  # clamp so every month has the day
+            return CronTrigger(day=day, hour=local.hour, minute=local.minute, timezone=tz)
         raise ValueError(f"unknown repeat '{repeat}'")
 
     def list_jobs(self, user_id: int) -> List[dict]:

@@ -52,12 +52,17 @@ def create_app(config: Config, db: Database, scheduler: ReminderScheduler,
     @app.post("/reminders")
     def create_reminder(req: ReminderRequest, _: None = Depends(require_token)) -> dict:
         chat_id = req.chat_id or req.telegram_id
+        # Reject an invalid tz up front (like the bot's /tz) so we never persist garbage that
+        # would silently make every future reminder parse in UTC (Bugbot).
+        if req.tz is not None and not _valid_tz(req.tz):
+            raise HTTPException(status_code=400, detail=f"'{req.tz}' is not a valid IANA timezone")
         db.upsert_user(req.telegram_id, chat_id, req.tz)
         tz = db.get_user_tz(req.telegram_id, config.default_tz)
         reply = handle_reminder_text(
             req.text, user_id=req.telegram_id, chat_id=chat_id, tz_name=tz,
             llm_call=llm_call, schedule=scheduler.schedule,
             get_count=db.get_count, set_count=db.set_count, daily_cap=config.daily_cap,
+            usage_lock=db.usage_lock,
         )
         return {"reply": reply, "pending": scheduler.list_jobs(req.telegram_id)}
 
@@ -127,6 +132,7 @@ def build_dispatcher(config: Config, db: Database, scheduler: ReminderScheduler,
             user_id=message.from_user.id, chat_id=message.chat.id, tz_name=tz,
             llm_call=llm_call, schedule=scheduler.schedule,
             get_count=db.get_count, set_count=db.set_count, daily_cap=config.daily_cap,
+            usage_lock=db.usage_lock,
         )
         await message.answer(reply)
 

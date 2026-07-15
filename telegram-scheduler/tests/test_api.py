@@ -71,6 +71,14 @@ def test_daily_cap_via_api(tmp_path):
         client._scheduler.shutdown()
 
 
+def test_invalid_timezone_rejected(client):
+    r = client.post("/reminders", json={"telegram_id": 7, "text": "at 3pm ping", "tz": "Mars/Phobos"})
+    assert r.status_code == 400
+    # a valid tz is accepted
+    ok = client.post("/reminders", json={"telegram_id": 7, "text": "at 3pm ping", "tz": "America/New_York"})
+    assert ok.status_code == 200
+
+
 def test_api_token_required_when_set(tmp_path):
     client = _make_client(tmp_path, api_token="s3cret")
     try:

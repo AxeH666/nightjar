@@ -7,6 +7,7 @@ The usage counter is exposed as plain get/set callables so the pure `usage.check
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -38,6 +39,9 @@ class Database:
         self.engine = create_engine(url, connect_args={"check_same_thread": False}, future=True)
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine, future=True)
+        # Serializes the usage-counter read-modify-write across threads (one-process server), so
+        # concurrent requests can't both slip under the daily cap. Passed as usage_lock in main.
+        self.usage_lock = threading.Lock()
 
     # ---- users ----
     def upsert_user(self, telegram_id: int, chat_id: int, tz: Optional[str] = None) -> None:
