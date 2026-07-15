@@ -38,9 +38,15 @@ export interface ByokProvider {
 
 // Curated set of the common cloud providers OpenCode already supports. (OpenCode
 // knows ~20 via the models.dev registry; these are the ones we surface in the UI.)
+//
+// `defaultModel` is LOAD-BEARING: the global Local/Cloud toggle sets the active chat
+// model to `<provider>/<defaultModel>` when you switch to Cloud, so a stale id here
+// selects a superseded/retired model on switch. Keep these current — Anthropic was
+// `claude-sonnet-4-20250514` (deprecated, retires 2026-06-15) and is now
+// `claude-sonnet-5`. Verify any change against the provider's live model registry.
 export const BYOK_PROVIDERS: ByokProvider[] = [
   { id: "openai", name: "OpenAI", envVar: "NIGHTJAR_BYOK_OPENAI", defaultModel: "gpt-4o", keyHint: "sk-…" },
-  { id: "anthropic", name: "Anthropic", envVar: "NIGHTJAR_BYOK_ANTHROPIC", defaultModel: "claude-sonnet-4-20250514", keyHint: "sk-ant-…" },
+  { id: "anthropic", name: "Anthropic", envVar: "NIGHTJAR_BYOK_ANTHROPIC", defaultModel: "claude-sonnet-5", keyHint: "sk-ant-…" },
   { id: "google", name: "Google Gemini", envVar: "NIGHTJAR_BYOK_GOOGLE", defaultModel: "gemini-2.0-flash", keyHint: "AIza…" },
   { id: "groq", name: "Groq", envVar: "NIGHTJAR_BYOK_GROQ", defaultModel: "llama-3.3-70b-versatile", keyHint: "gsk_…" },
   { id: "openrouter", name: "OpenRouter", envVar: "NIGHTJAR_BYOK_OPENROUTER", defaultModel: "openai/gpt-4o", keyHint: "sk-or-…" },
