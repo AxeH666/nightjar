@@ -22,6 +22,18 @@ import * as preview from "./preview-server"
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
 
+// WSLg has no working GPU: the GPU process fails to initialise ("Exiting GPU process due
+// to errors during initialization") and Chromium's software-WebGL fallback is gated behind
+// a flag. Left as-is this spams GL errors and can take the renderer/window down (a dead
+// window reads as "the app stopped responding"). Under WSL, skip the GPU process entirely
+// and enable SwiftShader so rendering is stable in software AND the CAD three.js viewer
+// still draws. Native Windows/macOS/Linux keep their real GPU (these calls must run before
+// app 'ready', i.e. here at module load). See NJ-30.
+if (isWSL()) {
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch("enable-unsafe-swiftshader")
+}
+
 // The env opencode-serve runs with: repo root + the (decrypted) BYOK keys under
 // their non-standard NIGHTJAR_BYOK_* names, which opencode.json references via
 // {env:...}. Recomputed on every key change so a removed key's var disappears.

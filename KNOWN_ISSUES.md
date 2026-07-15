@@ -42,6 +42,12 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-31 — WSLg GPU-process crash could take the app/window down ("not responding"); force software rendering under WSL — FIXED + VERIFIED 2026-07-15
+
+- **Severity:** high — under WSLg the GPU process fails to initialise ("Exiting GPU process due to errors during initialization"), spams GL ReadPixels stalls, and Chromium's software-WebGL fallback is disabled-by-default. That can crash the renderer/window, and a dead window reads as "the app stopped responding" (a user symptom: chat not answering "hello" even though the local model was fine). Part of NJ-30's WSLg-GPU story.
+- **Fix (`main/index.ts`):** under WSL (`isWSL()`), at module load (before app `ready`) call `app.disableHardwareAcceleration()` + `app.commandLine.appendSwitch("enable-unsafe-swiftshader")`. This skips the failing GPU process and enables SwiftShader so rendering is stable in software AND the CAD three.js viewer still draws. Native Windows/macOS/Linux keep their real GPU (untouched).
+- **Verified (WSL):** a fresh boot with the flags shows **"Exiting GPU process" = 0** (was 1), "software WebGL deprecated" = 0, GL ReadPixels stalls = 0; the app connects and chat responds ("hello" → reply); zero crashes. Software rendering is slower but stable. The CAD viewer rendering in software needs a GUI glance to confirm visually.
+
 ## NJ-30 — WSLg is NOT a supported interactive GUI environment; move GUI/interaction testing to native Windows — FLAGGED for maintainer (dev-workflow decision, NOT applied) 2026-07-15
 
 - **Context:** the file-handling investigation (NJ-26…NJ-29) established that several interactive features are broken specifically by WSLg/WSL, not by JUNE's code:
