@@ -79,5 +79,41 @@ check("a completed 'once' has no next_run", fired_once["next_run"] is None)
 
 check("mark_fired on a missing task errors, doesn't raise", "error" in p.task_mark_fired("nope"))
 
+# ---------- Bugbot regressions ----------
+# scheduled_day=0 (Monday) must NOT be treated as unset (was `and scheduled_day`).
+mon = p.task_create("weekly monday", schedule="weekly", scheduled_time="10:00", scheduled_day=0)
+with SessionLocal() as db:
+    row = db.query(ScheduledTask).filter(ScheduledTask.id == mon["id"]).first()
+    check("MONDAY_NOT_UNSET — scheduled_day 0 stored, not None", row.scheduled_day == 0, row.scheduled_day)
+    check("MONDAY_NOT_UNSET — next_run lands on a Monday", row.next_run.weekday() == 0, row.next_run.weekday())
+
+# mark_fired with a `now` EARLIER than the slot must not re-schedule the same slot.
+d2 = p.task_create("daily noon", schedule="daily", scheduled_time="12:00")
+with SessionLocal() as db:  # pin next_run to a known slot
+    row = db.query(ScheduledTask).filter(ScheduledTask.id == d2["id"]).first()
+    row.next_run = datetime(2026, 7, 15, 12, 0); db.commit()
+fired = p.task_mark_fired(d2["id"], now="2026-07-15T11:59:00Z")  # 1 min BEFORE the slot
+check("NO_SAME_SLOT_REFIRE — advances past the current slot", fired["next_run"] > "2026-07-15T12:00:00Z", fired["next_run"])
+
+# malformed `now` returns an error dict, doesn't raise out of the tool.
+check("bad now on mark_fired → error dict", "error" in p.task_mark_fired(d2["id"], now="not-a-date"))
+# task_due tolerates a bad `now` (degrades to utcnow rather than raising).
+try:
+    p.task_due(now="garbage")
+    check("bad now on task_due → no raise", True)
+except Exception:
+    check("bad now on task_due → no raise", False)
+
+# migration completes a legacy time-only 'once' corpse (no future date) instead of resurrecting it.
+with SessionLocal() as db:
+    legacy_once = ScheduledTask(id="legacyonce", owner=p.OWNER, name="stale one-off", prompt="",
+                                task_type="llm", schedule="once", scheduled_time="09:00",
+                                scheduled_date=None, next_run=None, status="active")
+    db.add(legacy_once); db.commit()
+p._migrate_dead_task_rows()
+with SessionLocal() as db:
+    lo = db.query(ScheduledTask).filter(ScheduledTask.id == "legacyonce").first()
+    check("LEGACY_ONCE_COMPLETED — time-only past 'once' completed, not resurrected", lo.status == "completed", lo.status)
+
 print(f"\n{len(fails) == 0 and 'all passed' or f'{len(fails)} FAILED: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

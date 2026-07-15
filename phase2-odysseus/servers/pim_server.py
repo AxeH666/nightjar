@@ -35,17 +35,27 @@ def _migrate_dead_task_rows() -> int:
     from schedule_backend import compute_next_run as _cnr
 
     healed = 0
+    now = datetime.utcnow()
     with SessionLocal() as db:
         rows = (db.query(ScheduledTask)
                 .filter(ScheduledTask.status == "active", ScheduledTask.next_run.is_(None)).all())
         for r in rows:
-            nr = _cnr(r.schedule or "once", r.scheduled_time or "",
-                      scheduled_day=r.scheduled_day, scheduled_date=r.scheduled_date,
-                      now=datetime.utcnow())
-            if nr is None:
-                r.status = "completed"  # a dead 'once' in the past — nothing to fire
+            sched = (r.schedule or "once").lower()
+            if sched == "once":
+                # A legacy one-off carries no day info (only a time), so we can't know WHICH day
+                # it was meant for — resurrecting it to fire at the next occurrence could deliver
+                # a weeks-stale reminder (Bugbot). Keep it ONLY if it has a still-future explicit
+                # date; otherwise complete the corpse.
+                if r.scheduled_date and r.scheduled_date > now:
+                    r.next_run = r.scheduled_date
+                else:
+                    r.status = "completed"
             else:
-                r.next_run = nr
+                nr = _cnr(sched, r.scheduled_time or "", scheduled_day=r.scheduled_day, now=now)
+                if nr is None:
+                    r.status = "completed"  # unschedulable recurring → don't leave it dangling
+                else:
+                    r.next_run = nr
             healed += 1
         if healed:
             db.commit()
@@ -84,9 +94,10 @@ def note_list(limit: int = 20) -> list[dict]:
 # ---------------- tasks ----------------
 @mcp.tool()
 def task_create(name: str, prompt: str = "", schedule: str = "once",
-                scheduled_time: str = "", scheduled_day: int = 0) -> dict:
+                scheduled_time: str = "", scheduled_day: int = -1) -> dict:
     """Create a scheduled reminder/task. schedule: once|daily|weekly|monthly; scheduled_time
     'HH:MM' (UTC); scheduled_day = weekday 0=Mon..6=Sun (weekly) or day-of-month 1..28 (monthly).
+    Pass -1 (the default) to leave scheduled_day unset.
 
     NJ-16 fix: this now computes a real `next_run` so a poller can actually fire the task —
     before, rows were written with no next_run and nothing could ever run them.
@@ -95,7 +106,9 @@ def task_create(name: str, prompt: str = "", schedule: str = "once",
     if sched not in VALID_SCHEDULES:
         return {"error": f"invalid schedule '{schedule}'; must be one of {', '.join(VALID_SCHEDULES)}"}
 
-    day = scheduled_day if sched in ("weekly", "monthly") and scheduled_day else None
+    # -1 = unset. Check `>= 0` explicitly so scheduled_day=0 (Monday) is NOT swallowed by a
+    # truthiness test (Bugbot: `and scheduled_day` treated Monday as unset).
+    day = scheduled_day if sched in ("weekly", "monthly") and scheduled_day >= 0 else None
     next_run = compute_next_run(sched, scheduled_time or "", scheduled_day=day, now=datetime.utcnow())
     if next_run is None:
         return {"error": "could not compute a fire time for that schedule (a 'once' time in the past?)."}
@@ -127,7 +140,7 @@ def task_due(now: str = "") -> list[dict]:
     This is what a scheduler polls to know what to fire. Uses the ix_scheduled_tasks_due index
     (status, next_run). Fire them, then call task_mark_fired for each.
     """
-    when = _parse_iso(now) if now else datetime.utcnow()
+    when = (_parse_iso(now) or datetime.utcnow()) if now else datetime.utcnow()
     with SessionLocal() as db:
         rows = (db.query(ScheduledTask)
                 .filter(ScheduledTask.owner == OWNER, ScheduledTask.status == "active",
@@ -143,7 +156,12 @@ def task_mark_fired(task_id: str, now: str = "") -> dict:
     it completed (once). `now` (ISO-8601 UTC, default utcnow) is the fire time — pass the time
     the task was DUE so a recurring task advances from its slot, not from wall-clock. A
     missing/foreign task returns an error, not a raise."""
-    fired_at = _parse_iso(now) if now else datetime.utcnow()
+    if now:
+        fired_at = _parse_iso(now)
+        if fired_at is None:
+            return {"error": f"bad 'now' timestamp: '{now}'"}
+    else:
+        fired_at = datetime.utcnow()
     with SessionLocal() as db:
         t = db.query(ScheduledTask).filter(ScheduledTask.id == task_id,
                                             ScheduledTask.owner == OWNER).first()
@@ -154,17 +172,30 @@ def task_mark_fired(task_id: str, now: str = "") -> dict:
             t.status = "completed"
             t.next_run = None
         else:
-            # Advance from the fire time so we don't immediately re-fire the same slot.
-            t.next_run = compute_next_run(t.schedule, t.scheduled_time or "",
-                                          scheduled_day=t.scheduled_day, now=fired_at)
+            # Advance past the LATER of the fire time and the current slot, so we never return
+            # the same slot and re-fire it (Bugbot: a fired_at earlier than next_run could).
+            base = max(fired_at, t.next_run) if t.next_run else fired_at
+            nr = compute_next_run(t.schedule, t.scheduled_time or "", scheduled_day=t.scheduled_day, now=base)
+            if nr is None:
+                # A recurring task we can no longer schedule → complete it, never a zombie that's
+                # active with next_run=None and thus never due again (Bugbot).
+                t.status = "completed"
+                t.next_run = None
+            else:
+                t.next_run = nr
         db.commit()
         return {"id": t.id, "status": t.status,
                 "next_run": (t.next_run.isoformat() + "Z") if t.next_run else None}
 
 
-def _parse_iso(s: str) -> datetime:
-    """Parse an ISO-8601 UTC string (tolerating a trailing 'Z') to a naive-UTC datetime."""
-    return datetime.fromisoformat(s.strip().replace("Z", "").replace("z", ""))
+def _parse_iso(s: str):
+    """Parse an ISO-8601 UTC string (tolerating a trailing 'Z') to a naive-UTC datetime, or
+    None if it can't be parsed — so a malformed `now` degrades instead of raising out of the
+    MCP tool (Bugbot)."""
+    try:
+        return datetime.fromisoformat(s.strip().replace("Z", "").replace("z", ""))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 # ---------------- calendar ----------------
