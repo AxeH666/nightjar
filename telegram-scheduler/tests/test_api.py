@@ -71,6 +71,12 @@ def test_daily_cap_via_api(tmp_path):
         client._scheduler.shutdown()
 
 
+def test_nonpositive_telegram_id_rejected(client):
+    # 0/negatives are invalid ids; -1 specifically must not collide with the GLOBAL_BUCKET counter.
+    assert client.post("/reminders", json={"telegram_id": -1, "text": "at 3pm x"}).status_code == 422
+    assert client.post("/reminders", json={"telegram_id": 0, "text": "at 3pm x"}).status_code == 422
+
+
 def test_invalid_timezone_rejected(client):
     r = client.post("/reminders", json={"telegram_id": 7, "text": "at 3pm ping", "tz": "Mars/Phobos"})
     assert r.status_code == 400

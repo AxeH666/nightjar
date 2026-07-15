@@ -26,7 +26,13 @@ class Config:
     # Where the SQLite DB (app tables + APScheduler jobstore) lives. Must be a persistent volume
     # in production so reminders survive a container restart.
     data_dir: str = ""
-    daily_cap: int = 50           # max reminder parses per user per UTC day (shared-key guard)
+    daily_cap: int = 50           # max reminder parses per USER per UTC day (shared-key guard)
+    # The un-bypassable cost ceiling: max paid parses across ALL users per UTC day (0 = unlimited).
+    # An HTTP caller can rotate telegram_ids to dodge the per-user cap, but NOT this aggregate one.
+    # Fail-safe default so a public deploy is protected out of the box; raise it to your budget.
+    global_daily_cap: int = 1000
+    user_rate_per_min: int = 15   # per-user sliding-window flood limit (0 = disabled)
+    llm_timeout_s: int = 30       # hard wall-clock timeout per paid LLM call (CLAUDE.md rule 3)
     default_tz: str = "UTC"       # tz for users who haven't set one via /tz
     http_host: str = "0.0.0.0"    # noqa: S104 — bind-all is intended for a containerized service
     http_port: int = 8080
@@ -54,6 +60,9 @@ def load_config() -> Config:
         llm_model=os.environ.get("LLM_MODEL", "").strip(),
         data_dir=os.environ.get("DATA_DIR", "").strip(),
         daily_cap=_int("DAILY_CAP", 50),
+        global_daily_cap=_int("GLOBAL_DAILY_CAP", 1000),
+        user_rate_per_min=_int("USER_RATE_PER_MIN", 15),
+        llm_timeout_s=_int("LLM_TIMEOUT_S", 30),
         default_tz=(os.environ.get("DEFAULT_TZ", "UTC").strip() or "UTC"),
         http_host=os.environ.get("HTTP_HOST", "0.0.0.0").strip() or "0.0.0.0",  # noqa: S104
         http_port=_int("HTTP_PORT", 8080),
