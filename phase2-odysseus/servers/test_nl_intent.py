@@ -95,6 +95,17 @@ args = intent_to_task_args(parse_reminder(
     now_utc=NOW, tz_name="UTC"))
 check("intent_to_task_args shape", args == {"name": "Standup", "prompt": "Standup",
       "schedule": "weekly", "scheduled_time": "09:00", "scheduled_day": 4}, args)
+check("recurring args carry NO scheduled_date", "scheduled_date" not in args)
+
+# 10. a 'once' reminder on a specific future day forwards its calendar date, so task_create
+# fires on THAT day, not the next occurrence of the clock time today/tomorrow (Bugbot).
+once_args = intent_to_task_args(parse_reminder(
+    "next friday at 1pm call the dentist",
+    mock('{"title":"Call the dentist","datetime_local":"2026-07-24T13:00","repeat":"once"}'),
+    now_utc=NOW, tz_name="UTC"))
+check("once forwards scheduled_date (the full when_utc)",
+      once_args.get("scheduled_date") == "2026-07-24T13:00:00", once_args.get("scheduled_date"))
+check("once schedule stays 'once'", once_args["schedule"] == "once", once_args["schedule"])
 
 print(f"\n{len(fails) == 0 and 'all passed' or f'{len(fails)} FAILED: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

@@ -94,10 +94,13 @@ def note_list(limit: int = 20) -> list[dict]:
 # ---------------- tasks ----------------
 @mcp.tool()
 def task_create(name: str, prompt: str = "", schedule: str = "once",
-                scheduled_time: str = "", scheduled_day: int = -1) -> dict:
+                scheduled_time: str = "", scheduled_day: int = -1,
+                scheduled_date: str = "") -> dict:
     """Create a scheduled reminder/task. schedule: once|daily|weekly|monthly; scheduled_time
     'HH:MM' (UTC); scheduled_day = weekday 0=Mon..6=Sun (weekly) or day-of-month 1..28 (monthly).
-    Pass -1 (the default) to leave scheduled_day unset.
+    Pass -1 (the default) to leave scheduled_day unset. scheduled_date = ISO-8601 UTC datetime
+    for a 'once' reminder that must fire on a specific calendar day (e.g. "next Friday 1pm");
+    when given it takes precedence over scheduled_time and the row remembers the exact date.
 
     NJ-16 fix: this now computes a real `next_run` so a poller can actually fire the task —
     before, rows were written with no next_run and nothing could ever run them.
@@ -109,7 +112,12 @@ def task_create(name: str, prompt: str = "", schedule: str = "once",
     # -1 = unset. Check `>= 0` explicitly so scheduled_day=0 (Monday) is NOT swallowed by a
     # truthiness test (Bugbot: `and scheduled_day` treated Monday as unset).
     day = scheduled_day if sched in ("weekly", "monthly") and scheduled_day >= 0 else None
-    next_run = compute_next_run(sched, scheduled_time or "", scheduled_day=day, now=datetime.utcnow())
+    # A 'once' reminder resolved to a concrete calendar datetime ("next Friday 1pm") must fire on
+    # THAT date — not the next occurrence of the clock time today/tomorrow (Bugbot). A malformed
+    # date degrades to time-only rather than raising out of the tool.
+    sdate = _parse_iso(scheduled_date) if (sched == "once" and scheduled_date) else None
+    next_run = compute_next_run(sched, scheduled_time or "", scheduled_day=day,
+                                scheduled_date=sdate, now=datetime.utcnow())
     if next_run is None:
         return {"error": "could not compute a fire time for that schedule (a 'once' time in the past?)."}
 
@@ -117,7 +125,8 @@ def task_create(name: str, prompt: str = "", schedule: str = "once",
         t = ScheduledTask(id=_uid(), owner=OWNER, name=name, prompt=prompt,
                           task_type="llm", schedule=sched,
                           scheduled_time=(scheduled_time or None),
-                          scheduled_day=day, next_run=next_run, status="active")
+                          scheduled_day=day, scheduled_date=sdate,
+                          next_run=next_run, status="active")
         db.add(t); db.commit()
         return {"id": t.id, "name": t.name, "schedule": t.schedule,
                 "next_run": next_run.isoformat() + "Z"}

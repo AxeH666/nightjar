@@ -115,5 +115,23 @@ with SessionLocal() as db:
     lo = db.query(ScheduledTask).filter(ScheduledTask.id == "legacyonce").first()
     check("LEGACY_ONCE_COMPLETED — time-only past 'once' completed, not resurrected", lo.status == "completed", lo.status)
 
+# ONCE_KEEPS_CALENDAR_DATE — a 'once' reminder resolved to a specific future day ("next Friday
+# 1pm") must fire on THAT date, not the next occurrence of the clock time today/tomorrow. The NL
+# parser forwards scheduled_date; task_create must honor it over scheduled_time (Bugbot).
+future = p.task_create("dentist", schedule="once", scheduled_time="13:00",
+                       scheduled_date="2026-09-04T13:00:00Z")
+with SessionLocal() as db:
+    row = db.query(ScheduledTask).filter(ScheduledTask.id == future["id"]).first()
+    check("ONCE_KEEPS_CALENDAR_DATE — next_run is the given date, not today/tomorrow",
+          row.next_run == datetime(2026, 9, 4, 13, 0), row.next_run)
+    check("ONCE_KEEPS_CALENDAR_DATE — scheduled_date persisted on the row",
+          row.scheduled_date == datetime(2026, 9, 4, 13, 0), row.scheduled_date)
+check("ONCE past explicit date → error (can't schedule a one-off in the past)",
+      "error" in p.task_create("too late", schedule="once", scheduled_time="13:00",
+                               scheduled_date="2020-01-01T13:00:00Z"))
+# a malformed scheduled_date degrades to time-only rather than raising out of the tool.
+degraded = p.task_create("loose", schedule="once", scheduled_time="23:59", scheduled_date="not-a-date")
+check("ONCE bad scheduled_date degrades to time-only (no raise)", "error" not in degraded, degraded)
+
 print(f"\n{len(fails) == 0 and 'all passed' or f'{len(fails)} FAILED: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

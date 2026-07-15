@@ -112,11 +112,17 @@ def parse_reminder(
 
 
 def intent_to_task_args(intent: ReminderIntent) -> dict:
-    """Shape a ReminderIntent into task_create(...) kwargs."""
-    return {
+    """Shape a ReminderIntent into task_create(...) kwargs. For a 'once' reminder the exact
+    calendar date is load-bearing ("next Friday 1pm"), so forward when_utc as scheduled_date;
+    without it task_create fires at the next occurrence of the clock time today/tomorrow, on the
+    wrong day (Bugbot). Recurring reminders repeat by time/day and carry no one-off date."""
+    args = {
         "name": intent.title,
         "prompt": intent.title,
         "schedule": intent.repeat,
         "scheduled_time": intent.scheduled_time,
         "scheduled_day": intent.scheduled_day or 0,
     }
+    if intent.repeat == "once":
+        args["scheduled_date"] = intent.when_utc.isoformat()
+    return args
