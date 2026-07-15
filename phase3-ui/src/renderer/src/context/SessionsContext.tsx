@@ -48,6 +48,11 @@ interface RefBundle {
   // NJ-7: track a Create-Image turn so we can retry ONCE with a stronger directive if
   // the (small local) model finishes the turn without ever calling generate_image.
   imageGen?: { prompt: string; agent: string; model: string; retried: boolean; sawTool: boolean; lastIdleAt?: number }
+  // CAD viewer handoff: on a cad-agent turn, `export` (STEP→GLB) is the ONLY thing that
+  // populates the 3D viewer — `render_view` is a PNG the user never sees. If the model
+  // builds/renders but never exports, auto-send ONE export directive on idle so the viewer
+  // fills without relying on the model choosing export. Bounded by `retried` (no loop).
+  cadExport?: { agent: string; model: string; sawBuild: boolean; sawExport: boolean; retried: boolean; lastIdleAt?: number }
 }
 const freshRefs = (): RefBundle => ({
   textParts: new Map(),
@@ -384,6 +389,19 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const refs = perSessionRefs.current.get(sid)
       // NJ-7: the model DID call generate_image (any status) → cancel the retry-once.
       if (refs?.imageGen && /generate_image/i.test(call.tool)) refs.imageGen.sawTool = true
+      // CAD: note whether this turn built/rendered a shape, and whether it produced a
+      // SUCCESSFUL export. sawExport must match what actually fills the viewer — the watcher
+      // only converts a COMPLETED export with a parseable STEP path. A failed / rejected /
+      // empty export must NOT set sawExport, or it would suppress the auto-export retry and
+      // leave the viewer empty with no recovery (Bugbot). By session.idle every tool call is
+      // terminal, so a still-pending export can't wrongly trip the retry here.
+      if (refs?.cadExport) {
+        if (/build123d_export/i.test(call.tool)) {
+          if (call.status === "completed" && /Exported to:?\s*\S[^\n]*?\.step\b/i.test(call.output ?? "")) refs.cadExport.sawExport = true
+        } else if (/build123d_(execute|render_view)/i.test(call.tool)) {
+          refs.cadExport.sawBuild = true
+        }
+      }
       updateMessages(sid, (prev) =>
         prev.map((m) => {
           if (m.id !== messageID) return m
@@ -518,11 +536,55 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             },
           ])
         }
+        // CAD viewer handoff: a cad turn ended. If it built/rendered a shape but never
+        // exported (export is the ONLY thing that feeds the 3D viewer — render_view is a PNG
+        // the user can't see), auto-send ONE export directive so the viewer fills. Same
+        // duplicate-idle coalescing as the image retry; bounded by `retried` (no loop).
+        const ce = refs.cadExport
+        const dupeCad = ce?.lastIdleAt !== undefined && Date.now() - ce.lastIdleAt < 800
+        if (ce && !dupeCad) ce.lastIdleAt = Date.now()
+        if (dupeCad || !ce) {
+          // duplicate idle, or no cad-export turn armed → nothing to do
+        } else if (ce.sawExport) {
+          refs.cadExport = undefined // model exported → the message watcher converts STEP→GLB → viewer
+        } else if (ce.sawBuild && !ce.retried) {
+          ce.retried = true
+          const client = clientRef.current
+          if (client) {
+            setBusy(sid, true) // a fresh (auto-export) turn begins
+            const directive =
+              "You built the model but did not export it, so the 3D viewer beside the chat is still empty. " +
+              "Call the cad-build123d_export tool NOW with format 'step' and object_name '*' to emit the assembly — " +
+              "Nightjar converts that STEP into the 3D model shown in the viewer. Do NOT call render_view (its PNG " +
+              "is not visible to the user); call export and nothing else."
+            client.promptAsync(sid, directive, ce.agent, ce.model).catch((err) => {
+              setBusy(sid, false)
+              refs.cadExport = undefined
+              setStatus(`cad auto-export failed: ${err?.message ?? err}`)
+            })
+          } else {
+            refs.cadExport = undefined
+          }
+        } else if (ce.sawBuild) {
+          // built + already retried but still no export → surface a non-silent hint.
+          refs.cadExport = undefined
+          updateMessages(sid, (prev) => [
+            ...prev,
+            {
+              id: `cad-noexport-${Date.now()}`,
+              role: "assistant",
+              blocks: [{ kind: "text", text: "I built the model but couldn't export it to the 3D viewer — ask me to export it as STEP, or use Load demo." }],
+            },
+          ])
+        } else {
+          refs.cadExport = undefined // no build this turn (plain chat) → nothing to export
+        }
         break
       }
       case "session.error": {
         setBusy(sid, false)
         refs.imageGen = undefined // an errored/aborted turn must not fire the clean-idle image retry (NJ-7)
+        refs.cadExport = undefined // ditto — an errored cad turn must not fire the auto-export
         const name: string | undefined = p.error?.name
         setStatus(`error: ${name ?? p.error ?? "unknown"}`)
         handleSessionError(p.error, refs.lastSent, refs.lastKind, refs.lastModel, sid, slotOf(sid))
@@ -630,7 +692,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           convertingExportsRef.current.has(call.callID) // in flight — don't double-convert
         )
           continue
-        const path = /Exported to (.+?\.step)\b/i.exec(call.output)?.[1]
+        // export() outputs "Exported to <path>.step<suffix>" (single) OR "Exported to:\n
+        // <path>.step\n…" (multi/list). Match both: optional colon, any whitespace incl. the
+        // newline, then the first token ending in .step (stop before the volume/bbox suffix).
+        const path = /Exported to:?\s*(\S[^\n]*?\.step)\b/i.exec(call.output)?.[1]
         if (!path) continue
         convertingExportsRef.current.add(call.callID)
         const gen = ++cadGenRef.current
@@ -712,6 +777,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       refs.lastKind = "chat"
       refs.lastModel = model
       refs.imageGen = undefined // a plain chat send supersedes any pending image retry (NJ-7)
+      // CAD: arm the auto-export watcher for a build turn on the cad agent; a non-cad send clears it.
+      refs.cadExport = agent === "cad" ? { agent, model, sawBuild: false, sawExport: false, retried: false } : undefined
       const files: FilePart[] = atts.map((a) => ({ mime: a.mime, url: a.dataUrl, filename: a.name }))
       const imgPaths = atts.filter((a) => a.isImage && a.path).map((a) => a.path as string)
       const promptText = imgPaths.length
