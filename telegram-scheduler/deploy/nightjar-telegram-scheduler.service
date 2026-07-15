@@ -1,0 +1,27 @@
+# systemd unit for a bare-metal / VM deploy (non-Docker). Install:
+#   sudo cp deploy/nightjar-telegram-scheduler.service /etc/systemd/system/
+#   sudo mkdir -p /opt/nightjar-telegram-scheduler /var/lib/nightjar-telegram-scheduler
+#   # copy the project to /opt/... and create a venv there: python3.12 -m venv venv && venv/bin/pip install .
+#   sudo cp .env.example /etc/nightjar-telegram-scheduler.env   # then edit it
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nightjar-telegram-scheduler
+[Unit]
+Description=Nightjar Telegram reminder scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A dedicated unprivileged user is recommended: sudo useradd -r -s /usr/sbin/nologin nightjar
+User=nightjar
+Group=nightjar
+WorkingDirectory=/opt/nightjar-telegram-scheduler
+EnvironmentFile=/etc/nightjar-telegram-scheduler.env
+Environment=DATA_DIR=/var/lib/nightjar-telegram-scheduler
+ExecStart=/opt/nightjar-telegram-scheduler/venv/bin/nightjar-telegram-scheduler
+Restart=on-failure
+RestartSec=5
+# The SQLite jobstore lives under DATA_DIR; keep it writable and persistent across restarts.
+StateDirectory=nightjar-telegram-scheduler
+
+[Install]
+WantedBy=multi-user.target
