@@ -2,7 +2,7 @@
 // Paths are absolute (Electron main won't inherit a dev PATH) and overridable via env.
 import net from "node:net"
 import os from "node:os"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ServiceDef } from "./supervisor"
@@ -35,6 +35,23 @@ export function findImageModel(): string | null {
 // Exported so the preview/artifact layer can compute tidy relative mirror paths
 // (relative(WORKSPACE, filePath)) for files the coding agent writes.
 export const WORKSPACE = process.env.NIGHTJAR_WORKSPACE || join(REPO, "phase2-odysseus/workspace")
+
+// True when running under WSL/WSLg (a Linux Electron hosted by Windows). Detected via
+// /proc/version ("WSL"/"microsoft"), with an os.release() fallback. Cached — the kernel
+// can't change under us. Drives WSL-aware behaviour: the attach picker defaults to the
+// Windows filesystem (the Linux home has none of the user's real files), clipboard-image
+// paste shells out to PowerShell (WSL delivers an undecodable BMP), and the drag-drop
+// zone offers browse-instead (Windows→WSL DnD is not bridged by the platform).
+let _isWSL: boolean | undefined
+export function isWSL(): boolean {
+  if (_isWSL !== undefined) return _isWSL
+  try {
+    _isWSL = /microsoft|wsl/i.test(readFileSync("/proc/version", "utf8"))
+  } catch {
+    _isWSL = /microsoft|wsl/i.test(os.release())
+  }
+  return _isWSL
+}
 
 function tcpOpen(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
   return new Promise((resolve) => {
