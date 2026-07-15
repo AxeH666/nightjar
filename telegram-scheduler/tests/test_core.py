@@ -3,6 +3,7 @@ store all mocked (no Telegram, no real LLM, no timing)."""
 from datetime import datetime
 
 from app.core import handle_reminder_text
+from app.usage import GLOBAL_BUCKET
 
 NOW = datetime(2026, 7, 15, 12, 0, 0)
 
@@ -116,3 +117,54 @@ def test_daily_cap_denies_without_scheduling():
     assert scheduled == ["R", "R", "R"]
     assert "limit" in over.lower()
     assert scheduled.count("R") == 3  # the denied 4th did not schedule
+
+
+_OK = '{"title":"X","datetime_local":"2026-07-15T15:00","repeat":"once"}'
+
+
+def test_global_cap_denies_across_users_and_refunds_the_user_slot():
+    get_c, set_c, data = _store()
+    kw = dict(tz_name="UTC", llm_call=_llm(_OK), schedule=lambda *a: None,
+              get_count=get_c, set_count=set_c, now_utc=NOW, global_cap=2)
+    handle_reminder_text("at 3pm a", user_id=1, chat_id=1, **kw)   # global 1/2
+    handle_reminder_text("at 3pm b", user_id=2, chat_id=2, **kw)   # global 2/2
+    over = handle_reminder_text("at 3pm c", user_id=3, chat_id=3, **kw)  # global full → deny
+    assert "capacity" in over.lower()
+    assert data.get((3, "2026-07-15"), 0) == 0            # user 3 refunded — not their fault
+    assert data[(GLOBAL_BUCKET, "2026-07-15")] == 2        # global bucket sits at its cap
+
+
+def test_rate_check_throttles_without_any_cost():
+    scheduled = []
+    get_c, set_c, data = _store()
+    reply = handle_reminder_text(
+        "at 3pm ping", user_id=1, chat_id=1, tz_name="UTC",
+        llm_call=_llm(_OK), schedule=lambda *a: scheduled.append(a),
+        get_count=get_c, set_count=set_c, now_utc=NOW,
+        rate_check=lambda uid: False)          # throttled
+    assert "fast" in reply.lower()
+    assert scheduled == []
+    assert data.get((1, "2026-07-15"), 0) == 0  # no slot consumed, no paid call
+
+
+def test_network_error_refunds_both_user_and_global():
+    get_c, set_c, data = _store()
+
+    def broken(system, user):
+        raise ConnectionError("provider down")
+
+    handle_reminder_text("at 3pm ping", user_id=1, chat_id=1, tz_name="UTC",
+                         llm_call=broken, schedule=lambda *a: None,
+                         get_count=get_c, set_count=set_c, now_utc=NOW, global_cap=5)
+    assert data.get((1, "2026-07-15"), 0) == 0             # user refunded
+    assert data.get((GLOBAL_BUCKET, "2026-07-15"), 0) == 0  # global refunded too
+
+
+def test_unparseable_keeps_both_slots():
+    get_c, set_c, data = _store()
+    handle_reminder_text("hello", user_id=1, chat_id=1, tz_name="UTC",
+                         llm_call=_llm("no json here"), schedule=lambda *a: None,
+                         get_count=get_c, set_count=set_c, now_utc=NOW, global_cap=5)
+    # a real (paid) call happened → both the user and the global budget stay charged
+    assert data[(1, "2026-07-15")] == 1
+    assert data[(GLOBAL_BUCKET, "2026-07-15")] == 1

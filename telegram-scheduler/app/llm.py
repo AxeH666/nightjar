@@ -20,6 +20,14 @@ from .config import Config
 
 LlmCall = Callable[[str, str], str]
 
+_DEFAULT_TIMEOUT_S = 30.0
+
+
+def _timeout_s(config: Config) -> float:
+    """Per-call wall-clock timeout in seconds (rule 3). A non-positive config value would mean an
+    *instant* timeout to the SDK (every call fails), not 'off' — clamp it to the default."""
+    return float(config.llm_timeout_s) if config.llm_timeout_s > 0 else _DEFAULT_TIMEOUT_S
+
 
 def make_llm_call(config: Config) -> LlmCall:
     provider = (config.llm_provider or "mock").lower()
@@ -38,7 +46,11 @@ def _anthropic_call(config: Config) -> LlmCall:
         raise ValueError("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is unset")
     import anthropic  # lazy: only needed for this provider
 
-    client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+    # Hard per-call wall-clock timeout + no SDK retries so a hung/slow provider can't tie up a
+    # request worker unbounded (CLAUDE.md rule 3 — every model round-trip carries its own timeout).
+    # <=0 would mean "instant timeout" to httpx (every call fails), not "off" — clamp to the default.
+    client = anthropic.Anthropic(api_key=config.anthropic_api_key,
+                                 timeout=_timeout_s(config), max_retries=0)
     model = config.llm_model or "claude-opus-4-8"
 
     def call(system: str, user: str) -> str:
@@ -59,7 +71,9 @@ def _openai_call(config: Config) -> LlmCall:
         raise ValueError("LLM_PROVIDER=openai but OPENAI_API_KEY is unset")
     from openai import OpenAI  # lazy
 
-    client = OpenAI(api_key=config.openai_api_key)
+    # Hard per-call wall-clock timeout + no SDK retries (CLAUDE.md rule 3).
+    client = OpenAI(api_key=config.openai_api_key,
+                    timeout=_timeout_s(config), max_retries=0)
     model = config.llm_model or "gpt-4o-mini"
 
     def call(system: str, user: str) -> str:

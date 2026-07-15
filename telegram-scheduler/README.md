@@ -22,7 +22,7 @@ imported. Keep the two copies in sync.
 Telegram user --> aiogram bot (inbound, async polling) --.
 Nightjar app  --> POST /reminders (inbound, HTTP) --------+--> core.handle_reminder_text
                                                                 |
-                          daily-cap check (usage.py, per-user/day)
+                          flood + per-user + global cap (usage.py)
                           -> LLM parse (llm.py -> nl_intent.py)
                           -> schedule (scheduler.py: APScheduler + SQLite jobstore)
                                                                 |
@@ -65,6 +65,23 @@ In mock mode delivery is **recorded, not sent** (no Telegram). Wire a real bot t
 5. Message the bot: `/start`, then `/tz America/New_York`, then _"remind me at 3pm to call Sam"_.
 
 `DATA_DIR` must be a **persistent volume** — it holds `scheduler.db` (the pending reminders).
+
+## Abuse & cost controls (public deployments)
+
+The server parses reminders with **your** paid LLM key, so a public bot needs guarding. Three
+knobs (all in `.env.example`):
+
+- **`GLOBAL_DAILY_CAP`** (default `1000`, `0` = unlimited) — the **un-bypassable** ceiling on paid
+  parses across *all* users per UTC day. The per-user `DAILY_CAP` is dodgeable on the HTTP path
+  (the caller supplies the `telegram_id`); this aggregate cap is not. Set it to your daily budget.
+- **`USER_RATE_PER_MIN`** (default `15`, `0` = off) — per-user sliding-window flood limit.
+- **`LLM_TIMEOUT_S`** (default `30`) — hard wall-clock timeout per LLM call.
+
+Note: the **bot** is open to anyone who finds it — Telegram authenticates each user's id and the
+caps bound cost, but there is no allowlist. The **HTTP API** is a *trusted-backend* surface: its
+single `API_TOKEN` acts as a superuser (the caller names the `telegram_id`), so keep it secret and
+don't expose the port to untrusted networks. (Bot allowlist + HTTP-exposure hardening land in a
+follow-up PR.)
 
 ## HTTP API
 

@@ -11,7 +11,7 @@ import asyncio
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import Config, load_config
 from .core import handle_reminder_text
@@ -19,17 +19,21 @@ from .db import Database
 from .llm import LlmCall, make_llm_call
 from .scheduler import ReminderScheduler
 from .transport import MockTransport, TelegramTransport, Transport
+from .usage import RateLimiter
 
 
 class ReminderRequest(BaseModel):
-    telegram_id: int
+    # Must be a real (positive) Telegram id: rejects 0/negatives, and specifically the -1
+    # GLOBAL_BUCKET sentinel so an HTTP caller can't collide with / poison the global cost counter.
+    telegram_id: int = Field(gt=0)
     text: str
     chat_id: Optional[int] = None  # defaults to telegram_id
     tz: Optional[str] = None       # set/override the user's timezone
 
 
 def create_app(config: Config, db: Database, scheduler: ReminderScheduler,
-               llm_call: LlmCall, transport: Transport) -> FastAPI:
+               llm_call: LlmCall, transport: Transport,
+               rate_limiter: Optional[RateLimiter] = None) -> FastAPI:
     app = FastAPI(title="Nightjar Telegram Scheduler", version="1.0")
 
     def require_token(authorization: str = Header(default="")) -> None:
@@ -62,6 +66,8 @@ def create_app(config: Config, db: Database, scheduler: ReminderScheduler,
             req.text, user_id=req.telegram_id, chat_id=chat_id, tz_name=tz,
             llm_call=llm_call, schedule=scheduler.schedule,
             get_count=db.get_count, set_count=db.set_count, daily_cap=config.daily_cap,
+            global_cap=config.global_daily_cap,
+            rate_check=(rate_limiter.allow if rate_limiter else None),
             usage_lock=db.usage_lock,
         )
         return {"reply": reply, "pending": scheduler.list_jobs(req.telegram_id)}
@@ -81,7 +87,8 @@ def create_app(config: Config, db: Database, scheduler: ReminderScheduler,
 
 
 # --------------------------------------------------------------------------- aiogram bot
-def build_dispatcher(config: Config, db: Database, scheduler: ReminderScheduler, llm_call: LlmCall):
+def build_dispatcher(config: Config, db: Database, scheduler: ReminderScheduler, llm_call: LlmCall,
+                     rate_limiter: Optional[RateLimiter] = None):
     """Build the aiogram Dispatcher. Imported lazily so HTTP-only/test use doesn't need aiogram."""
     from aiogram import Dispatcher, F
     from aiogram.filters import Command
@@ -132,6 +139,8 @@ def build_dispatcher(config: Config, db: Database, scheduler: ReminderScheduler,
             user_id=message.from_user.id, chat_id=message.chat.id, tz_name=tz,
             llm_call=llm_call, schedule=scheduler.schedule,
             get_count=db.get_count, set_count=db.set_count, daily_cap=config.daily_cap,
+            global_cap=config.global_daily_cap,
+            rate_check=(rate_limiter.allow if rate_limiter else None),
             usage_lock=db.usage_lock,
         )
         await message.answer(reply)
@@ -157,7 +166,8 @@ async def _serve() -> None:
     scheduler = ReminderScheduler(config.db_url, delivery=transport.send)
     scheduler.start()
     llm_call = make_llm_call(config)
-    app = create_app(config, db, scheduler, llm_call, transport)
+    rate_limiter = RateLimiter(config.user_rate_per_min)
+    app = create_app(config, db, scheduler, llm_call, transport, rate_limiter=rate_limiter)
 
     server = uvicorn.Server(uvicorn.Config(app, host=config.http_host, port=config.http_port,
                                            log_level="info"))
@@ -166,7 +176,7 @@ async def _serve() -> None:
         from aiogram import Bot
 
         bot = Bot(token=config.bot_token)
-        dp = build_dispatcher(config, db, scheduler, llm_call)
+        dp = build_dispatcher(config, db, scheduler, llm_call, rate_limiter=rate_limiter)
         coros.append(dp.start_polling(bot))
         print(f"[main] Telegram bot polling; HTTP on {config.http_host}:{config.http_port}")
     else:
