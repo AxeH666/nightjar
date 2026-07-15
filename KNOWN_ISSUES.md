@@ -42,6 +42,13 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-28 — clipboard image PASTE silently failed under WSL (undecodable BMP); added a PowerShell read-through — FIXED (in-app Ctrl+V needs confirming) 2026-07-15
+
+- **Severity:** medium — copying an image in Windows and pasting into JUNE under WSL did nothing (text pastes fine). WSL delivers the copied bitmap to the DOM clipboard as a BI_BITFIELDS BMP Chromium can't decode.
+- **Fix (`main/index.ts` + `preload/index.ts` + `lib/attachments.ts` + `ChatSurface.tsx`):** new `nightjar:readWindowsClipboardImage` IPC — under WSL ONLY — shells out to `powershell.exe` (`[System.Windows.Forms.Clipboard]::GetImage()` → PNG → base64) and returns a data URL. On paste, when the DOM clipboard has no file AND no text (the WSL image case), the composer calls it and inserts the PNG as an attachment. Native Windows/macOS/Linux use the normal DOM path unchanged. Graceful null when powershell.exe is unreachable / no image; 8s wall-clock timeout (rule 3); runaway-output guard.
+- **Verified (WSL):** powershell.exe reachable; round-trip (set an image on the Windows clipboard → the handler's exact command reads it back as valid PNG base64); the handler's full JS (spawn→parse→data URL) returns a valid `data:image/png;base64,iVBOR…`; typecheck (node+web) clean.
+- **Needs a real Ctrl+V to confirm:** the full in-app flow (copy an image in Windows → Ctrl+V in the composer → chip appears). Every component is verified; only the live keystroke path is unexercised.
+
 ## NJ-27 — dropped/browsed files saved a base64 COPY instead of using the real path (File.path removed in Electron 32) — FIXED (real-path branch needs native Windows) 2026-07-15
 
 - **Severity:** low-medium — it worked but wastefully (a saved copy per dropped image), and on native Windows the "proper" path was unavailable because `File.path` was removed in Electron 32.

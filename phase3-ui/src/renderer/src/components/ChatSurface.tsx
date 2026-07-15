@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type ClipboardEvent, type DragEvent } from
 import type { ToolCall } from "../lib/opencode"
 import { ToolCallCard } from "./ToolCallCard"
 import { ToolsMenu } from "./composer/ToolsMenu"
-import { type Attachment, type AttachmentResult, pickAttachments, attachmentsFromDataTransfer, fmtSize } from "../lib/attachments"
+import { type Attachment, type AttachmentResult, pickAttachments, attachmentsFromDataTransfer, windowsClipboardImageAttachment, fmtSize } from "../lib/attachments"
 import { useModel } from "../context/ModelContext"
 import { isLocalModel } from "../lib/byok"
 
@@ -133,9 +133,23 @@ export function ChatSurface({
   function onPaste(e: ClipboardEvent) {
     const dt = e.clipboardData
     const hasFile = !!dt && (dt.files.length > 0 || Array.from(dt.items || []).some((it) => it.kind === "file"))
-    if (!hasFile) return // let normal text paste proceed
-    e.preventDefault()
-    attachmentsFromDataTransfer(dt).then(addResult)
+    if (hasFile) {
+      e.preventDefault()
+      attachmentsFromDataTransfer(dt).then(addResult)
+      return
+    }
+    // WSL image-paste workaround (NJ-28): a bitmap copied in Windows arrives as an
+    // undecodable BMP that Chromium drops, so it's neither a file nor text here. When a
+    // paste has NO file AND NO text, ask the main process to read the Windows clipboard via
+    // PowerShell (returns null instantly off WSL / when there's no image). Async, and
+    // nothing else would paste (no text), so no preventDefault is needed.
+    if (dt && !dt.getData("text/plain")) {
+      windowsClipboardImageAttachment().then((att) => {
+        if (att) addResult({ attachments: [att], errors: [] })
+      })
+      return
+    }
+    // else: a plain-text paste — let it proceed normally
   }
   function onDrop(e: DragEvent) {
     e.preventDefault()
