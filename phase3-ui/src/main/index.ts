@@ -3,13 +3,14 @@
 // proxy, `opencode serve`, side-channel). The window shows immediately with a
 // health strip; the renderer connects to OpenCode once it reports healthy.
 import { app, BrowserWindow, ipcMain, dialog, shell } from "electron"
-import { join, resolve, sep, basename, extname } from "path"
+import { join, resolve, sep, basename, extname, dirname } from "path"
 import { homedir, tmpdir } from "os"
 import { readFile, writeFile, mkdir } from "fs/promises"
+import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO, WORKSPACE, findImageModel } from "./services"
+import { nightjarServices, REPO, WORKSPACE, findImageModel, isWSL } from "./services"
 import * as byok from "./byok"
 import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
@@ -297,10 +298,43 @@ const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB (raised from 25 MB — 
 // error, so Browse looked broken. The renderer now surfaces over-cap errors too.)
 const mb = (n: number): string => (n / (1024 * 1024)).toFixed(0)
 
+// Persisted UI settings (currently just the folder the attach picker last used, so it
+// reopens where you left off). Tiny JSON in userData; every access is best-effort and
+// never blocks the dialog.
+const UI_SETTINGS_PATH = (): string => join(app.getPath("userData"), "ui-settings.json")
+async function readUiSettings(): Promise<{ lastAttachmentDir?: string }> {
+  try {
+    return JSON.parse(await readFile(UI_SETTINGS_PATH(), "utf8"))
+  } catch {
+    return {}
+  }
+}
+async function writeUiSettings(patch: Record<string, unknown>): Promise<void> {
+  try {
+    const merged = { ...(await readUiSettings()), ...patch }
+    await mkdir(dirname(UI_SETTINGS_PATH()), { recursive: true })
+    await writeFile(UI_SETTINGS_PATH(), JSON.stringify(merged, null, 2))
+  } catch {
+    /* best-effort — a settings-write failure must never break attaching a file */
+  }
+}
+// Where the attach picker should open: the folder last used (if it still exists), else —
+// under WSL — the Windows user profile (`/mnt/c/Users`), because the Linux home holds none
+// of the user's real documents/images and the picker opening there made "there are no
+// files to attach" look like a bug. Native Windows/macOS/Linux fall through to the OS
+// default. (If a GTK/xdg-portal backend ignores defaultPath, that's a portal-version issue,
+// tracked in NJ-26 — the value we pass here is correct regardless.)
+async function attachmentDefaultPath(): Promise<string | undefined> {
+  const last = (await readUiSettings()).lastAttachmentDir
+  if (last && existsSync(last)) return last
+  return isWSL() && existsSync("/mnt/c/Users") ? "/mnt/c/Users" : undefined
+}
+
 // Open the native file dialog; returns absolute paths ([] if cancelled).
 ipcMain.handle("nightjar:pickFiles", async (): Promise<string[]> => {
   const opts: Electron.OpenDialogOptions = {
     title: "Attach files",
+    defaultPath: await attachmentDefaultPath(),
     properties: ["openFile", "multiSelections"],
     filters: [
       { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] },
@@ -309,7 +343,9 @@ ipcMain.handle("nightjar:pickFiles", async (): Promise<string[]> => {
     ],
   }
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
-  return r.canceled ? [] : r.filePaths
+  if (r.canceled) return []
+  if (r.filePaths[0]) void writeUiSettings({ lastAttachmentDir: dirname(r.filePaths[0]) }) // reopen here next time
+  return r.filePaths
 })
 
 // Read a user-picked file (from the dialog) → base64 data URL + metadata. The user

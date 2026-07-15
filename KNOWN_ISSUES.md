@@ -42,6 +42,12 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-26 — attach file picker opened at the empty Linux $HOME under WSL, hiding the user's Windows files — FIXED (dialog-open needs a GUI to confirm) 2026-07-15
+
+- **Severity:** medium — under WSL the picker opened at the Linux home, where none of the user's real documents/images live, so "Browse" looked like it had nothing to attach.
+- **Fix (`phase3-ui/src/main/index.ts` + `services.ts`):** `showOpenDialog` now sets `defaultPath` to the last-used folder (persisted in `ui-settings.json`, reused only if it still exists), else — under WSL (`isWSL()` via `/proc/version`, os.release() fallback) — the Windows user profile `/mnt/c/Users`. Native Windows/macOS/Linux fall through to the OS default. Image filters were already present.
+- **Verified (WSL, logic):** `isWSL()` → true; defaultPath → `/mnt/c/Users` with no persisted dir, the persisted dir when it exists, falls back when stale. **Needs a GUI to confirm** the GTK/portal dialog actually OPENS at that path — if it ignores `defaultPath`, that's an xdg-desktop-portal version issue (force GTK via `--xdg-portal-required-version`, or ensure a portal backend ≥ v4); the value we pass is correct regardless.
+
 ## NJ-25 — CAD build→viewer handoff: model built the geometry but never called export, so the 3D viewer stayed empty — FIXED + VERIFIED 2026-07-15
 
 - **Severity:** medium — the CAD pipeline (Fireworks/gpt-oss-120b → build123d → geometry) worked, but the built model never appeared in the 3D viewer. Confirmed on a real concept-car prompt: the model called `execute` (built + named parts) and `render_view` (PNG → /tmp) but NOT `export`, and even said "the image cannot be displayed in the chat interface" — it didn't know the viewer exists.
