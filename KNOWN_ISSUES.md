@@ -42,6 +42,15 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-25 — CAD build→viewer handoff: model built the geometry but never called export, so the 3D viewer stayed empty — FIXED + VERIFIED 2026-07-15
+
+- **Severity:** medium — the CAD pipeline (Fireworks/gpt-oss-120b → build123d → geometry) worked, but the built model never appeared in the 3D viewer. Confirmed on a real concept-car prompt: the model called `execute` (built + named parts) and `render_view` (PNG → /tmp) but NOT `export`, and even said "the image cannot be displayed in the chat interface" — it didn't know the viewer exists.
+- **Root cause:** the viewer's watcher only fires on a completed `cad-build123d_export` (STEP→GLB); `render_view` produces a PNG that never feeds it. The agent was left to choose export and didn't.
+- **Fix (one PR, 2 files):**
+  1. **Auto-export** (`phase3-ui/src/renderer/src/context/SessionsContext.tsx`): a `cadExport` tracker (mirrors the NJ-7 image-retry) armed on every cad-agent send. If the turn built/rendered a shape but idled without an export, it auto-sends ONE export directive so the viewer fills without relying on the model — bounded by `retried` (no loop), surfaces a hint if it still fails. Also widened the export-path regex to catch the multi-file `Exported to:\n…` form.
+  2. **Prompt steering** (`phase2-odysseus/workspace/opencode.json`, cad agent): made the LIVE 3D VIEWER explicit — `render_view` is YOUR-eyes-only (the user can't see it), the viewer updates ONLY on `export`, so every finished/changed model MUST end with `cad-build123d_export`; never say an image "cannot be displayed".
+- **Verified (rule 6):** headless renderer harness — drove a real "make a 20mm cube" send on the CAD tab, stand-in simulated build (execute+render_view) with NO export → the renderer AUTO-FIRED the export directive (and stopped after the export, no loop). Regex unit-tested against real export outputs. Typecheck + 33 tests pass. NB: end-to-end with the real Fireworks model (prompt steering effect) needs the user's key — the auto-export safety net covers a model that still forgets.
+
 ## NJ-24 — main-process crash: `Supervisor.onChange` sent IPC to a DESTROYED window on shutdown ("Object has been destroyed") — FIXED + VERIFIED 2026-07-15
 
 - **Severity:** medium — a scary "A JavaScript error occurred in the main process" dialog on quit / window close; the uncaught exception can leave the sidecar stack half-torn-down.
