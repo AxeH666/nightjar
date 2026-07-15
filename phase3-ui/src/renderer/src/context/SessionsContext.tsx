@@ -42,7 +42,6 @@ interface RefBundle {
   roleById: Map<string, "user" | "assistant">
   pendingParts: Map<string, any[]>
   loadedImages: Set<string>
-  cadExports: Set<string> // export tool-call IDs already converted (avoid re-processing) — Task 5
   lastSent: string
   lastKind: SendKind // what the last send was (chat|image) → correct retry dispatch (NJ-9)
   lastModel: string // the model the last send used → recovery judged on it, not global (B4)
@@ -55,7 +54,6 @@ const freshRefs = (): RefBundle => ({
   roleById: new Map(),
   pendingParts: new Map(),
   loadedImages: new Set(),
-  cadExports: new Set(),
   lastSent: "",
   lastKind: "chat",
   lastModel: "",
@@ -167,6 +165,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const [cadModel, setCadModel] = useState<{ glb: ArrayBuffer; parts: string[] } | null>(null)
   const [cadBusy, setCadBusy] = useState(false)
   const [cadError, setCadError] = useState<string | null>(null)
+  // Which export tool-calls have already been converted (by callID) — a component-level ref,
+  // NOT per-session, so it survives a reconnect's session rebind (Bugbot: a per-session set is
+  // gc'd, so an export that completed during a reconnect would never build). And a monotonic
+  // generation so, when several exports complete close together, only the latest one's result
+  // (and its busy=false) is applied — a slow older convert can't clobber a newer model.
+  const processedExportsRef = useRef<Set<string>>(new Set())
+  const cadGenRef = useRef(0)
   const clearCadModel = useCallback(() => {
     setCadModel(null)
     setCadError(null)
@@ -359,32 +364,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
               prev.map((mm) => (mm.id === messageID ? { ...mm, blocks: [...mm.blocks, { kind: "image", src, name: m[1] }] } : mm)),
             )
           })
-        }
-      }
-      // CAD (Task 5): the CAD agent's export tool completed → parse the STEP path it wrote,
-      // convert it to a GLB (trusted, wall-clock-capped, in main), and hand the bytes to the
-      // viewer. Only for a completed export we haven't processed, and only step exports.
-      if (
-        refs &&
-        call.status === "completed" &&
-        call.output &&
-        /cad-build123d_export|build123d_export/i.test(call.tool) &&
-        !refs.cadExports.has(call.callID)
-      ) {
-        const m = /Exported to (.+?\.step)\b/i.exec(call.output)
-        if (m) {
-          refs.cadExports.add(call.callID)
-          const stepPath = m[1]
-          setCadBusy(true)
-          setCadError(null)
-          cad
-            .buildModel(stepPath)
-            .then((res) => {
-              if ("error" in res) setCadError(res.error)
-              else setCadModel({ glb: res.glb, parts: res.parts })
-            })
-            .catch((e) => setCadError(e instanceof Error ? e.message : String(e)))
-            .finally(() => setCadBusy(false))
         }
       }
       // Delegate live-preview mirroring to ArtifactContext (keyed by this session).
@@ -588,6 +567,49 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       cancelled = true
     }
   }, [primaryId, clientRef, rebindSlot])
+
+  // CAD (Task 5): watch the cad session's MESSAGES (not live SSE) for a completed export tool
+  // call, then convert its STEP → GLB and hand the bytes to the viewer. Watching messages —
+  // which include the transcript carried across a reconnect — means an export that completed
+  // during a reconnect is still picked up (Bugbot). Dedup by callID via a component-level ref
+  // (survives rebind); a generation guard makes the latest export win under concurrency.
+  const cadSid = slots.cad
+  const cadMessages = cadSid ? sessions[cadSid]?.messages : undefined
+  useEffect(() => {
+    if (!cadMessages) return
+    for (const m of cadMessages) {
+      for (const b of m.blocks) {
+        if (b.kind !== "tool") continue
+        const call = b.call
+        if (
+          call.status !== "completed" ||
+          !call.output ||
+          !/build123d_export/i.test(call.tool) ||
+          processedExportsRef.current.has(call.callID)
+        )
+          continue
+        const path = /Exported to (.+?\.step)\b/i.exec(call.output)?.[1]
+        if (!path) continue
+        processedExportsRef.current.add(call.callID)
+        const gen = ++cadGenRef.current
+        setCadBusy(true)
+        setCadError(null)
+        cad
+          .buildModel(path)
+          .then((res) => {
+            if (gen !== cadGenRef.current) return // superseded by a newer export
+            if ("error" in res) setCadError(res.error)
+            else setCadModel({ glb: res.glb, parts: res.parts })
+          })
+          .catch((e) => {
+            if (gen === cadGenRef.current) setCadError(e instanceof Error ? e.message : String(e))
+          })
+          .finally(() => {
+            if (gen === cadGenRef.current) setCadBusy(false)
+          })
+      }
+    }
+  }, [cadMessages])
 
   // Validate every session's agent against the live agent list (Bugbot: default
   // agent init removed + the ported #21 mode-revalidation). DEFAULT_AGENT
