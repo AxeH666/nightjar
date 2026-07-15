@@ -140,6 +140,7 @@ interface SessionsValue {
   cadBusy: boolean
   cadError: string | null
   clearCadModel: () => void
+  loadCadHero: () => void // build + show the pre-authored planetary-gearset demo
   // recovery offers (chat slot)
   fallbackToLocal: () => void
   acceptOpenRouterSwitch: () => void
@@ -175,6 +176,26 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const clearCadModel = useCallback(() => {
     setCadModel(null)
     setCadError(null)
+  }, [])
+  const loadCadHero = useCallback(() => {
+    // The demo bypasses the agent entirely — a newer generation so a slow agent export
+    // in flight can't clobber the demo (and vice-versa).
+    const gen = ++cadGenRef.current
+    setCadBusy(true)
+    setCadError(null)
+    cad
+      .loadHero()
+      .then((res) => {
+        if (gen !== cadGenRef.current) return
+        if ("error" in res) setCadError(res.error)
+        else setCadModel({ glb: res.glb, parts: res.parts })
+      })
+      .catch((e) => {
+        if (gen === cadGenRef.current) setCadError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (gen === cadGenRef.current) setCadBusy(false)
+      })
   }, [])
   // Persisted set of session ids that have served as CODE sessions (see the
   // module-level helpers). The Code tab filters GET /session down to these.
@@ -856,6 +877,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     cadBusy,
     cadError,
     clearCadModel,
+    loadCadHero,
     fallbackToLocal,
     acceptOpenRouterSwitch,
   }

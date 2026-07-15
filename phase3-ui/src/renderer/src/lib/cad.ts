@@ -13,6 +13,7 @@ export interface CadConvertResult {
 interface CadBridge {
   convert(stepPath: string): Promise<CadConvertResult>
   readGlb(glbPath: string): Promise<Uint8Array | null>
+  loadHero(): Promise<{ ok: boolean; glb?: Uint8Array; parts?: string[]; error?: string }>
 }
 
 function bridge(): CadBridge | null {
@@ -39,5 +40,13 @@ export const cad = {
     const glb = await this.readGlbBytes(res.glbPath)
     if (!glb) return { error: "could not read the converted model." }
     return { glb, parts: res.parts ?? [] }
+  },
+  // Build + convert the pre-authored planetary-gearset hero (the reliable demo). Bytes come
+  // back as a Uint8Array; copy into a standalone ArrayBuffer for GLTFLoader.parse.
+  async loadHero(): Promise<{ glb: ArrayBuffer; parts: string[] } | { error: string }> {
+    const res = await bridge()?.loadHero()
+    if (!res) return { error: "CAD bridge unavailable." }
+    if (!res.ok || !res.glb) return { error: res.error || "couldn't load the demo model." }
+    return { glb: res.glb.slice().buffer, parts: res.parts ?? [] }
   },
 }
