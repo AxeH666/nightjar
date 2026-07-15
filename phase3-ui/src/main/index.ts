@@ -426,6 +426,21 @@ ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.Cap
   return saved
 })
 
+// The global Local/Cloud toggle flips several capability prefs at once. Persist them in
+// ONE store write, then apply with exactly ONE image reconcile + ONE engine restart —
+// instead of up to four (one per changed capability) if the renderer looped setPref. The
+// restart re-injects NIGHTJAR_{BROWSERUSE,RESEARCH,VISION}_PROVIDER; the reconcile seeds
+// the image endpoint. We run both unconditionally here rather than diffing which ids
+// changed: the toggle already touches image + at least one env-applied capability on every
+// switch, so the "did anything relevant change" check would essentially always be true, and
+// a redundant reconcile/restart is cheap and safe next to the alternative (a stale backend).
+ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabilities.CapabilityPref>) => {
+  const saved = capabilities.setBulk(prefs) // throws on any unknown id → no partial write
+  await reconcileImageEndpoint()
+  await supervisor.restartService("opencode-serve", opencodeServeEnv())
+  return saved
+})
+
 // ── Local vision (Ollama gemma3:4b) — status + auto-pull ──────────────────────
 // nightjar_analyze_image routes to Ollama's vision model (NIGHTJAR_VISION_MODEL @
 // OLLAMA_HOST). Detect readiness, auto-pull the model if Ollama is running but the

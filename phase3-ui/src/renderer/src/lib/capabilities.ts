@@ -23,6 +23,7 @@ interface CapabilitiesBridge {
   catalog(): Promise<{ capabilities: CapabilityMeta[]; ui: string[] }>
   list(): Promise<Record<string, CapabilityPref>>
   set(id: CapabilityId, pref: CapabilityPref): Promise<CapabilityPref>
+  setBulk(prefs: Record<string, CapabilityPref>): Promise<Record<string, CapabilityPref>>
 }
 
 function bridge(): CapabilitiesBridge | null {
@@ -44,6 +45,12 @@ export const capabilities = {
   // Persist a capability's choice. Best-effort when the bridge is absent.
   async set(id: CapabilityId, pref: CapabilityPref): Promise<void> {
     await bridge()?.set(id, pref)
+  },
+  // Persist several capability prefs at once (the global Local/Cloud toggle) — one engine
+  // restart instead of one per capability. Returns the full sanitized prefs map (so the
+  // caller reflects any main-side coercion); empty object when the bridge is absent.
+  async setBulk(prefs: Record<string, CapabilityPref>): Promise<Record<string, CapabilityPref>> {
+    return (await bridge()?.setBulk(prefs)) ?? {}
   },
 }
 
