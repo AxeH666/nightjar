@@ -6,6 +6,23 @@ kept for the historical record with their root cause + fix + verification.
 
 ---
 
+## 📌 OPEN DECISIONS & PENDING VERIFICATIONS (as of 2026-07-15, after PRs #66–#76)
+
+Consolidated so nothing drifts. Prune as items resolve. (Cross-session copy: the `open-decisions` memory.)
+
+**Decisions the maintainer must make:**
+- **Image reading on the 6 GB GPU (NJ-32).** Local vision (`gemma3:4b`) can't fit alongside the chat model → images fail. Pick one: (a) **cloud vision** (Vision=Online + a vision-capable model/key — `gpt-oss-120b` is text-only), (b) **tune local VRAM** (fewer llama `-ngl` / smaller `-c` so vision fits, slower chat), or (c) images-cloud-only.
+- **Dev-workflow (NJ-30).** Recommendation flagged, NOT applied: native **Windows** for GUI/interaction testing, WSL for headless CI + Linux packaging.
+- **Stray `phase2-odysseus/workspace/demo_car.step`** (untracked CAD test output) — add to `.gitignore`? (offered, awaiting yes/no).
+
+**FYI / user action:** Fireworks chat "healed" to the local model after the WSLg crashes (chat pref = offline). The key WORKS — just re-select Fireworks in the model dropdown.
+
+**Verifications that can ONLY be closed on native Windows / hardware / a real keystroke** (do NOT mark "verified" from a WSL proxy — rule 8): real drag-drop attach (NJ-27/29), in-app Ctrl+V image paste (NJ-28), the picker dialog actually opening at `/mnt/c/Users` (NJ-26), the CAD viewer drawing in software (NJ-31); plus older rule-6 items (NJ-6 GPU/diffusion, NJ-7 Ollama vision, NJ-9/10/12/14, telegram-scheduler live round-trip).
+
+**Deferred code follow-ups (own PRs):** NJ-19 (scheduler DST/tz), NJ-22 (startup validation of BYOK defaultModel vs `/config/providers`), NJ-23 (per-provider model picker for retired-model "pick another"), NJ-11/B3 (diffusion server-side `--gen-timeout`).
+
+---
+
 ## 🧪 MANUAL VERIFICATION CHECKLIST (NJ-4 … NJ-11)
 
 The Phase 0–6 pass (PRs #29–#35) code-wired every open item. Per **CLAUDE.md rule 6**,
@@ -41,6 +58,13 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 13-agent audit of the merged code). They stay here (not in ✅ RESOLVED) until re-triggered
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
+
+## NJ-32 — local image reading fails on a 6 GB GPU: the chat model fills VRAM, so local vision (gemma3:4b) runs on CPU and times out — FLAGGED (hardware limit; decision pending) 2026-07-15
+
+- **Severity:** medium — attaching an **image** and asking about it fails (times out); TEXT/document attachments read fine. Diagnosed while chasing "not able to read files".
+- **What (measured on this machine, RTX 4050 6 GB):** `llama-server` (Qwen3-4B chat) holds ~5.5 GB VRAM, leaving ~450 MB free. Ollama loads the vision model `gemma3:4b` (~3.3 GB) with `size_vram=0` → it runs on **CPU** → a tiny image takes 125s+ and hits the vision tool's 60s cap (`NIGHTJAR_VISION_TIMEOUT_S`, `phase2-mcp/nightjar_capabilities/vision.py`) → returns an error → the image "can't be read". A busy/slow image turn can also make a following plain message look unanswered. `gpt-oss-120b` (the user's Fireworks model) is **text-only**, so it isn't an image fallback.
+- **Not a code bug — a hardware/VRAM ceiling:** a 4B chat model + a 4B vision model don't co-fit in 6 GB. Options (maintainer's call, see the OPEN DECISIONS section + the `open-decisions` memory): (a) **cloud vision** — Vision=Online + a vision-capable provider/model; (b) **tune local VRAM** — reduce llama `-ngl`/`-c` (`phase3-ui/src/main/services.ts`) so `gemma3:4b` fits, at some chat-speed cost; (c) images-cloud-only.
+- **Verified:** direct Ollama `gemma3:4b` vision call on a test PNG → HTTP 000 / 125s timeout with `size_vram=0`; `nvidia-smi` shows ~450 MB free. Local text-doc reading verified working (model pulled a codeword out of an attached memo).
 
 ## NJ-31 — WSLg GPU-process crash could take the app/window down ("not responding"); force software rendering under WSL — FIXED + VERIFIED 2026-07-15
 

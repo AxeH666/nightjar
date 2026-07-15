@@ -127,3 +127,28 @@ quietly ignore it either. Call it out explicitly to the user as a separate,
 named item — and if it's a defect in already-shipped Nightjar work rather than
 a note on the current task, add it to `KNOWN_ISSUES.md` following the NJ-\*
 format, so it survives past the current conversation.
+
+## 8. Verify environment-dependent behavior on the environment it targets — and state what you couldn't
+
+The WSL file-handling pass (PRs #72–#76, `KNOWN_ISSUES.md` NJ-26…NJ-32) repeatedly
+hit features that pass or fail based on the *runtime environment*, not the code:
+Windows→WSL drag-drop delivers no payload while native-Windows DnD works; clipboard
+image paste yields an undecodable BMP under WSL; the GPU process can't initialise
+under WSLg (a crash that read as "the app stopped responding"); `File.path` was
+removed in Electron 32; a 4B chat + 4B vision model don't co-fit on a 6 GB GPU. A
+*synthetic* drop dispatched into a headless renderer exercised the code path and
+"passed" — but that is NOT the real OS delivery, so calling the feature "verified"
+from it would have been a false green. Whether a GTK dialog honours `defaultPath`,
+whether a real drop delivers files, whether notifications fire — none can be closed
+under WSL/headless.
+
+**Rule:** when a change depends on the runtime environment (WSL/WSLg vs native
+Windows/macOS/Linux; real GPU vs software; headless vs a real GUI/keystroke; a
+specific Electron/Chromium API version), detect and branch on it explicitly, and
+**degrade gracefully with a visible fallback** rather than a silent no-op. Then
+state **honestly which environment each fix was verified in** and which still needs
+a native / GUI / real-input confirmation — never mark an environment-dependent
+feature "verified" from a proxy (a synthetic event, a logic-only test) that isn't
+the real path. This extends rule 6 (re-trigger the REAL failure) and pairs with
+rule 7 (record the residual "needs native Windows / a real keystroke" as its own
+`KNOWN_ISSUES.md` item).
