@@ -42,6 +42,16 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-19 — desktop local scheduler: NL recurring reminders fire at a frozen UTC clock (DST drift) and can use the UTC weekday, not the user's local one — FLAGGED (deferred; fixed in the always-on server) 2026-07-15
+
+- **Severity:** low — affects only *recurring* reminders (`daily`/`weekly`/`monthly`) created from natural language, and only across a DST boundary or when the local→UTC conversion crosses midnight. One-off reminders and same-offset users are unaffected.
+- **Context:** found while fixing the equivalent Bugbot findings on the **always-on Telegram server** (Task-6 PR 17, #65). The NL parser (`phase2-odysseus/servers/nl_intent.py`) converts the user's local wall-clock to UTC and stores `scheduled_time` (UTC `HH:MM`) + `scheduled_day` (the **UTC** weekday for weekly). The **desktop** scheduler (`compute_next_run` in `schedule_backend.py`, polled by `phase3-ui/src/main/scheduler.ts`) then computes `next_run` at that fixed UTC clock time forever.
+- **What:** (1) **DST drift** — "every day at 8am" local is stored as a fixed UTC hour; after a daylight-saving change the local fire time shifts by an hour. (2) **UTC weekday** — for a late-evening local time that maps to the next UTC date, the weekly reminder's `scheduled_day` is the UTC weekday, so it can fire a day off from the local weekday the user meant.
+- **Why deferred (not a drive-by fix):** the always-on server (#65) fixed this by scheduling recurring APScheduler crons **in the user's IANA timezone** (so the fire time re-derives each occurrence, DST-correct, on the local weekday). The desktop path stores everything as naive UTC and re-derives `next_run` in UTC; fixing it properly means persisting the user's tz + local wall-clock on the task row and computing `next_run` in local tz — a schema + `compute_next_run` change that belongs in its own PR, not folded silently into the CAD/telegram work (CLAUDE.md rule 7).
+- **To do:** carry the user's tz (or local wall-clock) on `ScheduledTask` and compute recurring `next_run` in that tz, mirroring the always-on server's local-cron approach. Until then, recurring desktop reminders are correct at creation and drift at most one hour across DST.
+
+---
+
 ## NJ-18 — upstream (build123d): `export_gltf` reports SUCCESS while writing an EMPTY GLB, and an `import_step` tree cannot be exported at all — FLAGGED + MITIGATION IDENTIFIED (blocks the Task-5 CAD viewer) 2026-07-14
 
 - **Severity:** high **for the CAD feature** (it silently produces an empty 3D model), zero today (no CAD code shipped yet). Found by probing the real library **before** writing the converter, per CLAUDE.md rule 6 — not by reading its docs.

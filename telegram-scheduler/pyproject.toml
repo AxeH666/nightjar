@@ -1,0 +1,36 @@
+[project]
+name = "nightjar-telegram-scheduler"
+version = "1.0.0"
+description = "Nightjar Task 6 — always-on Telegram reminder scheduling server (FastAPI + APScheduler + aiogram)"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "apscheduler>=3.10,<4",
+    "sqlalchemy>=2.0",
+    "aiogram>=3.4",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+# Real LLM providers are optional — mock mode (the default) needs neither. Install the one you
+# deploy with: pip install .[anthropic]  or  .[openai]
+anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.30"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+nightjar-telegram-scheduler = "app.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
