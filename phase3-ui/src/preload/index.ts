@@ -51,6 +51,10 @@ contextBridge.exposeInMainWorld("nightjar", {
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   readGeneratedImage: (filename: string): Promise<string | null> =>
     ipcRenderer.invoke("nightjar:readGeneratedImage", filename),
+  // WSL image-paste workaround: read a copied bitmap from the Windows clipboard via
+  // PowerShell → PNG data URL (null off WSL / no image / powershell unreachable).
+  readWindowsClipboardImage: (): Promise<string | null> =>
+    ipcRenderer.invoke("nightjar:readWindowsClipboardImage"),
   // Live-preview / Artifacts: mirror write/edit content into a per-session sandbox
   // served by the loopback static server, list/read for the Files tab, save-as (any
   // type) + reveal-in-folder for download.

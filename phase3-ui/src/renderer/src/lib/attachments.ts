@@ -32,6 +32,7 @@ interface AttachmentBridge {
   saveAttachment(dataUrl: string, name: string): Promise<string>
   readGeneratedImage(filename: string): Promise<string | null>
   getPathForFile?(file: File): string // Electron webUtils; "" when the File has no on-disk path
+  readWindowsClipboardImage?(): Promise<string | null> // WSL: PNG data URL from the Windows clipboard
 }
 
 function bridge(): AttachmentBridge | null {
@@ -176,6 +177,24 @@ export async function attachmentsFromDataTransfer(dt: DataTransfer | null): Prom
     }
   }
   return { attachments, errors }
+}
+
+// WSL image-paste workaround (NJ-28): the main process reads a copied bitmap from the
+// Windows clipboard via PowerShell and returns a PNG data URL (null off WSL / no image /
+// powershell unreachable). Turn that into an Attachment, saving a copy so the local vision
+// tool has a path. Returns null when there was no image to insert.
+export async function windowsClipboardImageAttachment(): Promise<Attachment | null> {
+  const dataUrl = (await bridge()?.readWindowsClipboardImage?.()) ?? null
+  if (!dataUrl) return null
+  const name = "pasted-image.png"
+  let path: string | undefined
+  try {
+    path = await bridge()?.saveAttachment(dataUrl, name)
+  } catch {
+    /* best-effort: cloud vision still works via the data-URL part */
+  }
+  const b64 = dataUrl.slice(dataUrl.indexOf(",") + 1)
+  return { id: nextId(), name, mime: "image/png", dataUrl, size: Math.round(b64.length * 0.75), path, isImage: true }
 }
 
 // Read a generated image (filename parsed from the generate_image tool output) for

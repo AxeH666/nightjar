@@ -375,6 +375,42 @@ ipcMain.handle("nightjar:saveAttachment", async (_e, dataUrl: string, name: stri
   return abs
 })
 
+// WSL clipboard-image paste workaround (NJ-28). Windows delivers a copied bitmap to the
+// WSL DOM clipboard as a BI_BITFIELDS BMP that Chromium can't decode, so image PASTE
+// silently fails under WSL (text pastes fine). Read the Windows clipboard directly via
+// PowerShell and return a PNG data URL. Only runs under WSL; returns null gracefully when
+// powershell.exe is unreachable, the clipboard has no image, or anything errors. Bounded
+// by a wall-clock timeout (rule 3) so a wedged powershell can't hang the paste.
+const PS_CLIPBOARD_IMAGE_CMD =
+  "Add-Type -AssemblyName System.Windows.Forms; " +
+  "$img=[System.Windows.Forms.Clipboard]::GetImage(); " +
+  "if($img){$ms=New-Object System.IO.MemoryStream; $img.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray())}"
+ipcMain.handle("nightjar:readWindowsClipboardImage", async (): Promise<string | null> => {
+  if (!isWSL()) return null // native Windows/macOS/Linux use the normal DOM clipboard path
+  return new Promise<string | null>((done) => {
+    let out = ""
+    let settled = false
+    const finish = (v: string | null) => {
+      if (settled) return
+      settled = true
+      done(v)
+    }
+    const child = spawn("powershell.exe", ["-NonInteractive", "-NoProfile", "-Command", PS_CLIPBOARD_IMAGE_CMD], {
+      timeout: 8000, // kills a wedged powershell (rule 3)
+    })
+    child.stdout?.on("data", (b: Buffer) => {
+      out += b.toString()
+      if (out.length > 200 * 1024 * 1024) { child.kill(); finish(null) } // guard runaway output
+    })
+    child.on("error", () => finish(null)) // powershell.exe not reachable → graceful no-op
+    child.on("exit", () => {
+      const b64 = out.trim().replace(/\s+/g, "")
+      // a real base64 PNG is well over this; anything shorter is empty/garbage → null
+      finish(/^[A-Za-z0-9+/=]+$/.test(b64) && b64.length > 100 ? `data:image/png;base64,${b64}` : null)
+    })
+  })
+})
+
 // Read a generated image (by filename) from Odysseus's generated_images dir → data
 // URL, so chat can render it inline (the tool returns a web path not served here).
 ipcMain.handle("nightjar:readGeneratedImage", async (_e, filename: string): Promise<string | null> => {
