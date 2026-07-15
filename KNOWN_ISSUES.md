@@ -42,6 +42,22 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-30 — WSLg is NOT a supported interactive GUI environment; move GUI/interaction testing to native Windows — FLAGGED for maintainer (dev-workflow decision, NOT applied) 2026-07-15
+
+- **Context:** the file-handling investigation (NJ-26…NJ-29) established that several interactive features are broken specifically by WSLg/WSL, not by JUNE's code:
+  - **Drag-drop** — Windows→WSL DnD is not bridged by the platform (NJ-29); no payload is delivered.
+  - **Clipboard image paste** — WSL hands Chromium an undecodable BI_BITFIELDS BMP (NJ-28; worked around via PowerShell).
+  - **GPU / WebGL** — WSLg falls back to software SwiftShader; the app logs "Exiting GPU process", "software WebGL has been deprecated", and GL stalls.
+  - **Desktop notifications** — "[scheduler] desktop notifications unavailable — local reminders disabled" under WSLg.
+  All of these work on a native **Windows** build.
+- **Recommendation (NOT applied — maintainer's call):** treat native Windows as the supported target for GUI/interaction testing, and reserve WSL for **headless CI + Linux packaging**. This is a dev-workflow change, so it's flagged here for a decision rather than changed unilaterally — no CI/build/workflow config was touched.
+
+## NJ-29 — Windows→WSL drag-drop delivers NO payload (hard platform limitation); added a browse-instead fallback — HANDLED (fallback verified; real DnD is native-Windows-only) 2026-07-15
+
+- **Severity:** medium (a headline complaint) but NOT fixable under WSL — Microsoft doesn't bridge drag-drop across the Windows→WSL boundary, so a drop into the WSL-hosted window delivers no files/uri-list at all. Confirmed by elimination: a synthetic real-File drop attaches perfectly (the code is correct), so the OS simply delivers nothing on a real drag.
+- **Fix (graceful handling — `main/index.ts` config + `lib/platform.ts` + `ChatSurface.tsx`):** expose `isWSL` to the renderer; when a drop under WSL yields an empty result, replace the silent failure with a visible notice — "Drag-and-drop isn't supported under WSL. Click Browse (or paste) to attach instead." — plus a **Browse** button that opens the file picker. The drag overlay text also flips under WSL. Native Windows DnD is unaffected and works (via the webUtils path, NJ-27).
+- **Verified (WSL):** with `config.isWSL=true`, a synthetic empty drop surfaces the notice + Browse button; typecheck (node+web) clean. Real Windows→WSL DnD is intentionally NOT attempted (there's no payload to read); native-Windows DnD needs a native build to confirm.
+
 ## NJ-28 — clipboard image PASTE silently failed under WSL (undecodable BMP); added a PowerShell read-through — FIXED (in-app Ctrl+V needs confirming) 2026-07-15
 
 - **Severity:** medium — copying an image in Windows and pasting into JUNE under WSL did nothing (text pastes fine). WSL delivers the copied bitmap to the DOM clipboard as a BI_BITFIELDS BMP Chromium can't decode.

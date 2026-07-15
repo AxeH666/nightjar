@@ -5,6 +5,7 @@ import { ToolsMenu } from "./composer/ToolsMenu"
 import { type Attachment, type AttachmentResult, pickAttachments, attachmentsFromDataTransfer, windowsClipboardImageAttachment, fmtSize } from "../lib/attachments"
 import { useModel } from "../context/ModelContext"
 import { isLocalModel } from "../lib/byok"
+import { useIsWSL } from "../lib/platform"
 
 // Local-vision readiness (Ollama + gemma3:4b), mirrored from the main process — used
 // to warn before an image is sent to the text-only local model (NJ-7).
@@ -102,6 +103,11 @@ export function ChatSurface({
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attachError, setAttachError] = useState<string | null>(null) // surfaced attach failures (was silently swallowed)
   const [dragOver, setDragOver] = useState(false)
+  // WSL doesn't bridge Windows→WSL drag-drop, so a drop delivers no payload. Detect WSL and,
+  // when a drop yields nothing there, show a browse-instead fallback rather than failing
+  // silently (NJ-29). Native Windows DnD works and is unaffected.
+  const isWSL = useIsWSL()
+  const [wslDropNotice, setWslDropNotice] = useState(false)
   const [createMode, setCreateMode] = useState(false) // "Create Image" prompt mode
   const [imageNotice, setImageNotice] = useState<string | null>(null) // use-time image-unavailable reason
   // The per-message web tool armed in the "+" menu (reset after each send). ONE value,
@@ -155,7 +161,13 @@ export function ChatSurface({
     e.preventDefault()
     setDragOver(false)
     if (busy) return
-    attachmentsFromDataTransfer(e.dataTransfer).then(addResult)
+    attachmentsFromDataTransfer(e.dataTransfer).then((res) => {
+      // Under WSL a drop delivers no files/uri-list (the platform doesn't bridge it), so we
+      // get an empty result — surface the browse-instead fallback instead of nothing. If
+      // something WAS delivered (native Windows, or a Linux-side drag), attach it normally.
+      if (isWSL && res.attachments.length === 0 && res.errors.length === 0) setWslDropNotice(true)
+      else addResult(res)
+    })
   }
 
   async function submit() {
@@ -220,7 +232,9 @@ export function ChatSurface({
     >
       {dragOver && (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-nightjar-accent bg-nightjar-accent/10">
-          <span className="rounded-lg bg-nightjar-base/90 px-4 py-2 text-sm font-medium text-nightjar-accent">Drop files to attach</span>
+          <span className="rounded-lg bg-nightjar-base/90 px-4 py-2 text-sm font-medium text-nightjar-accent">
+            {isWSL ? "Drag-and-drop isn't supported under WSL — release, then click Browse" : "Drop files to attach"}
+          </span>
         </div>
       )}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -264,6 +278,23 @@ export function ChatSurface({
           <div className="mb-2 flex items-center gap-2 rounded-md border border-nightjar-alert/60 bg-nightjar-alert/10 px-2 py-1 text-xs text-nightjar-alert">
             <span className="flex-1">{attachError}</span>
             <button onClick={() => setAttachError(null)} className="hover:underline">dismiss</button>
+          </div>
+        )}
+        {wslDropNotice && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-nightjar-accent/40 bg-nightjar-accent/5 px-2 py-1 text-xs text-nightjar-text/70">
+            <span className="flex-1">Drag-and-drop isn't supported under WSL. Click Browse (or paste) to attach instead.</span>
+            <button
+              onClick={() => {
+                setWslDropNotice(false)
+                browse()
+              }}
+              className="rounded border border-nightjar-accent px-2 py-0.5 text-nightjar-accent hover:bg-nightjar-accent/10"
+            >
+              Browse files
+            </button>
+            <button onClick={() => setWslDropNotice(false)} className="text-nightjar-text/50 hover:underline">
+              dismiss
+            </button>
           </div>
         )}
         {attachments.length > 0 && (

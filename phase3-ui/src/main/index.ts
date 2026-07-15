@@ -262,6 +262,7 @@ function createWindow(): void {
 ipcMain.handle("nightjar:config", () => ({
   opencodeUrl: OPENCODE_URL,
   sideChannelUrl: SIDE_CHANNEL_URL,
+  isWSL: isWSL(), // renderer uses this to swap the drag-drop zone for a browse-instead fallback
 }))
 ipcMain.handle("nightjar:status", () => latestStatus)
 
