@@ -41,18 +41,22 @@ export interface ByokProvider {
 //
 // `defaultModel` is LOAD-BEARING: the global Local/Cloud toggle sets the active chat
 // model to `<provider>/<defaultModel>` when you switch to Cloud, so a stale id here
-// selects a superseded/retired model on switch. Keep these current — Anthropic was
-// `claude-sonnet-4-20250514` (deprecated, retires 2026-06-15) and is now
-// `claude-sonnet-5`. Verify any change against the provider's live model registry.
+// selects a superseded/retired model on switch — and the engine throws ModelNotFoundError
+// (no fuzzy match) so EVERY prompt on that provider fails 100% of the time. Keep these
+// current: Anthropic was `claude-sonnet-4-20250514` (retired) → `claude-sonnet-5`; and on
+// the 2026-07 registry bump google `gemini-2.0-flash` → `gemini-2.5-flash` and xai
+// `grok-3` → `grok-4.3` (the old ids were dropped from the bundled models.dev catalog,
+// leaving those two providers dead-on-arrival for chat). Verify any change against the
+// engine's live registry: `curl http://127.0.0.1:4096/config/providers`.
 export const BYOK_PROVIDERS: ByokProvider[] = [
   { id: "openai", name: "OpenAI", envVar: "NIGHTJAR_BYOK_OPENAI", defaultModel: "gpt-4o", keyHint: "sk-…" },
   { id: "anthropic", name: "Anthropic", envVar: "NIGHTJAR_BYOK_ANTHROPIC", defaultModel: "claude-sonnet-5", keyHint: "sk-ant-…" },
-  { id: "google", name: "Google Gemini", envVar: "NIGHTJAR_BYOK_GOOGLE", defaultModel: "gemini-2.0-flash", keyHint: "AIza…" },
+  { id: "google", name: "Google Gemini", envVar: "NIGHTJAR_BYOK_GOOGLE", defaultModel: "gemini-2.5-flash", keyHint: "AIza…" },
   { id: "groq", name: "Groq", envVar: "NIGHTJAR_BYOK_GROQ", defaultModel: "llama-3.3-70b-versatile", keyHint: "gsk_…" },
   { id: "openrouter", name: "OpenRouter", envVar: "NIGHTJAR_BYOK_OPENROUTER", defaultModel: "openai/gpt-4o", keyHint: "sk-or-…" },
   { id: "mistral", name: "Mistral", envVar: "NIGHTJAR_BYOK_MISTRAL", defaultModel: "mistral-large-latest", keyHint: "…" },
   { id: "deepseek", name: "DeepSeek", envVar: "NIGHTJAR_BYOK_DEEPSEEK", defaultModel: "deepseek-chat", keyHint: "sk-…" },
-  { id: "xai", name: "xAI Grok", envVar: "NIGHTJAR_BYOK_XAI", defaultModel: "grok-3", keyHint: "xai-…" },
+  { id: "xai", name: "xAI Grok", envVar: "NIGHTJAR_BYOK_XAI", defaultModel: "grok-4.3", keyHint: "xai-…" },
 ]
 
 // Optional mock provider for end-to-end testing without burning a real cloud key

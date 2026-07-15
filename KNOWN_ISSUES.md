@@ -42,6 +42,14 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-22 — BYOK default model ids drift out of the bundled models.dev registry (google/xai were dead-on-arrival) — FIXED, durable validation DEFERRED 2026-07-15
+
+- **Severity:** high for the affected providers (100% chat failure), zero for the local-first default path.
+- **Context:** found by the June breakage-audit. `BYOK_PROVIDERS[].defaultModel` (`phase3-ui/src/main/byok.ts`) is load-bearing — the switcher and the Local→Cloud toggle set the active chat model to `<provider>/<defaultModel>` and `promptAsync` sends it verbatim; the engine's `getModel` throws `ModelNotFoundError` (no fuzzy match) so every prompt fails before generation.
+- **What:** on the 2026-07 registry bump, google `gemini-2.0-flash` and xai `grok-3` were dropped from the bundled catalog. Verified live: `curl :4096/config/providers` shows google starts at `gemini-2.5-flash`, xai at `grok-4.3`; the other six defaults resolve.
+- **Fix (this pass):** google → `gemini-2.5-flash`, xai → `grok-4.3` (both verified present in the live registry). End-to-end with a real Google/xAI key is UNVERIFIED (no key on hand) — the id now resolves in the registry, which was the failure point.
+- **Deferred (durable):** these constants silently rot on every catalog bump. Add a startup/test check that validates each `defaultModel` against `/config/providers` so a future mismatch surfaces loudly instead of killing that provider's chat.
+
 ## NJ-21 — drag-and-drop file attach: added a text/uri-list fallback for Linux/WSLg; NOT verified on real WSLg hardware — FLAGGED (needs a hands-on test) 2026-07-15
 
 - **Severity:** medium (a headline user complaint), but environment-bound.
