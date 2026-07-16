@@ -12,7 +12,7 @@ import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { Notification } from "electron"
-import { REPO } from "./services"
+import { REPO, venvPython } from "./services"
 
 const POLL_INTERVAL_MS = 60_000 // once a minute — reminders are minute-granular (HH:MM)
 const POLL_TIMEOUT_MS = 20_000 // rule 3: a poll subprocess that hangs is killed
@@ -25,7 +25,7 @@ let initialTimer: ReturnType<typeof setTimeout> | null = null
 let stopped = false
 
 function pyPath(): string {
-  return join(REPO, "phase2-odysseus", "venv", "bin", "python")
+  return venvPython(join(REPO, "phase2-odysseus", "venv"))
 }
 function pollerScript(): string {
   return join(REPO, "phase2-odysseus", "servers", "task_poller.py")

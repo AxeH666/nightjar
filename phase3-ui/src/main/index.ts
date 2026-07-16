@@ -10,7 +10,7 @@ import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO, WORKSPACE, findImageModel, isWSL } from "./services"
+import { nightjarServices, REPO, WORKSPACE, findImageModel, isWSL, VENV_PY, venvPython } from "./services"
 import * as byok from "./byok"
 import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
@@ -42,7 +42,10 @@ if (isWSL()) {
 // correct value and break every {env:NIGHTJAR_ROOT} MCP path when the repo isn't
 // literally at ~/nightjar.
 function opencodeServeEnv(): Record<string, string> {
-  return { NIGHTJAR_ROOT: REPO, ...byok.envForOpencode(), ...capabilities.envForOpencode() }
+  // NJ_VENV_PY is REQUIRED here (not just in the service def): setEnv() overrides the def env
+  // with this at startup, and every restart rebuilds from it — without it the opencode.json MCP
+  // commands' {env:NJ_VENV_PY} resolves to "" and every MCP fails (on Linux too).
+  return { NIGHTJAR_ROOT: REPO, NJ_VENV_PY: VENV_PY, ...byok.envForOpencode(), ...capabilities.envForOpencode() }
 }
 
 // Roots the renderer is allowed to read TTS audio from (Kokoro writes under the
@@ -69,7 +72,7 @@ const ODYSSEUS_DATA_DIR = join(homedir(), ".nightjar", "odysseus")
 // rather than a silent fallback — the honest, safe outcome.
 function runImageSeed(extraEnv: Record<string, string>): Promise<boolean> {
   return new Promise((done) => {
-    const py = join(REPO, "phase2-odysseus", "venv", "bin", "python")
+    const py = venvPython(join(REPO, "phase2-odysseus", "venv"))
     const script = join(REPO, "phase2-odysseus", "seed_image_endpoint.py")
     const child = spawn(py, [script], {
       env: { ...process.env, NIGHTJAR_ROOT: REPO, ODYSSEUS_DATA_DIR, ...extraEnv },

@@ -10,18 +10,25 @@ import { httpOk } from "./supervisor"
 import { findOllama, OLLAMA_HOST } from "./vision"
 
 const HOME = os.homedir()
-const BUN = process.env.NIGHTJAR_BUN || join(HOME, ".bun/bin/bun")
+const IS_WIN = process.platform === "win32"
+const BUN = process.env.NIGHTJAR_BUN || join(HOME, ".bun/bin", IS_WIN ? "bun.exe" : "bun")
 // Repo root: an explicit NIGHTJAR_ROOT wins; otherwise DERIVE it from this
 // module's own location rather than assuming ~/nightjar (which breaks when the
 // project is cloned anywhere else). This file sits at <repo>/phase3-ui/src/main/
 // under bun and <repo>/phase3-ui/out/main/ in the Electron build — both are three
 // levels below the repo root, so the same "../../.." resolves correctly in either.
 export const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
+// Interpreter path inside a venv, OS-correct: POSIX venvs put python at bin/python, Windows
+// venvs at Scripts\python.exe. Used for the app-launched python sidecars below; the
+// opencode.json MCP commands use the {env:NJ_VENV_PY} form, resolved from the opencode-serve
+// env (NJ_VENV_PY, set below). On POSIX both reduce to bin/python — identical to before.
+export const VENV_PY = IS_WIN ? "Scripts/python.exe" : "bin/python"
+export const venvPython = (venvDir: string): string => join(venvDir, VENV_PY)
 const OPENCODE_ENTRY = join(REPO, "research/opencode/packages/opencode/src/index.ts")
 const LLAMA_BIN = process.env.NIGHTJAR_LLAMA_BIN || join(HOME, "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
 // Local IMAGE generation (NJ-6): the diffusers GPU venv + the Z-Image-Turbo model dir.
-const DIFFUSION_PY = process.env.NIGHTJAR_DIFFUSION_PY || join(REPO, "diffusion-mcp/venv/bin/python")
+const DIFFUSION_PY = process.env.NIGHTJAR_DIFFUSION_PY || venvPython(join(REPO, "diffusion-mcp/venv"))
 const DIFFUSION_PORT = process.env.NIGHTJAR_DIFFUSION_PORT || "8100"
 
 // The local image-model directory (Z-Image-Turbo), present only if it exists AND
@@ -113,20 +120,20 @@ export function nightjarServices(): ServiceDef[] {
       // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
       // config is portable (no hardcoded /home/<user>/...). Pass NIGHTJAR_ROOT
       // through so those substitutions resolve — the app needs no manual setup.
-      env: { NIGHTJAR_ROOT: REPO, ...(DESIGN ? { NIGHTJAR_MAX_OUTPUT_TOKENS: "6144" } : {}) },
+      env: { NIGHTJAR_ROOT: REPO, NJ_VENV_PY: VENV_PY, ...(DESIGN ? { NIGHTJAR_MAX_OUTPUT_TOKENS: "6144" } : {}) },
       ready: () => httpOk("http://127.0.0.1:4096/agent"),
       readyTimeoutMs: 60000, // also spawns the MCP servers per opencode.json
     },
     {
       name: "side-channel",
-      command: join(REPO, "phase2-mcp/venv/bin/python"),
+      command: venvPython(join(REPO, "phase2-mcp/venv")),
       args: [join(REPO, "phase2-mcp/sidechannel.py")],
       ready: () => tcpOpen("127.0.0.1", 8765),
       readyTimeoutMs: 15000,
     },
     {
       name: "wake-daemon",
-      command: join(REPO, "phase2-mcp/venv/bin/python"),
+      command: venvPython(join(REPO, "phase2-mcp/venv")),
       args: [join(REPO, "phase2-mcp/wake_daemon.py")],
       cwd: join(REPO, "phase2-mcp"),
       // Best-effort: no mic/audio hardware is not a reason the rest of Nightjar
