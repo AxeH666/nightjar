@@ -55,6 +55,30 @@ function saveFiles(projectId: string, files: ProjectFile[]): void {
   }
 }
 
+// The parts a project owns in localStorage. Exposed via delete/copy helpers so the projects
+// store can DROP a deleted project's content (privacy — it must not linger on disk) and CARRY
+// a duplicated project's content to the new id, without knowing the key layout.
+const CONTENT_PARTS = ["instructions", "memory", "files"] as const
+
+export function deleteProjectContent(projectId: string): void {
+  try {
+    for (const part of CONTENT_PARTS) localStorage.removeItem(key(projectId, part))
+  } catch {
+    /* localStorage unavailable → nothing was persisted */
+  }
+}
+
+export function copyProjectContent(fromId: string, toId: string): void {
+  try {
+    for (const part of CONTENT_PARTS) {
+      const v = localStorage.getItem(key(fromId, part))
+      if (v !== null) localStorage.setItem(key(toId, part), v)
+    }
+  } catch {
+    /* localStorage unavailable → nothing to copy */
+  }
+}
+
 let fseq = 0
 function newFileId(): string {
   fseq += 1
