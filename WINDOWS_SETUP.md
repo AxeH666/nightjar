@@ -217,3 +217,73 @@ The merged foundation (PRs #83–#87) to eyeball on a real display:
   data; duplicate copies it).
 - Then: the deferred **PR 5b** (per-project chat isolation) + the net-new labs get built and
   verified here, where the session core + viewers can actually be driven.
+
+---
+
+## 9. Full-native (Option B) first-run checklist
+
+The §7 fixes are in `main`, so a fresh clone runs natively. This is the minimal path to a
+GPU-rendered LAB/CAD verification using a **BYOK cloud key** (skip local llama for the first
+run). Keep your WSL clone until this passes — safety net.
+
+### 9.0 · Fresh clone (do NOT copy from WSL)
+- Enable long paths once (admin PowerShell): `git config --system core.longpaths true`
+- Clone to a **short, space-free** path (avoid OneDrive-synced or spaced paths):
+  ```powershell
+  cd C:\dev
+  git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
+  cd nightjar
+  ```
+- **Why fresh, not copied:** the WSL clone's `node_modules` hold Linux-native binaries
+  (Electron/esbuild) and its venvs hold Linux python + Linux OCP/VTK wheels — none run on
+  Windows. Fresh clone + fresh installs is mandatory.
+
+### 9.1 · Install (minimal: LAB/CAD via Fireworks BYOK)
+1. **Node 20 LTS** → `cd phase3-ui; npm install` (Electron's binary downloads on install).
+2. **Bun** → `powershell -c "irm bun.sh/install.ps1 | iex"` (→ `%USERPROFILE%\.bun\bin\bun.exe`,
+   found automatically). ⚠️ *Bun running OpenCode's TS is the least-tested piece on Windows — if
+   `opencode-serve` won't start, suspect this first (check its service log in the app).*
+3. **Python 3.12** → `winget install Python.Python.3.12` (confirm `py -3.12 --version`).
+4. **uv** → `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`.
+5. **phase-cad venv** (the CAD lab):
+   ```powershell
+   cd phase-cad
+   uv venv --python 3.12 .venv
+   uv pip install --python .venv\Scripts\python "build123d>=0.11,<0.12" "build123d-mcp==0.3.79" "cadquery-ocp-novtk!=7.9.3.1.1"
+   .\.venv\Scripts\python smoke_test.py    # the gate — must pass
+   cd ..
+   ```
+   ⚠️ *OCP/VTK are big Windows wheels (slow but present). If a wheel fails: confirm Python
+   **3.12 exactly** (not 3.13) + recent uv.*
+6. **Skip for now** (add after the core works): `llama.cpp` (using BYOK), the other backend venvs
+   (`phase2-mcp`/`odysseus`/`browser-use`), Ollama, diffusion, the Odysseus patch.
+
+### 9.2 · Run (native — no WSL workarounds)
+```powershell
+cd phase3-ui
+npm run dev
+```
+- The app **is** the launcher: its supervisor spawns `opencode-serve` (bun) → which spawns the
+  CAD MCP (`phase-cad\.venv\Scripts\python.exe`, resolved via `NJ_VENV_PY`).
+- **No env vars needed** if bun is at its default path (the app auto-sets `NIGHTJAR_ROOT` +
+  `NJ_VENV_PY`). Set `NIGHTJAR_BUN` only if bun is elsewhere.
+- **No `LIBGL_ALWAYS_SOFTWARE` / SwiftShader** — the software-GL path is `isWSL()`-gated, so
+  native Windows uses the **real GPU** automatically.
+- Under BYOK, `llama-server`/`inference-proxy` show **failed/unhealthy** — expected and harmless
+  (the spawn-error guard keeps startup going).
+
+### 9.3 · Fireworks BYOK (skip llama)
+In the running app → **Manage keys / Settings** → add your **Fireworks** key → pick the Fireworks
+model in the switcher (the "cloud active" banner appears). Chat + CAD then run via the cloud model
+— no local llama. *(Add local llama later: a CUDA `llama-server.exe` + the GGUF, then
+`NIGHTJAR_LLAMA_BIN` + `NIGHTJAR_MODEL_GGUF`.)*
+
+### 9.4 · Verify (§8 above, on real GPU)
+Walk the §8 checklist. In addition, confirm the previously-WSL-broken things now work natively
+(all `isWSL()`-gated in code): **drag-drop** a file onto the chat · **Ctrl+V** an image ·
+**file picker** opens at a normal Windows path (not `/mnt/c`) · a **desktop notification** fires ·
+the 3D viewer is smooth (**GPU**, not SwiftShader). Prompt a real part ("a bracket with two M4
+holes") to exercise the CAD MCP python via the `NJ_VENV_PY` fix.
+
+**PR 5b:** it was *deferred, never built* (it needed on-device verification) — once the above is
+green, per-project chat isolation gets **built** on Windows and verified there for the first time.
