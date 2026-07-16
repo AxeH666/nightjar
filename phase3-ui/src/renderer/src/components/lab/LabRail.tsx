@@ -19,11 +19,15 @@ export function LabRail({
   history,
   onBack,
   onOpenSettings,
+  onOpenProjects,
 }: {
   lab: LabDef
   history?: LabHistory
   onBack: () => void
   onOpenSettings: () => void
+  // When provided, the Projects entry is live and opens the lab's Projects home; a lab that
+  // isn't built yet omits it and the entry stays a disabled "soon" placeholder (rule 8).
+  onOpenProjects?: () => void
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -60,13 +64,22 @@ export function LabRail({
 
       {/* Projects + Settings pinned at the bottom */}
       <div className="shrink-0 border-t border-nightjar-surface p-2 text-sm">
-        <button
-          disabled
-          title="Per-lab Projects — coming soon"
-          className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-nightjar-text/30"
-        >
-          📁 Projects <span className="ml-auto text-[10px] uppercase tracking-wide">soon</span>
-        </button>
+        {onOpenProjects ? (
+          <button
+            onClick={onOpenProjects}
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-nightjar-text/70 hover:bg-nightjar-surface"
+          >
+            📁 Projects
+          </button>
+        ) : (
+          <button
+            disabled
+            title="Per-lab Projects — coming soon"
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-nightjar-text/30"
+          >
+            📁 Projects <span className="ml-auto text-[10px] uppercase tracking-wide">soon</span>
+          </button>
+        )}
         <button
           onClick={onOpenSettings}
           className="mt-1 flex w-full items-center gap-2 rounded px-2 py-1 text-left text-nightjar-text/70 hover:bg-nightjar-surface"
