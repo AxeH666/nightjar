@@ -1,26 +1,25 @@
 import { useSessions } from "../../context/SessionsContext"
 import { usePermission } from "../../context/PermissionContext"
 import { useConnection } from "../../context/ConnectionContext"
+import { useCadScene } from "../../lib/useCadScene"
 import { ChatSurface } from "../ChatSurface"
-import { CadViewer } from "../CadViewer"
+import { CadCanvas } from "./CadCanvas"
+import { CadInspector } from "./CadInspector"
 import { LabShell } from "../../shell/LabShell"
 import { LabRail } from "./LabRail"
 import { labById } from "./labs"
 
-// Mechanical & Physics inside the LAB shell (Lab.md §5). It REUSES the existing CAD stack
-// wholesale — the `cad` session slot, the `cad` agent, the STEP→GLB pipeline, and the
-// CadViewer — so it introduces no new agent, MCP, permission gate, or session slot. The
-// standalone CAD tab stays until the shell is proven (§2/§10). A dedicated Mechanical
-// session slot arrives when Projects key sessions by (slot, projectId) in a later PR;
-// until then this and the CAD tab share the one `cad` session, which is fine (same agent).
-//
-// CadViewer keeps its own explode/isolate/reset controls here; those fold into the unified
-// right Inspector in the next-but-one PR, at which point this inspector panel fills out.
+// Mechanical & Physics inside the LAB shell (Lab.md §5). REUSES the existing CAD stack — the
+// `cad` session slot, the `cad` agent, and the STEP→GLB pipeline — so it adds no new agent,
+// MCP, permission gate, or session slot. One useCadScene controller drives BOTH the center
+// canvas AND the right Inspector's explode/isolate/visibility controls, as separate shell
+// regions. The standalone CAD tab (its own CadViewer) is untouched until it folds in (§2/§10).
 export function MechanicalLab({ onBack, onOpenSettings }: { onBack: () => void; onOpenSettings: () => void }) {
   const { slots, messagesOf, busyOf, send, createImage, cadModel, cadBusy, cadError, loadCadHero, sessionIdsBySlot } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const id = slots.cad
+  const scene = useCadScene(cadModel?.glb ?? null)
 
   return (
     <LabShell
@@ -32,21 +31,8 @@ export function MechanicalLab({ onBack, onOpenSettings }: { onBack: () => void; 
           onOpenSettings={onOpenSettings}
         />
       }
-      center={<CadViewer glb={cadModel?.glb ?? null} busy={cadBusy} />}
-      inspector={
-        <div className="flex h-full flex-col gap-2 p-3 text-xs">
-          <div className="text-xs uppercase tracking-wide text-nightjar-text/40">Inspector</div>
-          <div className="rounded border border-nightjar-surface/60 p-2 text-nightjar-text/60">
-            <div className="flex justify-between">
-              <span>Parts</span>
-              <span>{cadModel?.parts.length ?? 0}</span>
-            </div>
-          </div>
-          <p className="text-nightjar-text/30">
-            Properties · Structure · Downloads land in the unified Inspector next.
-          </p>
-        </div>
-      }
+      center={<CadCanvas canvasRef={scene.canvasRef} busy={cadBusy} error={scene.error} hasModel={scene.parts.length > 0} />}
+      inspector={<CadInspector scene={scene} />}
       bottom={
         <>
           <div className="flex items-center gap-2 border-b border-nightjar-surface px-3 py-1.5 text-xs">
