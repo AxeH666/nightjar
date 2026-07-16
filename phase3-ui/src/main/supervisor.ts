@@ -200,6 +200,19 @@ export class Supervisor {
     child.stdout?.on("data", cap)
     child.stderr?.on("data", cap)
 
+    // A spawn failure (most often ENOENT — a legitimately-absent optional binary such as
+    // llama-server when running on BYOK cloud, or a missing bun on a fresh box) emits 'error'.
+    // With no listener that would crash the app on an unhandled 'error'. Capture it and drop
+    // m.child so the readiness gate below returns immediately (no long foreground wait) and the
+    // service is marked failed — the app then continues bringing up the rest (opencode-serve, …).
+    child.on("error", (err) => {
+      cap(Buffer.from(`spawn error: ${(err as Error)?.message ?? String(err)}\n`))
+      if (m.child === child) {
+        m.child = undefined
+        this.set(m, "failed", `could not spawn: ${(err as Error)?.message ?? String(err)}`)
+      }
+    })
+
     child.on("exit", (code) => {
       m.child = undefined
       if (m.intentionalStop) {
