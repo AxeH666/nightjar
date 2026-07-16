@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
+import { deleteProjectContent, copyProjectContent } from "./projectContent"
 
 // Per-lab Projects (Lab.md §4.6): a project is an isolated container so related work stays
 // separate ("openforge" and "manohiti" never bleed together). This module is the STORE —
@@ -95,16 +96,22 @@ export function useProjects(lab: LabId): ProjectsStore {
     (id: string, description: string) => mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p))),
     [mutate],
   )
-  const remove = useCallback((id: string) => mutate((prev) => prev.filter((p) => p.id !== id)), [mutate])
+  const remove = useCallback(
+    (id: string) => {
+      deleteProjectContent(id) // drop the project's Memory/Instructions/Files too — must not linger on disk
+      mutate((prev) => prev.filter((p) => p.id !== id))
+    },
+    [mutate],
+  )
   const duplicate = useCallback(
-    (id: string) =>
-      mutate((prev) => {
-        const src = prev.find((p) => p.id === id)
-        if (!src) return prev
-        const now = Date.now()
-        const copy: Project = { ...src, id: newId(), name: `${src.name} (copy)`, favorite: false, createdAt: now, updatedAt: now }
-        return [copy, ...prev]
-      }),
+    (id: string) => {
+      const src = projectsRef.current.find((p) => p.id === id)
+      if (!src) return
+      const now = Date.now()
+      const copy: Project = { ...src, id: newId(), name: `${src.name} (copy)`, favorite: false, createdAt: now, updatedAt: now }
+      copyProjectContent(src.id, copy.id) // carry Memory/Instructions/Files into the duplicate
+      mutate((prev) => [copy, ...prev])
+    },
     [mutate],
   )
   const toggleFavorite = useCallback(
