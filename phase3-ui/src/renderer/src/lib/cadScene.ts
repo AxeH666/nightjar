@@ -23,6 +23,7 @@ export interface CadSceneController {
   setIsolated(name: string | null): void // show only this part (drill-down); null = show all
   setPartVisible(name: string, visible: boolean): void
   frameAll(): void
+  getBounds(): [number, number, number] | null // model bounding-box size [x,y,z] in mm, or null if no model
   resize(): void
   dispose(): void
 }
@@ -197,6 +198,14 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     if (p) p.object.visible = visible
   }
 
+  function getBounds(): [number, number, number] | null {
+    if (!modelRoot) return null
+    const box = new THREE.Box3().setFromObject(modelRoot)
+    if (box.isEmpty()) return null
+    const size = box.getSize(new THREE.Vector3())
+    return [size.x, size.y, size.z]
+  }
+
   function dispose() {
     cancelAnimationFrame(raf)
     controls.dispose()
@@ -204,7 +213,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     renderer.dispose()
   }
 
-  return { load, clear, setExplode, setIsolated, setPartVisible, frameAll, resize, dispose }
+  return { load, clear, setExplode, setIsolated, setPartVisible, frameAll, getBounds, resize, dispose }
 }
 
 // Free GPU resources for a subtree (geometries + materials) so repeated loads don't leak.
