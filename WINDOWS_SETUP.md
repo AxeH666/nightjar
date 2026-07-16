@@ -3,8 +3,8 @@
 > **Read this first.** JUNE's launch layer is currently **WSL/Linux-specific** in two ways
 > (see [§7 Windows blockers](#7-windows-blockers-native-run-needs-these)): MCP/service
 > commands hardcode POSIX venv paths (`venv/bin/python`), and the supervisor kills process
-> trees with POSIX `process.kill(-pid)`. So **a fully-native Windows run needs two small
-> porting fixes first** (§7). This doc installs every component and gives you **two wiring
+> trees with POSIX `process.kill(-pid)`. **Both are now fixed** (Linux-preserving; §7) — a
+> fully-native Windows run is unblocked (the Windows *runtime* is yours to confirm on the box). This doc installs every component and gives you **two wiring
 > options** (§6): **(A) hybrid** — backend in WSL2, native-Windows Electron UI (no porting
 > needed, fastest to real GPU rendering); **(B) full native** — everything on Windows (needs
 > the §7 fixes). Pick after you've seen the pieces.
@@ -153,8 +153,9 @@ for the LAB/CAD verification.
 | `NIGHTJAR_SKIP_OLLAMA` / `NIGHTJAR_SKIP_DIFFUSION` | skip optional models in bash setup | — |
 | `NIGHTJAR_DESIGN_PROFILE` | lift local-model output caps | optional |
 
-> After the §7 port fix, two more are set **by the app** (not by you): `NJ_VENV` (`bin`/`Scripts`)
-> and `NJ_PYEXT` (``/`.exe`), which make the `opencode.json` MCP paths resolve per-OS.
+> The app sets **`NJ_VENV_PY`** (`bin/python` on POSIX, `Scripts/python.exe` on Windows) in the
+> opencode-serve env — it resolves the `opencode.json` MCP interpreter paths per-OS (§7). A
+> **manual** `opencode serve` run (not via the app) must export it too.
 
 ---
 
@@ -185,23 +186,21 @@ now, then land the §7 fixes and move to **Option B** incrementally.
 
 ## 7. Windows blockers (native run needs these)
 
-These are the only reasons a fully-native Windows run doesn't work out of the box. Both fixes are
-**Linux-preserving** (they change nothing on Linux) and I can build + typecheck/build-verify them in
-this repo; only the Windows *runtime* is yours to confirm.
+These were the two blockers to a fully-native Windows run. **Both are now fixed** — Linux-preserving
+(nothing changes on Linux; typecheck/build/tests green). Only the Windows *runtime* is yours to confirm.
 
 1. **POSIX venv paths.** `opencode.json` (all 9 MCP commands) + `services.ts` (side-channel,
-   wake-daemon, diffusion default) hardcode `venv/bin/python`. On Windows that's
-   `venv\Scripts\python.exe`. **Fix:** parameterize via OpenCode's `{env:…}` substitution —
-   `venv/{env:NJ_VENV}/python{env:NJ_PYEXT}` in `opencode.json`, and an OS-aware helper in
-   `services.ts`; the app sets `NJ_VENV`=`bin`/`Scripts` and `NJ_PYEXT`=``/`.exe` by
-   `process.platform`. (On Linux → identical to today.)
-2. **POSIX process-tree kill.** `supervisor.ts` uses `spawn(…, {detached:true})` +
-   `process.kill(-pid, "SIGTERM"/"SIGKILL")` (a process-**group** kill; `SIGTERM` isn't real on
-   Windows). **Fix:** a Windows branch using `taskkill /pid <pid> /T /F` for stop/restart/health.
-   (`pidOnPort` already has a `win32` netstat branch.)
+   wake-daemon, diffusion default) hardcoded `venv/bin/python`; on Windows that's
+   `venv\Scripts\python.exe`. **Fixed:** `opencode.json` now uses `venv/{env:NJ_VENV_PY}`, and
+   `services.ts` sets `NJ_VENV_PY`=`bin/python`/`Scripts/python.exe` by `process.platform` (and
+   resolves its own python sidecars + `bun.exe` the same way). On Linux → identical to before.
+2. **POSIX process-tree kill.** `supervisor.ts` used `spawn(…, {detached:true})` +
+   `process.kill(-pid, …)` (a process-**group** kill; `SIGTERM` isn't real on Windows). **Fixed:**
+   `killTree`/`killProc` helpers branch to `taskkill /pid <pid> /T [/F]` on Windows (POSIX path
+   unchanged), plus `windowsHide` on spawn. (`pidOnPort` already had a `win32` netstat branch.)
 
-Until #1 lands, Option A (adopt-in-WSL) sidesteps both, because the Windows UI never spawns/kills
-the backend — it adopts it.
+Both are in `main`, so **Option B (full native) is unblocked**. Option A (adopt-in-WSL) also still
+works — it never spawns/kills the backend, so it never needed these.
 
 ---
 

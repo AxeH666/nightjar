@@ -9,6 +9,31 @@ import { promisify } from "node:util"
 
 const execFileP = promisify(execFile)
 
+// Cross-platform process termination. On POSIX we spawn children `detached` (their own
+// process group) and kill the GROUP via a negative pid; Windows has no process groups, so
+// `taskkill /T` walks the tree. killTree = the whole tree (our OWN detached children);
+// killProc = a single process (an ADOPTED unmanaged process we must NOT group-kill — mirrors
+// the POSIX single-pid signal, NJ-5). force=false → graceful (SIGTERM / taskkill), true →
+// hard (SIGKILL / taskkill /F). Best-effort: a target that's already gone is ignored.
+function killTree(pid: number, force: boolean): void {
+  if (process.platform === "win32") {
+    execFile("taskkill", ["/pid", String(pid), "/T", ...(force ? ["/F"] : [])], { windowsHide: true }, () => {})
+  } else {
+    try {
+      process.kill(-pid, force ? "SIGKILL" : "SIGTERM")
+    } catch {}
+  }
+}
+function killProc(pid: number, force: boolean): void {
+  if (process.platform === "win32") {
+    execFile("taskkill", ["/pid", String(pid), ...(force ? ["/F"] : [])], { windowsHide: true }, () => {})
+  } else {
+    try {
+      process.kill(pid, force ? "SIGKILL" : "SIGTERM")
+    } catch {}
+  }
+}
+
 // Best-effort cross-platform "which PID is LISTENing on this local TCP port". Hard
 // 2s wall-clock cap (rule 3) so a blocked probe can never wedge a restart. Returns a
 // PID ONLY when EXACTLY ONE distinct listener is found — zero, or ambiguous (>1, as
@@ -163,7 +188,8 @@ export class Supervisor {
     const child = spawn(m.def.command, m.def.args, {
       cwd: m.def.cwd,
       env: { ...process.env, ...(m.def.env ?? {}) },
-      detached: true, // own process group → clean tree kill
+      detached: true, // own process group → clean tree kill (POSIX); taskkill /T on Windows
+      windowsHide: true, // no console-window pop-ups for the spawned sidecars on Windows
       stdio: ["ignore", "pipe", "pipe"],
     })
     m.child = child
@@ -259,9 +285,7 @@ export class Supervisor {
         if (misses >= 3) {
           this.set(m, "unhealthy", "failed 3 consecutive health checks")
           if (m.child && (m.def.autoRestart ?? true)) {
-            try {
-              process.kill(-m.child.pid!, "SIGKILL")
-            } catch {}
+            killTree(m.child.pid!, true)
             // exit handler triggers the restart
           }
         }
@@ -330,9 +354,7 @@ export class Supervisor {
       m.intentionalStop = true
       c.removeAllListeners("exit")
       if (c.pid) {
-        try {
-          process.kill(-c.pid, "SIGKILL")
-        } catch {}
+        killTree(c.pid, true)
       }
       m.child = undefined
     }
@@ -364,9 +386,7 @@ export class Supervisor {
         this.beginHealthWatch(m)
         return
       }
-      try {
-        process.kill(pid, "SIGTERM")
-      } catch {}
+      killProc(pid, false)
       let freeBy = Date.now() + 4000
       while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
       if (await m.def.ready()) {
@@ -378,9 +398,7 @@ export class Supervisor {
         // below then reports honestly instead of us killing the wrong target.
         const still = m.def.port ? await pidOnPort(m.def.port) : pid
         if (still === pid) {
-          try {
-            process.kill(pid, "SIGKILL")
-          } catch {}
+          killProc(pid, true)
           freeBy = Date.now() + 4000
           while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
         }
@@ -417,18 +435,14 @@ export class Supervisor {
         this.set(m, "stopped")
         continue
       }
-      try {
-        process.kill(-c.pid, "SIGTERM")
-      } catch {}
+      killTree(c.pid, false)
     }
     // grace, then hard-kill survivors
     await sleep(2500)
     for (const m of this.managed) {
       const c = m.child
       if (c?.pid) {
-        try {
-          process.kill(-c.pid, "SIGKILL")
-        } catch {}
+        killTree(c.pid, true)
       }
       this.set(m, "stopped")
     }
