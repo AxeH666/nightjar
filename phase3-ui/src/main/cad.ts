@@ -10,7 +10,7 @@ import { mkdtempSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { REPO } from "./services"
+import { REPO, venvPython } from "./services"
 
 // rule 3: a hard wall-clock cap on the conversion subprocess. build123d meshing on a
 // pathological input could otherwise hang; execFile's `timeout` SIGKILLs it. OCCT tessellation
@@ -40,7 +40,7 @@ export async function readGlb(glbPath: string): Promise<Uint8Array | null> {
 }
 
 function pyPath(): string {
-  return join(REPO, "phase-cad", ".venv", "bin", "python")
+  return venvPython(join(REPO, "phase-cad", ".venv"))
 }
 function converterScript(): string {
   return join(REPO, "phase-cad", "step_to_glb.py")

@@ -22,8 +22,8 @@ export const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(i
 // venvs at Scripts\python.exe. Used for the app-launched python sidecars below; the
 // opencode.json MCP commands use the {env:NJ_VENV_PY} form, resolved from the opencode-serve
 // env (NJ_VENV_PY, set below). On POSIX both reduce to bin/python — identical to before.
-const VENV_PY = IS_WIN ? "Scripts/python.exe" : "bin/python"
-const venvPython = (venvDir: string): string => join(venvDir, VENV_PY)
+export const VENV_PY = IS_WIN ? "Scripts/python.exe" : "bin/python"
+export const venvPython = (venvDir: string): string => join(venvDir, VENV_PY)
 const OPENCODE_ENTRY = join(REPO, "research/opencode/packages/opencode/src/index.ts")
 const LLAMA_BIN = process.env.NIGHTJAR_LLAMA_BIN || join(HOME, "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
