@@ -22,6 +22,7 @@ export interface CadSceneController {
   setExplode(factor: number): void // 0 = assembled; larger = parts pushed radially outward
   setIsolated(name: string | null): void // show only this part (drill-down); null = show all
   setPartVisible(name: string, visible: boolean): void
+  showAllParts(): void // reset all parts to visible and clear isolation (Reset view)
   frameAll(): void
   getBounds(): [number, number, number] | null // model bounding-box size [x,y,z] in mm, or null if no model
   resize(): void
@@ -33,6 +34,7 @@ interface PartNode {
   object: THREE.Object3D
   home: THREE.Vector3 // original local position
   dir: THREE.Vector3 // unit direction from assembly center to this part's center
+  visible: boolean // per-part visibility intent (Inspector checkbox), combined with isolation
 }
 
 // Walk single-child container chains to the node whose children are the actual parts. For our
@@ -79,6 +81,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
   const center = new THREE.Vector3()
   let radius = 1
   let explodeFactor = 0
+  let isolated: string | null = null // current drill-down isolation (null = show all)
   let raf = 0
   // Monotonic load token. Each load() captures its value; a load whose token is no longer
   // current (a newer load started, or clear() ran) must NOT attach its result. Guards the
@@ -93,6 +96,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     }
     parts = []
     explodeFactor = 0
+    isolated = null
   }
 
   function animate() {
@@ -173,10 +177,11 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
         dir.set(0, 0, i % 2 === 0 ? 1 : -1)
       }
       dir.normalize()
-      return { name: object.name || `part_${i + 1}`, object, home: object.position.clone(), dir }
+      return { name: object.name || `part_${i + 1}`, object, home: object.position.clone(), dir, visible: true }
     })
+    applyVisibility()
 
-    return parts.map((p) => ({ name: p.name, visible: true }))
+    return parts.map((p) => ({ name: p.name, visible: p.visible }))
   }
 
   function clear() {
@@ -189,13 +194,31 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     applyExplode()
   }
 
+  // Effective visibility combines the per-part `visible` intent (Inspector checkboxes) with
+  // the isolation filter, so the two controls never fight: a part shows only if it's toggled
+  // on AND (nothing is isolated OR it IS the isolated part). One rule, one source of truth.
+  function applyVisibility() {
+    for (const p of parts) p.object.visible = p.visible && (isolated === null || p.name === isolated)
+  }
+
   function setIsolated(name: string | null) {
-    for (const p of parts) p.object.visible = name === null || p.name === name
+    isolated = name
+    applyVisibility()
   }
 
   function setPartVisible(name: string, visible: boolean) {
     const p = parts.find((x) => x.name === name)
-    if (p) p.object.visible = visible
+    if (!p) return
+    p.visible = visible
+    applyVisibility()
+  }
+
+  // Reset every part to visible and clear isolation (the "Reset view" affordance) so the
+  // viewport and the Inspector's checkboxes agree again.
+  function showAllParts() {
+    for (const p of parts) p.visible = true
+    isolated = null
+    applyVisibility()
   }
 
   function getBounds(): [number, number, number] | null {
@@ -213,7 +236,7 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
     renderer.dispose()
   }
 
-  return { load, clear, setExplode, setIsolated, setPartVisible, frameAll, getBounds, resize, dispose }
+  return { load, clear, setExplode, setIsolated, setPartVisible, showAllParts, frameAll, getBounds, resize, dispose }
 }
 
 // Free GPU resources for a subtree (geometries + materials) so repeated loads don't leak.

@@ -95,9 +95,11 @@ export function useCadScene(glb: ArrayBuffer | null): CadScene {
   }, [])
   const reset = useCallback(() => {
     setExplode(0)
-    setIsolated(null)
+    setIsolatedState(null)
+    setParts((prev) => prev.map((p) => ({ ...p, visible: true })))
+    ctrlRef.current?.showAllParts()
     ctrlRef.current?.frameAll()
-  }, [setExplode, setIsolated])
+  }, [setExplode])
 
   return { canvasRef, parts, explode, setExplode, isolated, setIsolated, setPartVisible, reset, bounds, error }
 }
