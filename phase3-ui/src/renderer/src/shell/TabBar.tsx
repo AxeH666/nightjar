@@ -9,11 +9,15 @@
 //
 // `CoworkScreen.tsx` is kept in the tree for v2 — nothing imports it. The slot it vacates
 // is where the CAD tab lands (Task 5).
-export type TabId = "chat" | "cad" | "code"
+//
+// LAB (Lab.md) is added as a launcher tab beside CAD; CAD stays standalone until LAB's
+// shared shell is proven, then folds into LAB → Mechanical (§2/§10).
+export type TabId = "chat" | "cad" | "lab" | "code"
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "cad", label: "CAD" },
+  { id: "lab", label: "LAB" },
   { id: "code", label: "Code" },
 ]
 

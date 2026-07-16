@@ -4,8 +4,8 @@
 // settings). Replaces the old flat single-screen AppBody. Consumes the context
 // stack; owns only the active-tab state.
 //
-// v1 ships THREE tabs: Chat, CAD (Prompt-to-CAD, Task 5, in the slot Cowork vacated), and
-// Code. Cowork is deferred to v2 and is neither listed (TabBar) nor mounted (below).
+// v1 ships FOUR tabs: Chat, CAD (Prompt-to-CAD, Task 5), LAB (the discipline-lab hub,
+// Lab.md), and Code. Cowork is deferred to v2 and is neither listed (TabBar) nor mounted.
 import { useState } from "react"
 import { useConnection } from "../context/ConnectionContext"
 import { useModel } from "../context/ModelContext"
@@ -15,6 +15,7 @@ import { LOCAL_MODEL } from "../lib/byok"
 import { TabBar, type TabId } from "./TabBar"
 import { ChatScreen } from "../screens/ChatScreen"
 import { CadScreen } from "../screens/CadScreen"
+import { LabScreen } from "../screens/LabScreen"
 import { CodeScreen } from "../screens/CodeScreen"
 import { ModelSwitcher } from "../components/ModelSwitcher"
 import { CloudBanner } from "../components/CloudBanner"
@@ -126,6 +127,9 @@ export function AppShell() {
         </div>
         <div className={tab === "cad" ? "h-full" : "hidden"}>
           <CadScreen />
+        </div>
+        <div className={tab === "lab" ? "h-full" : "hidden"}>
+          <LabScreen onOpenSettings={() => setShowKeys(true)} />
         </div>
         {/* Cowork is deferred to v2 and is NOT mounted in the v1 build — see TabBar. */}
         <div className={tab === "code" ? "h-full" : "hidden"}>
