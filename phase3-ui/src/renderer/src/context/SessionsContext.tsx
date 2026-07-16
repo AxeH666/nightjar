@@ -68,24 +68,30 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const DEFAULT_AGENT: Record<SlotId, string> = { chat: "assistant", code: "coding", cad: "cad" }
 const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June coding", cad: "June CAD" }
 
-// Client-side "kind" tag for sessions. OpenCode has NO per-session kind, so we
-// remember which session ids have served as CODE sessions (created or resumed
-// into the code slot) and persist that across restarts — the Code tab lists only
-// these, never the chat session or unrelated pre-existing histories. localStorage
-// is renderer-only and can be unavailable/blocked, so every access is guarded and
-// degrades to in-memory-only for the current run.
-const CODE_SESSIONS_KEY = "nightjar.codeSessionIds"
-function loadCodeSessionIds(): Set<string> {
+// Client-side "kind" tag for sessions, PER SLOT. OpenCode has NO per-session kind, so we
+// remember which session ids have served each history slot (created or resumed into that
+// slot) and persist it across restarts — a slot's history rail lists only its own ids,
+// never another slot's session or unrelated pre-existing histories. Only slots with a
+// resumable history rail need this (code + each lab, e.g. cad); the chat slot is the
+// adopted primary and has no list. localStorage is renderer-only and can be unavailable/
+// blocked, so every access is guarded and degrades to in-memory-only for the current run.
+const HISTORY_SLOTS: SlotId[] = ["code", "cad"]
+const isHistorySlot = (slot: SlotId): boolean => HISTORY_SLOTS.includes(slot)
+// The code slot keeps its ORIGINAL key so existing users' history survives the generalization.
+function sessionIdsKey(slot: SlotId): string {
+  return slot === "code" ? "nightjar.codeSessionIds" : `nightjar.sessionIds.${slot}`
+}
+function loadSessionIds(slot: SlotId): Set<string> {
   try {
-    const raw = localStorage.getItem(CODE_SESSIONS_KEY)
+    const raw = localStorage.getItem(sessionIdsKey(slot))
     return new Set(raw ? (JSON.parse(raw) as string[]) : [])
   } catch {
     return new Set()
   }
 }
-function persistCodeSessionIds(ids: Set<string>): void {
+function persistSessionIds(slot: SlotId, ids: Set<string>): void {
   try {
-    localStorage.setItem(CODE_SESSIONS_KEY, JSON.stringify([...ids]))
+    localStorage.setItem(sessionIdsKey(slot), JSON.stringify([...ids]))
   } catch {
     /* localStorage unavailable → this run keeps the set in memory only */
   }
@@ -137,8 +143,8 @@ interface SessionsValue {
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
-  // code-session kind registry (Code tab list); persisted client-side
-  codeSessionIds: Set<string>
+  // per-slot session-kind registry (each history slot's list — Code + labs); persisted client-side
+  sessionIdsBySlot: Record<SlotId, Set<string>>
   // CAD (Task 5): the current converted model for the viewer + whether a conversion is
   // running. The CAD agent's export tool completing drives these; the CAD screen renders them.
   cadModel: { glb: ArrayBuffer; parts: string[] } | null
@@ -222,24 +228,28 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (gen === cadGenRef.current) setCadBusy(false)
       })
   }, [])
-  // Persisted set of session ids that have served as CODE sessions (see the
-  // module-level helpers). The Code tab filters GET /session down to these.
-  const [codeSessionIds, setCodeSessionIds] = useState<Set<string>>(loadCodeSessionIds)
-  const markCodeSession = useCallback((id: string) => {
-    setCodeSessionIds((prev) => {
-      if (!id || prev.has(id)) return prev
-      const next = new Set(prev).add(id)
-      persistCodeSessionIds(next)
-      return next
+  // Per-slot persisted sets of session ids that have served each history slot (see the
+  // module-level helpers). Each slot's history rail filters GET /session down to its set.
+  const [sessionIdsBySlot, setSessionIdsBySlot] = useState<Record<SlotId, Set<string>>>(() => ({
+    chat: new Set(),
+    code: loadSessionIds("code"),
+    cad: loadSessionIds("cad"),
+  }))
+  const markSlotSession = useCallback((slot: SlotId, id: string) => {
+    setSessionIdsBySlot((prev) => {
+      if (!id || prev[slot].has(id)) return prev
+      const nextSet = new Set(prev[slot]).add(id)
+      persistSessionIds(slot, nextSet)
+      return { ...prev, [slot]: nextSet }
     })
   }, [])
-  const unmarkCodeSession = useCallback((id: string) => {
-    setCodeSessionIds((prev) => {
-      if (!prev.has(id)) return prev
-      const next = new Set(prev)
-      next.delete(id)
-      persistCodeSessionIds(next)
-      return next
+  const unmarkSlotSession = useCallback((slot: SlotId, id: string) => {
+    setSessionIdsBySlot((prev) => {
+      if (!prev[slot].has(id)) return prev
+      const nextSet = new Set(prev[slot])
+      nextSet.delete(id)
+      persistSessionIds(slot, nextSet)
+      return { ...prev, [slot]: nextSet }
     })
   }, [])
 
@@ -629,9 +639,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             const prevSent = !!(prevCodeId && perSessionRefs.current.get(prevCodeId)?.lastSent)
             const prevReapable = !!prev && prev.messages.length === 0 && !prev.busy && !prevSent
             rebindSlot("code", codeId, true) // carries the old transcript into the new session
-            markCodeSession(codeId)
+            markSlotSession("code", codeId)
             if (prevCodeId && prevCodeId !== codeId && prevReapable) {
-              unmarkCodeSession(prevCodeId)
+              unmarkSlotSession("code", prevCodeId)
               client.deleteSession(prevCodeId).catch(() => {})
             }
           }
@@ -644,11 +654,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [primaryId, clientRef, rebindSlot, markCodeSession, unmarkCodeSession])
+  }, [primaryId, clientRef, rebindSlot, markSlotSession, unmarkSlotSession])
 
-  // cad slot ← created here on connect, recreated on reconnect (Task 5). Simpler than the
-  // code slot: CAD sessions aren't in any history list, so there's no reaping to do — we just
-  // carry the transcript into the new session on a reconnect.
+  // cad slot ← created here on connect, recreated on reconnect (Task 5). The cad slot now
+  // has a resumable history rail too (LAB → Mechanical), so it mirrors the code slot: mark
+  // each new cad session, and reap the prior one on reconnect if it was never used — else
+  // every reconnect leaves an empty "June CAD" session cluttering the Mechanical history.
+  // Any real conversation is carried into the new session and kept in the list.
   useEffect(() => {
     if (!primaryId) return
     const client = clientRef.current
@@ -658,8 +670,22 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       for (;;) {
         if (cancelled) return
         try {
+          const prevCadId = slotsRef.current.cad
           const cadId = await client.createSession(DEFAULT_TITLE.cad)
-          if (!cancelled) rebindSlot("cad", cadId, true)
+          if (!cancelled) {
+            // Decide reapability AFTER the await and BEFORE rebind (which gc's the old id),
+            // mirroring the code slot's B3 reap: reap only if the prior session is still
+            // present, empty, and not mid-turn (perSessionRefs.lastSent closes the flush lag).
+            const prev = prevCadId ? sessionsRef.current[prevCadId] : undefined
+            const prevSent = !!(prevCadId && perSessionRefs.current.get(prevCadId)?.lastSent)
+            const prevReapable = !!prev && prev.messages.length === 0 && !prev.busy && !prevSent
+            rebindSlot("cad", cadId, true) // carries the old transcript into the new session
+            markSlotSession("cad", cadId)
+            if (prevCadId && prevCadId !== cadId && prevReapable) {
+              unmarkSlotSession("cad", prevCadId)
+              client.deleteSession(prevCadId).catch(() => {})
+            }
+          }
           return
         } catch {
           await sleep(1500)
@@ -669,7 +695,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [primaryId, clientRef, rebindSlot])
+  }, [primaryId, clientRef, rebindSlot, markSlotSession, unmarkSlotSession])
 
   // CAD (Task 5): watch the cad session's MESSAGES (not live SSE) for a completed export tool
   // call, then convert its STEP → GLB and hand the bytes to the viewer. Watching messages —
@@ -903,10 +929,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       }))
       slotsRef.current = { ...slotsRef.current, [slot]: sessionId }
       setSlots((prev) => ({ ...prev, [slot]: sessionId }))
-      if (slot === "code") markCodeSession(sessionId) // remember it as a code session
+      if (isHistorySlot(slot)) markSlotSession(slot, sessionId) // remember it in this slot's history
       gcSessions() // forget the previous slot session (unless another slot uses it)
     },
-    [clientRef, gcSessions, validAgent, markCodeSession],
+    [clientRef, gcSessions, validAgent, markSlotSession],
   )
 
   const newSession = useCallback(
@@ -916,9 +942,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const id = await client.createSession(DEFAULT_TITLE[slot])
       rebindSlot(slot, id, false) // fresh session → do not carry the old transcript
       setSessionAgent(id, validAgent(agent))
-      if (slot === "code") markCodeSession(id) // remember it as a code session
+      if (isHistorySlot(slot)) markSlotSession(slot, id) // remember it in this slot's history
     },
-    [clientRef, rebindSlot, setSessionAgent, validAgent, markCodeSession],
+    [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession],
   )
 
   const deleteSession = useCallback(
@@ -937,10 +963,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           /* leave the slot; gcSessions below still forgets the dead id */
         }
       }
-      unmarkCodeSession(sessionId) // drop it from the code-session kind registry too
+      for (const s of HISTORY_SLOTS) unmarkSlotSession(s, sessionId) // drop from every slot's history registry
       gcSessions() // drop the deleted id from the client-side registry
     },
-    [clientRef, rebindSlot, gcSessions, unmarkCodeSession],
+    [clientRef, rebindSlot, gcSessions, unmarkSlotSession],
   )
 
   const renameSession = useCallback(
@@ -968,7 +994,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     renameSession,
     hasSession,
     setBusy,
-    codeSessionIds,
+    sessionIdsBySlot,
     cadModel,
     cadBusy,
     cadError,

@@ -17,14 +17,21 @@ import { labById } from "./labs"
 // CadViewer keeps its own explode/isolate/reset controls here; those fold into the unified
 // right Inspector in the next-but-one PR, at which point this inspector panel fills out.
 export function MechanicalLab({ onBack, onOpenSettings }: { onBack: () => void; onOpenSettings: () => void }) {
-  const { slots, messagesOf, busyOf, send, createImage, cadModel, cadBusy, cadError, loadCadHero } = useSessions()
+  const { slots, messagesOf, busyOf, send, createImage, cadModel, cadBusy, cadError, loadCadHero, sessionIdsBySlot } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const id = slots.cad
 
   return (
     <LabShell
-      rail={<LabRail lab={labById("mechanical")} onBack={onBack} onOpenSettings={onOpenSettings} />}
+      rail={
+        <LabRail
+          lab={labById("mechanical")}
+          history={{ slot: "cad", agent: "cad", sessionIds: sessionIdsBySlot.cad, activeId: id }}
+          onBack={onBack}
+          onOpenSettings={onOpenSettings}
+        />
+      }
       center={<CadViewer glb={cadModel?.glb ?? null} busy={cadBusy} />}
       inspector={
         <div className="flex h-full flex-col gap-2 p-3 text-xs">

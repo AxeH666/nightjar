@@ -13,10 +13,10 @@ import { usePermission } from "../context/PermissionContext"
 import { useConnection } from "../context/ConnectionContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { ArtifactPanel } from "../components/ArtifactPanel"
-import { SessionList } from "../components/code/SessionList"
+import { SessionList } from "../components/SessionList"
 
 export function CodeScreen() {
-  const { slots, sessions, messagesOf, busyOf, send, createImage } = useSessions()
+  const { slots, sessions, messagesOf, busyOf, send, createImage, sessionIdsBySlot } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, syncCodeSession } = useArtifact()
@@ -33,7 +33,7 @@ export function CodeScreen() {
 
   return (
     <div className="flex h-full min-h-0">
-      <SessionList activeId={id} />
+      <SessionList slot="code" agent="coding" sessionIds={sessionIdsBySlot.code} activeId={id} />
       <div className="flex min-h-0 flex-1 flex-col">
         {/* IDE toolbar. folder-select + auto-accept-edits are scaffolds (see header). */}
         <div className="flex items-center gap-3 border-b border-nightjar-surface px-4 py-1.5 text-xs">
