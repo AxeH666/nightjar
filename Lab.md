@@ -1,6 +1,9 @@
 # LAB — Design Document
 
 > **Status: DESIGN ONLY. Nothing here is built yet.**
+> **→ Decisions resolved + phased PR plan: see [`LAB_IMPLEMENTATION_PLAN.md`](LAB_IMPLEMENTATION_PLAN.md)
+> (2026-07-16), which is authoritative for the §5.8 / §9.8 / §12.5 "open decisions" below — they are now
+> all closed there. This design doc is retained as the vision/architecture reference.**
 > This document captures the target architecture for turning JUNE's workspaces into
 > **LAB** — a top-level hub for engineering disciplines. It documents (a) the LAB hub
 > vision, (b) the shared workspace shell every lab reuses (incl. the per-lab **Projects**
