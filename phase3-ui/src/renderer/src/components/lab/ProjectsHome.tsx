@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useProjects, type Project, type ProjectsStore } from "../../lib/projects"
 import { labById, type LabId } from "./labs"
 
@@ -110,8 +110,16 @@ function ProjectCard({ project, store, onOpen }: { project: Project; store: Proj
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(project.name)
+  // Escape cancels a rename, but unmounting the focused input can still fire onBlur → commit.
+  // This flag makes that trailing commit a no-op so Escape genuinely discards the edit.
+  const cancelRef = useRef(false)
 
   function commitRename() {
+    if (cancelRef.current) {
+      cancelRef.current = false
+      setRenaming(false)
+      return
+    }
     store.rename(project.id, name)
     setRenaming(false)
   }
@@ -126,7 +134,11 @@ function ProjectCard({ project, store, onOpen }: { project: Project; store: Proj
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") commitRename()
-              if (e.key === "Escape") setRenaming(false)
+              if (e.key === "Escape") {
+                cancelRef.current = true // suppress the onBlur-on-unmount commit → Escape discards the edit
+                setName(project.name)
+                setRenaming(false)
+              }
             }}
             onBlur={commitRename}
             className="flex-1 rounded bg-nightjar-base px-1 text-sm text-nightjar-text focus:outline-none"
@@ -158,6 +170,7 @@ function ProjectCard({ project, store, onOpen }: { project: Project; store: Proj
         <div className="absolute right-2 top-8 z-10 flex flex-col rounded-lg border border-nightjar-surface bg-nightjar-base py-1 text-xs shadow-lg">
           <button
             onClick={() => {
+              setName(project.name) // start the rename from the current name, not a stale edit
               setRenaming(true)
               setMenu(false)
             }}
