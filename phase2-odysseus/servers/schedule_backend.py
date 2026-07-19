@@ -22,6 +22,15 @@ def _parse_hhmm(scheduled_time: str) -> tuple[int, int]:
     return 9, 0
 
 
+def _clamp_dom(year: int, month: int, dom: int) -> int:
+    """Clamp a day-of-month to (year, month)'s REAL last day (28-31). So a "the 31st" reminder
+    fires on the actual last day in short months, instead of a flat 28 that fired 2-3 days early
+    in every 30/31-day month (P3-16)."""
+    nxt = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+    last = (nxt - timedelta(days=1)).day
+    return min(max(1, dom), last)
+
+
 def compute_next_run(
     schedule: str,
     scheduled_time: str = "",
@@ -63,20 +72,29 @@ def compute_next_run(
         return cand if cand > now else cand + timedelta(days=7)
 
     if sched == "monthly":
-        dom = scheduled_day if scheduled_day is not None else now.day
-        dom = max(1, min(28, dom))  # clamp to a day every month has, avoids Feb-30 gaps
-        cand = at_time(now.replace(day=dom))
+        dom = max(1, scheduled_day if scheduled_day is not None else now.day)
+        # Clamp to the TARGET month's real last day (not a flat 28): "the 30th"/"31st" must fire on
+        # the 30th/31st in months that have them, and clamp back only where the month is genuinely
+        # shorter (Feb). The old max(1,min(28,dom)) fired 2-3 days EARLY every 30/31-day month (P3-16).
+        cand = at_time(now.replace(day=_clamp_dom(now.year, now.month, dom)))
         if cand > now:
             return cand
-        # Roll to the same day next month.
+        # Roll to the target day of next month (re-clamped to THAT month's length).
         year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
-        return at_time(datetime(year, month, dom))
+        return at_time(datetime(year, month, _clamp_dom(year, month, dom)))
 
     return None  # unknown schedule → not pollable (task_create rejects these)
 
 
 if __name__ == "__main__":
     import sys
+
+    # The check() lines print non-ASCII (→) test names; a raw Windows console (cp1252) chokes on
+    # them, so force UTF-8 stdout so this self-test runs on any console (Windows portability).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
     fails = []
 
@@ -123,9 +141,18 @@ if __name__ == "__main__":
     # December → January rollover
     r = compute_next_run("monthly", "08:00", scheduled_day=5, now=datetime(2026, 12, 20, 12, 0))
     check("monthly Dec→Jan rollover", r == datetime(2027, 1, 5, 8, 0), r)
-    # day 31 clamps to 28
+    # day 31 in a 31-day month → the 31st (was wrongly a flat clamp to 28 — P3-16)
     r = compute_next_run("monthly", "08:00", scheduled_day=31, now=NOW)
-    check("monthly day-31 clamps to 28", r == datetime(2026, 7, 28, 8, 0), r)
+    check("monthly day-31 in July → July 31", r == datetime(2026, 7, 31, 8, 0), r)
+    # day 31 in a 30-day month → the 30th (last day), NOT the 28th
+    r = compute_next_run("monthly", "08:00", scheduled_day=31, now=datetime(2026, 6, 10, 12, 0))
+    check("monthly day-31 in June → June 30", r == datetime(2026, 6, 30, 8, 0), r)
+    # day 30 in February → Feb 28 (a genuinely short month still clamps back)
+    r = compute_next_run("monthly", "08:00", scheduled_day=30, now=datetime(2026, 2, 10, 12, 0))
+    check("monthly day-30 in Feb → Feb 28", r == datetime(2026, 2, 28, 8, 0), r)
+    # rollover: day 31 in a 30-day month, its last day already passed → next month's 31st
+    r = compute_next_run("monthly", "08:00", scheduled_day=31, now=datetime(2026, 6, 30, 12, 0))
+    check("monthly day-31 June-30 passed → July 31", r == datetime(2026, 7, 31, 8, 0), r)
 
     # unknown schedule → None
     check("unknown schedule → None", compute_next_run("hourly", "10:00", now=NOW) is None)
