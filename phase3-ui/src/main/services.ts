@@ -18,6 +18,17 @@ const BUN = process.env.NIGHTJAR_BUN || join(HOME, ".bun/bin", IS_WIN ? "bun.exe
 // under bun and <repo>/phase3-ui/out/main/ in the Electron build — both are three
 // levels below the repo root, so the same "../../.." resolves correctly in either.
 export const REPO = process.env.NIGHTJAR_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
+// NJ-34: OpenCode substitutes {env:NIGHTJAR_ROOT} and {env:HOME} into opencode.json STRING
+// values ({env:NIGHTJAR_ROOT}/… MCP commands, {env:HOME}/.nightjar/… data dirs), then parses the
+// result as JSONC. A native-Windows backslash path there (C:\dev\nightjar) is an invalid JSON
+// escape (\d, \n, …) → the whole config fails to parse → the engine's /agent returns 400 → the
+// supervisor never marks opencode-serve healthy → the renderer never connects (chat dead). Windows
+// accepts forward slashes in all these paths, so the opencode-serve env feeds the slash-normalized
+// forms. No-op on POSIX (no backslashes to replace). Injecting a normalized HOME also fixes the
+// MCP data-dir divergence when the ambient HOME is unset or backslashed (audit1.md P1-1).
+const toPosix = (p: string): string => p.replace(/\\/g, "/")
+export const REPO_POSIX = toPosix(REPO)
+export const HOME_POSIX = toPosix(HOME)
 // Interpreter path inside a venv, OS-correct: POSIX venvs put python at bin/python, Windows
 // venvs at Scripts\python.exe. Used for the app-launched python sidecars below; the
 // opencode.json MCP commands use the {env:NJ_VENV_PY} form, resolved from the opencode-serve
@@ -130,7 +141,9 @@ export function nightjarServices(): ServiceDef[] {
       // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
       // config is portable (no hardcoded /home/<user>/...). Pass NIGHTJAR_ROOT
       // through so those substitutions resolve — the app needs no manual setup.
-      env: { NIGHTJAR_ROOT: REPO, NJ_VENV_PY: VENV_PY, ...(DESIGN ? { NIGHTJAR_MAX_OUTPUT_TOKENS: "6144" } : {}) },
+      // NJ-34: slash-normalized NIGHTJAR_ROOT + an injected slash-normalized HOME so every
+      // {env:…} OpenCode splices into opencode.json parses as valid JSON on Windows.
+      env: { NIGHTJAR_ROOT: REPO_POSIX, NJ_VENV_PY: VENV_PY, HOME: HOME_POSIX, ...(DESIGN ? { NIGHTJAR_MAX_OUTPUT_TOKENS: "6144" } : {}) },
       ready: () => httpOk("http://127.0.0.1:4096/agent"),
       readyTimeoutMs: 60000, // also spawns the MCP servers per opencode.json
     },

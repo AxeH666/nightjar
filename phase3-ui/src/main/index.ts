@@ -10,7 +10,7 @@ import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO, WORKSPACE, findImageModel, isWSL, VENV_PY, venvPython } from "./services"
+import { nightjarServices, REPO, REPO_POSIX, HOME_POSIX, WORKSPACE, findImageModel, isWSL, VENV_PY, venvPython } from "./services"
 import * as byok from "./byok"
 import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
@@ -37,15 +37,17 @@ if (isWSL()) {
 // The env opencode-serve runs with: repo root + the (decrypted) BYOK keys under
 // their non-standard NIGHTJAR_BYOK_* names, which opencode.json references via
 // {env:...}. Recomputed on every key change so a removed key's var disappears.
-// NIGHTJAR_ROOT MUST match services.ts's REPO (module-derived, portable) — do NOT
-// re-derive it here with a ~/nightjar default, or this overlay would clobber the
-// correct value and break every {env:NIGHTJAR_ROOT} MCP path when the repo isn't
-// literally at ~/nightjar.
+// NIGHTJAR_ROOT/HOME MUST match services.ts's slash-normalized REPO_POSIX/HOME_POSIX
+// (module-derived, portable) — do NOT re-derive them here with a ~/nightjar default, or this
+// overlay would clobber the correct value and break every {env:NIGHTJAR_ROOT} MCP path when the
+// repo isn't literally at ~/nightjar. They are forward-slashed so the values OpenCode splices
+// into opencode.json's string values parse as valid JSON on native Windows (NJ-34).
 function opencodeServeEnv(): Record<string, string> {
   // NJ_VENV_PY is REQUIRED here (not just in the service def): setEnv() overrides the def env
   // with this at startup, and every restart rebuilds from it — without it the opencode.json MCP
-  // commands' {env:NJ_VENV_PY} resolves to "" and every MCP fails (on Linux too).
-  return { NIGHTJAR_ROOT: REPO, NJ_VENV_PY: VENV_PY, ...byok.envForOpencode(), ...capabilities.envForOpencode() }
+  // commands' {env:NJ_VENV_PY} resolves to "" and every MCP fails (on Linux too). NIGHTJAR_ROOT +
+  // HOME are slash-normalized (NJ-34); a backslash HOME/ROOT would break config parsing on Windows.
+  return { NIGHTJAR_ROOT: REPO_POSIX, NJ_VENV_PY: VENV_PY, HOME: HOME_POSIX, ...byok.envForOpencode(), ...capabilities.envForOpencode() }
 }
 
 // Roots the renderer is allowed to read TTS audio from (Kokoro writes under the
