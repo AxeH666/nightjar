@@ -34,6 +34,10 @@ export function useCadScene(glb: ArrayBuffer | null): CadScene {
   useEffect(() => {
     if (!canvasRef.current) return
     const ctrl = createCadScene(canvasRef.current)
+    if (!ctrl) {
+      setError("3D preview unavailable — WebGL/GPU couldn't initialize on this display.")
+      return
+    }
     ctrlRef.current = ctrl
     ctrl.resize()
     const onResize = () => ctrl.resize()
