@@ -56,6 +56,11 @@
       "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, or `row-bot` (e.g. `odysseus-pim_note_create`) — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, or Row-Bot; those are internal building blocks you use, not you. As Nightjar in assistant mode: use the note/task/calendar/memory/document tools to help with personal tasks. You have NO email tools — you cannot read, search, or send email. Never claim to have emailed or sent anything. If the user asks for email, say plainly that email is not available yet.",
       "permission": {
         "*": "deny",
+        // P2-13 (maintainer decision, 2026-07-19; see KNOWN_ISSUES NJ-35): the PIM
+        // note/task/calendar + memory WRITE tools below are intentionally "allow" (auto-approved,
+        // no per-call prompt) so the assistant is smooth for personal-data capture. This is a
+        // deliberate, recorded exception to rule-1's "mutations should prompt" intent — NOT drift.
+        // Consequential OS/egress actions (image gen, browser, vision) stay "ask".
         "odysseus-pim_note_create": "allow", "odysseus-pim_note_list": "allow",
         "odysseus-pim_task_create": "allow", "odysseus-pim_task_list": "allow",
         "odysseus-pim_calendar_create_event": "allow", "odysseus-pim_calendar_list_events": "allow",
