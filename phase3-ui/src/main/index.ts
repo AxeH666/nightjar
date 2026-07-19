@@ -293,9 +293,16 @@ ipcMain.handle("nightjar:readAudio", async (_e, filePath: string): Promise<Array
   const buf = await readFile(abs)
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
 })
-ipcMain.handle("nightjar:restart", async (_e, _name: string) => {
-  /* per-service restart hook (future); supervisor already auto-restarts on crash */
+// P2-7: manual per-service restart from the health strip — for a sidecar that failed / exhausted
+// its auto-restarts. opencode-serve MUST be restarted with the authoritative env (BYOK keys +
+// slash-normalized paths); every other service uses its own def env.
+ipcMain.handle("nightjar:restart", async (_e, name: string) => {
+  if (name === "opencode-serve") await supervisor.restartService(name, opencodeServeEnv())
+  else await supervisor.restartService(name)
 })
+// P2-6: expose the captured sidecar stdout/stderr (last ~200 lines) so the health strip can show
+// WHY a service is red — the single biggest "invisible failure" fix on a fresh box.
+ipcMain.handle("nightjar:serviceLogs", (_e, name: string): string[] => supervisor.logs(name))
 
 // ── Chat attachments IPC ──────────────────────────────────────────────────────
 // Native file picker + read/save so the composer can attach files (paste/drag/

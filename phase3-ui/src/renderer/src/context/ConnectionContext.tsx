@@ -21,6 +21,8 @@ declare global {
       getConfig(): Promise<{ opencodeUrl: string; sideChannelUrl?: string; isWSL?: boolean }>
       getStatus?(): Promise<ServiceStatus[]>
       onStatus?(cb: (s: ServiceStatus[]) => void): () => void
+      restartService?(name: string): Promise<void>
+      serviceLogs?(name: string): Promise<string[]>
       readAudio?(path: string): Promise<ArrayBuffer>
       byok?: {
         keyStorageMode(): Promise<string>
