@@ -79,12 +79,36 @@ function runPoll(): void {
   )
 }
 
+// Whether local reminders can actually fire, and if not, why. Surfaced to the renderer so a
+// user isn't told "reminder set" (NJ-16 returns success) while it silently never fires (P2-20).
+export type SchedulerStatus =
+  | { available: true }
+  | { available: false; reason: "setup" | "notifications" }
+
+// Cached so the renderer can PULL it on mount — the startup push may land before the window is
+// listening (mirrors the vision-status cache). Optimistic default → the banner stays silent
+// until startLocalScheduler() runs its (synchronous) checks.
+let schedulerStatus: SchedulerStatus = { available: true }
+export function getSchedulerStatus(): SchedulerStatus {
+  return schedulerStatus
+}
+
 // Start the local scheduler. Gated on the odysseus venv existing (mirrors the other sidecar
 // gates) — without it the poller can't run, so there's nothing to schedule. Idempotent.
-export function startLocalScheduler(): void {
-  if (timer) return
+// Reports availability via onStatus + the cached status so the UI can show a visible
+// "reminders unavailable — finish setup" signal instead of failing silently (P2-20).
+export function startLocalScheduler(onStatus?: (s: SchedulerStatus) => void): void {
+  const set = (s: SchedulerStatus): void => {
+    schedulerStatus = s
+    onStatus?.(s)
+  }
+  if (timer) {
+    onStatus?.(schedulerStatus) // already started — re-emit the known status for a late subscriber
+    return
+  }
   if (!existsSync(pyPath())) {
     console.warn("[scheduler] odysseus venv missing — local reminders disabled")
+    set({ available: false, reason: "setup" })
     return
   }
   // Don't poll if we can't deliver: the poller CLAIMS (marks fired) the tasks it returns, so
@@ -92,12 +116,14 @@ export function startLocalScheduler(): void {
   // with nothing shown to the user (Bugbot). The paid server path delivers when we can't.
   if (!Notification.isSupported()) {
     console.warn("[scheduler] desktop notifications unavailable — local reminders disabled")
+    set({ available: false, reason: "notifications" })
     return
   }
   stopped = false
   // A short initial delay so it doesn't race window/service startup; then every minute.
   timer = setInterval(runPoll, POLL_INTERVAL_MS)
   initialTimer = setTimeout(runPoll, 5_000)
+  set({ available: true })
 }
 
 export function stopLocalScheduler(): void {
