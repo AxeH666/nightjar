@@ -66,7 +66,13 @@ export const NightjarGitGate: Plugin = async ({ directory, worktree, $ }) => {
   }
 
   async function dirtyFiles(): Promise<Array<{ path: string; untracked: boolean }>> {
-    const out = await $`git -C ${root} status --porcelain`.quiet().text()
+    // --untracked-files=all: list NEW files inside a new untracked dir INDIVIDUALLY, not as a
+    // collapsed `dir/` — otherwise the agent's own new file (e.g. newdir/x.py) is attributed to
+    // `newdir/` which, not matching the intended FILE path, gets `git clean`-wiped wholesale
+    // (audit1.md P1-3, all platforms). core.quotepath=false: keep non-ASCII paths unescaped so
+    // they still match the intended set. git always emits forward slashes here (see relative()
+    // normalization below), so path comparison is consistent cross-platform.
+    const out = await $`git -C ${root} -c core.quotepath=false status --porcelain --untracked-files=all`.quiet().text()
     const files: Array<{ path: string; untracked: boolean }> = []
     for (const line of out.split("\n")) {
       if (!line.trim()) continue
@@ -116,7 +122,11 @@ export const NightjarGitGate: Plugin = async ({ directory, worktree, $ }) => {
         )
         return
       }
-      const intendedRel = new Set(Array.from(intended).map((p) => relative(root, p)))
+      // Normalize to forward slashes: relative() yields OS-native separators (BACKSLASH on
+      // Windows: sub\target.py), but `git status` emits forward slashes (sub/target.py). Without
+      // this they never match for any subdirectory file, so the agent's OWN edit is judged
+      // out-of-scope and ROLLED BACK — making the coding agent unusable on Windows (audit1.md P1-3).
+      const intendedRel = new Set(Array.from(intended).map((p) => relative(root, p).replace(/\\/g, "/")))
 
       let changed: Array<{ path: string; untracked: boolean }>
       try {

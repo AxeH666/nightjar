@@ -11,7 +11,7 @@
 //     doom_loop permission to "deny".
 
 import { $ } from "bun"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -195,6 +195,74 @@ async function testB_patch() {
   rmSync(dir, { recursive: true, force: true })
 }
 
+// B4) SUBDIR paths (audit1.md P1-3, Windows): a file in a SUBDIRECTORY that IS this call's
+// intended target must be KEPT, not rolled back. On Windows relative() yields backslash paths
+// (sub\target.py) while `git status` emits forward slashes (sub/target.py); without normalization
+// they never match, so the agent's OWN edit is reverted (coding agent unusable on Windows). This
+// test reproduces the failure on Windows and guards it everywhere.
+async function testB_subdir() {
+  console.log("\n== Plugin B4: git-gate subdir paths (P1-3, Windows) ==")
+  const dir = mkdtempSync(join(tmpdir(), "njB4-"))
+  await $`git -C ${dir} init -q`.quiet()
+  await $`git -C ${dir} config user.email t@t.local`.quiet()
+  await $`git -C ${dir} config user.name t`.quiet()
+  mkdirSync(join(dir, "sub"), { recursive: true })
+  writeFileSync(join(dir, "sub", "target.py"), "print('sub target v1')\n")
+  writeFileSync(join(dir, "sub", "other.py"), "print('sub other v1')\n")
+  await $`git -C ${dir} add -A`.quiet()
+  await $`git -C ${dir} commit -q -m base`.quiet()
+
+  const hooks = await NightjarGitGate(pluginInput(dir))
+  const before = hooks["tool.execute.before"]!
+  const after = hooks["tool.execute.after"]!
+
+  // Edit call intends sub/target.py; during it edit the target (intended) + corrupt sub/other.py.
+  await before({ tool: "edit", sessionID: "s", callID: "s1" }, { args: { filePath: "sub/target.py" } })
+  writeFileSync(join(dir, "sub", "target.py"), "print('sub target v2 intended')\n")
+  writeFileSync(join(dir, "sub", "other.py"), "print('sub other CORRUPTED')\n")
+  await after({ tool: "edit", sessionID: "s", callID: "s1", args: { filePath: "sub/target.py" } }, { output: "ok" })
+
+  check(
+    "subdir intended file KEPT (sub/target.py = v2) — separator normalization",
+    readFileSync(join(dir, "sub", "target.py"), "utf8").includes("v2 intended"),
+  )
+  check(
+    "subdir out-of-scope file rolled back (sub/other.py = v1)",
+    readFileSync(join(dir, "sub", "other.py"), "utf8").includes("sub other v1"),
+  )
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// B5) NEW file in a NEW untracked subdir that IS this call's intended target must be KEPT. Default
+// `git status --porcelain` collapses an untracked dir to `newdir/`; intendedRel has the FILE
+// (newdir/created.py), so the mismatch flags `newdir/` out-of-scope and `git clean` wipes the
+// whole dir INCLUDING the intended file. `--untracked-files=all` lists the file individually.
+async function testB_newSubdir() {
+  console.log("\n== Plugin B5: git-gate new file in new untracked subdir (-uall) ==")
+  const dir = mkdtempSync(join(tmpdir(), "njB5-"))
+  await $`git -C ${dir} init -q`.quiet()
+  await $`git -C ${dir} config user.email t@t.local`.quiet()
+  await $`git -C ${dir} config user.name t`.quiet()
+  writeFileSync(join(dir, "base.py"), "print('base')\n")
+  await $`git -C ${dir} add -A`.quiet()
+  await $`git -C ${dir} commit -q -m base`.quiet()
+
+  const hooks = await NightjarGitGate(pluginInput(dir))
+  const before = hooks["tool.execute.before"]!
+  const after = hooks["tool.execute.after"]!
+
+  await before({ tool: "write", sessionID: "s", callID: "n1" }, { args: { filePath: "newdir/created.py" } })
+  mkdirSync(join(dir, "newdir"), { recursive: true })
+  writeFileSync(join(dir, "newdir", "created.py"), "print('created — intended')\n")
+  await after({ tool: "write", sessionID: "s", callID: "n1", args: { filePath: "newdir/created.py" } }, { output: "ok" })
+
+  check(
+    "new file in a new untracked subdir KEPT (not clean-wiped) — untracked-files=all",
+    existsSync(join(dir, "newdir", "created.py")) && readFileSync(join(dir, "newdir", "created.py"), "utf8").includes("intended"),
+  )
+  rmSync(dir, { recursive: true, force: true })
+}
+
 // ---------- C) doom-loop ----------
 async function testC() {
   console.log("\n== Plugin C: doom-loop ==")
@@ -247,6 +315,8 @@ await testA()
 await testB()
 await testB_perCall()
 await testB_patch()
+await testB_subdir()
+await testB_newSubdir()
 await testC()
 await testD()
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)
