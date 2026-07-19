@@ -52,26 +52,34 @@ in [`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md) §10; open issues in
 
 ## Setup (fresh clone)
 
-Nightjar depends on the **Odysseus** source as a git **submodule** (it's both a
-runtime dependency and the AGPL source-availability obligation). Clone with
-submodules, then run the setup script:
+Nightjar depends on two git **submodules**: the **OpenCode** engine (`research/opencode`,
+the only agent loop — pinned to the `AxeH666/opencode` fork) and the **Odysseus** source
+(`research/odysseus`, a runtime dependency + the AGPL source-availability obligation). Clone
+with submodules, then run the setup script (`scripts/setup.ps1` on native Windows):
 
 ```bash
 git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
 cd nightjar
-./scripts/setup.sh
+./scripts/setup.sh          # Linux / WSL / Git Bash
 ```
 
-Already cloned without `--recurse-submodules`? Fetch it after the fact:
+On **native Windows**, use the PowerShell one-shot instead (see `WINDOWS_SETUP.md §9`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+Already cloned without `--recurse-submodules`? Fetch both submodules after the fact:
 
 ```bash
-git submodule update --init research/odysseus
+git submodule update --init
 ```
 
-`scripts/setup.sh` fetches the Odysseus submodule, applies Nightjar's small
-integration patch to it (embedded ChromaDB, etc. — see
-`phase2-odysseus/odysseus-patches/`), creates the Python venvs + installs
-`requirements.txt`, and runs `npm install` for the UI. It's idempotent.
+`scripts/setup.sh` (or `scripts/setup.ps1` on Windows) fetches **both** submodules,
+`bun install`s the OpenCode engine, applies Nightjar's small Odysseus integration patch
+(embedded ChromaDB, etc. — see `phase2-odysseus/odysseus-patches/`), creates the Python
+venvs (incl. phase-cad) + installs `requirements.txt`, and runs `npm install` for the UI.
+It's idempotent.
 
 **Paths are not hardcoded.** Config and code resolve repo-relative paths from
 `NIGHTJAR_ROOT` (the desktop app sets it automatically via
@@ -86,6 +94,9 @@ export NIGHTJAR_ROOT="$(pwd)"
 (Local model weights, llama.cpp, and Ollama are a separate install — see the
 phase reports.)
 
+> **Offline caveat:** OpenCode's `grep`/`glob` tools fetch a small `ripgrep` binary on first
+> use, so the very first code-search needs network once (cached thereafter).
+
 ## Repository layout
 
 ```
@@ -93,6 +104,7 @@ phase1-engine/     local model + inference proxy + safety plugins
 phase2-mcp/        Row-Bot-derived capabilities (MCP) + wake-word daemon + side-channel
 phase2-odysseus/   Odysseus MCP wrappers + config + workspace + Odysseus patch
 phase3-ui/         Electron + React desktop UI (chat, modes, permissions, voice orb)
+research/opencode/ OpenCode engine source — git SUBMODULE (MIT; the only agent loop)
 research/odysseus/ Odysseus source — git SUBMODULE (AGPL; runtime dependency)
 research/*         other upstream reference clones — git-ignored (re-clonable)
 ```
@@ -107,9 +119,11 @@ email/RAG/research/PIM tier). Its attribution
 (`research/odysseus/{LICENSE,ACKNOWLEDGMENTS.md,licenses/}`) rides along with the
 submodule. The submodule is kept a faithful mirror of upstream; Nightjar's two
 integration changes are applied on top as a reviewable patch
-(`phase2-odysseus/odysseus-patches/`). The **other** `research/` clones (OpenCode,
-Row-Bot, orb-ui, …) remain git-ignored — they're development references, and the
-code Nightjar actually ships from them is vendored (e.g. Row-Bot under
+(`phase2-odysseus/odysseus-patches/`). The **OpenCode** engine (`research/opencode`) is
+likewise a git **submodule**, pinned to the `AxeH666/opencode` fork (a durable fork of
+`sst/opencode` so the exact commit stays fetchable). The remaining `research/` clones
+(orb-ui, gemma-chat, …) stay git-ignored — development references; the code Nightjar
+actually ships from a dependency is vendored (e.g. Row-Bot under
 `phase2-mcp/nightjar_capabilities/_vendor/`).
 
 ## Hardware / QA notes

@@ -31,7 +31,7 @@ adding networked access.
 
 | Component | Role | License | Attribution preserved at |
 |---|---|---|---|
-| OpenCode | native agent engine | MIT | `research/opencode/LICENSE`; also credited in Odysseus `licenses/opencode-MIT-LICENSE.txt` |
+| OpenCode | native agent engine | MIT | `research/opencode/LICENSE` (git submodule, `AxeH666/opencode` fork — fetched on clone); also credited in Odysseus `licenses/opencode-MIT-LICENSE.txt` |
 | Row-Bot | voice/vision/memory/browser bolt-on | Apache-2.0 | `phase2-mcp/NOTICE`, `phase2-mcp/LICENSE.row-bot` |
 | Odysseus | email/RAG/research/PIM bolt-on | AGPL-3.0-or-later | `research/odysseus/LICENSE`, `research/odysseus/ACKNOWLEDGMENTS.md`, `research/odysseus/licenses/` |
 | llmfit (© 2026 Alex Jones) | hardware model-fit (vendored) | MIT | `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS |
