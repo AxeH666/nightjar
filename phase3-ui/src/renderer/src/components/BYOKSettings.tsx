@@ -47,6 +47,10 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
       await byok.remove(id)
       await refresh()
       onChanged()
+    } catch (e: any) {
+      // Mirror save() (P3-8): a failed removal (IPC error, engine-restart failure) must surface,
+      // not silently leave the row as "key set" with no explanation.
+      setError(e?.message ?? String(e))
     } finally {
       setBusy(null)
     }

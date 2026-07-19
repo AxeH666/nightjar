@@ -31,7 +31,7 @@ export interface CapabilityMeta {
 }
 
 contextBridge.exposeInMainWorld("nightjar", {
-  getConfig: (): Promise<{ opencodeUrl: string; sideChannelUrl: string }> =>
+  getConfig: (): Promise<{ opencodeUrl: string; sideChannelUrl: string; isWSL: boolean }> =>
     ipcRenderer.invoke("nightjar:config"),
   getStatus: (): Promise<ServiceStatus[]> => ipcRenderer.invoke("nightjar:status"),
   restartService: (name: string): Promise<void> => ipcRenderer.invoke("nightjar:restart", name),
