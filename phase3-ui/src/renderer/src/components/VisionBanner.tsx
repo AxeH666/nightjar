@@ -51,7 +51,7 @@ export function VisionBanner() {
         <span>
           👁 Offline image analysis needs <b>Ollama</b> (cloud vision still works with a BYOK key).
         </span>
-        <button onClick={() => bridge()?.openOllamaDownload()} className={BTN}>
+        <button onClick={() => void bridge()?.openOllamaDownload()?.catch(() => {})} className={BTN}>
           Install Ollama
         </button>
       </div>
@@ -68,7 +68,7 @@ export function VisionBanner() {
     return (
       <div className={BAR}>
         <span>👁 Local vision model isn't downloaded.</span>
-        <button onClick={() => bridge()?.installVisionModel()} className={BTN}>
+        <button onClick={() => void bridge()?.installVisionModel()?.catch(() => {})} className={BTN}>
           Download gemma3:4b (~3.3 GB)
         </button>
       </div>

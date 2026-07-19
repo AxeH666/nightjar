@@ -939,12 +939,20 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     async (slot: SlotId, agent: string) => {
       const client = clientRef.current
       if (!client) return
-      const id = await client.createSession(DEFAULT_TITLE[slot])
+      let id: string
+      try {
+        id = await client.createSession(DEFAULT_TITLE[slot])
+      } catch (err: any) {
+        // Guard the create like resume/delete already do (P3-7): a network/timeout failure here
+        // must surface, not silently no-op the "new session" button (leaving the slot on its old id).
+        setStatus(`couldn't start a new session: ${err?.message ?? err}`)
+        return
+      }
       rebindSlot(slot, id, false) // fresh session → do not carry the old transcript
       setSessionAgent(id, validAgent(agent))
       if (isHistorySlot(slot)) markSlotSession(slot, id) // remember it in this slot's history
     },
-    [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession],
+    [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession, setStatus],
   )
 
   const deleteSession = useCallback(
