@@ -94,6 +94,13 @@ export interface ServiceDef {
   cwd?: string
   env?: Record<string, string>
   ready: () => Promise<boolean> // health probe
+  // Synchronous gate run right before SPAWN (never before ADOPT): return a human-readable
+  // reason to mark the service `failed` immediately instead of spawning something that
+  // cannot possibly work — e.g. a required source/binary is absent. Returns null when OK.
+  // Without this, spawning a missing target (bun against an absent engine entry) exits
+  // nonzero and burns the whole restart budget into an opaque "restarts exhausted"
+  // (audit1.md P0-2).
+  preflight?: () => string | null
   readyTimeoutMs?: number // wait this long for first healthy after spawn (default 90s)
   autoRestart?: boolean // default true
   maxRestarts?: number // default 5
@@ -182,6 +189,17 @@ export class Supervisor {
   }
 
   private async spawn(m: Managed): Promise<void> {
+    // Preflight (audit1.md P0-2): if the service reports it can't start (its source/binary
+    // is absent), fail fast with an actionable message instead of spawning a target that
+    // just exits nonzero and drains the restart budget. Adoption is unaffected — bring()
+    // checks ready() before ever calling spawn(), so an already-running instance is still
+    // adopted regardless of preflight. This is the single choke point for every spawn
+    // (initial + crash-restart), so a missing target can never enter a restart loop.
+    const pf = m.def.preflight?.()
+    if (pf) {
+      this.set(m, "failed", pf)
+      return
+    }
     m.intentionalStop = false
     m.adoptedPid = undefined // we're spawning our OWN process now — no longer adopting
     this.set(m, "starting")
