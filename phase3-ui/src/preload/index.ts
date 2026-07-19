@@ -85,6 +85,13 @@ contextBridge.exposeInMainWorld("nightjar", {
     ipcRenderer.on("nightjar:visionStatus", handler)
     return () => ipcRenderer.removeListener("nightjar:visionStatus", handler)
   },
+  // Local reminder scheduler availability (P2-20): pull on mount + subscribe to pushes.
+  getSchedulerStatus: (): Promise<unknown> => ipcRenderer.invoke("nightjar:schedulerStatus"),
+  onSchedulerStatus: (cb: (s: unknown) => void) => {
+    const handler = (_e: unknown, s: unknown) => cb(s)
+    ipcRenderer.on("nightjar:schedulerStatus", handler)
+    return () => ipcRenderer.removeListener("nightjar:schedulerStatus", handler)
+  },
   // BYOK — raw keys never cross this bridge; only masked status in, key text out.
   byok: {
     keyStorageMode: (): Promise<string> => ipcRenderer.invoke("byok:keyStorageMode"),

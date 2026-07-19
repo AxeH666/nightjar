@@ -25,6 +25,7 @@ import { CloudBanner } from "../components/CloudBanner"
 import { CapabilityCloudBanner } from "../components/CapabilityCloudBanner"
 import { HealthStrip } from "../components/HealthStrip"
 import { VisionBanner } from "../components/VisionBanner"
+import { SchedulerBanner } from "../components/SchedulerBanner"
 import { PermissionPanel } from "../components/PermissionPanel"
 import { BYOKSettings } from "../components/BYOKSettings"
 import { NightjarOrb } from "../components/orb/NightjarOrb"
@@ -105,6 +106,7 @@ export function AppShell() {
       <CapabilityCloudBanner online={online} />
       <HealthStrip services={services} />
       <VisionBanner />
+      <SchedulerBanner />
 
       {rateLimitOffer && (
         <div className="flex items-center gap-3 border-b border-nightjar-alert/50 bg-nightjar-alert/10 px-4 py-2 text-sm text-nightjar-text/90">

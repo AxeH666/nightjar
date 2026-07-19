@@ -16,7 +16,7 @@ import * as capabilities from "./capabilities"
 import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
-import { startLocalScheduler, stopLocalScheduler } from "./scheduler"
+import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type SchedulerStatus } from "./scheduler"
 import * as preview from "./preview-server"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
@@ -628,6 +628,12 @@ ipcMain.handle("nightjar:visionInstallModel", async () => {
 })
 ipcMain.handle("nightjar:openOllamaDownload", () => shell.openExternal("https://ollama.com/download"))
 
+// Scheduler availability (P2-20): push on startup + let the banner pull on mount (mirrors vision).
+function pushScheduler(s: SchedulerStatus): void {
+  sendToRenderer("nightjar:schedulerStatus", s)
+}
+ipcMain.handle("nightjar:schedulerStatus", () => getSchedulerStatus())
+
 // CAD (Task 5): convert a model-exported STEP file to a GLB the three.js viewer loads.
 // Runs the trusted phase-cad converter under a wall-clock timeout (rule 3, in cad.ts).
 ipcMain.handle("cad:convert", (_e, stepPath: string) => convertStepToGlb(stepPath))
@@ -639,8 +645,9 @@ ipcMain.handle("cad:loadHero", () => buildHeroModel())
 app.whenReady().then(() => {
   createWindow()
   // Local reminder scheduler (Task 6 free tier): poll for due tasks + fire desktop
-  // notifications while the app is open. Gated on the odysseus venv inside start().
-  startLocalScheduler()
+  // notifications while the app is open. Gated on the odysseus venv inside start();
+  // its availability is pushed to the renderer so the UI can flag it (P2-20).
+  startLocalScheduler(pushScheduler)
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
   supervisor.setEnv("opencode-serve", opencodeServeEnv())
   // Seed the image endpoint to match the persisted image-capability choice (Offline
