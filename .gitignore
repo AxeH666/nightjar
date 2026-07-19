@@ -85,16 +85,20 @@ tts_out.wav
 .cache/
 
 # ── Vendored / cloned UPSTREAM reference repos (each is its own huge git repo) ─
-# research/ holds full clones of OpenCode, Row-Bot, Open WebUI, orb-ui, gemma-chat
-# (~3 GB, each with its own .git) — re-clonable development references, ignored.
-# EXCEPTION: research/odysseus is a git SUBMODULE (see .gitmodules) — it's a
-# runtime dependency AND the AGPL source-availability obligation, so it's tracked
-# (as a gitlink) and fetched via `git submodule update --init`. Nightjar's changes
-# to it live as a patch in phase2-odysseus/odysseus-patches/ (submodule stays a
-# clean upstream mirror). Row-Bot's shipped code is vendored under
+# research/ holds full clones of Row-Bot, Open WebUI, orb-ui, gemma-chat (~3 GB,
+# each with its own .git) — re-clonable development references, ignored.
+# EXCEPTIONS (git SUBMODULES, see .gitmodules): research/opencode (the OpenCode
+# agent engine — the ONLY agent loop, a runtime dependency; pinned to
+# sst/opencode@7a8e7c8 via the AxeH666/opencode fork for durability) and
+# research/odysseus (a runtime dependency AND the AGPL source-availability
+# obligation). Both are tracked as gitlinks and fetched via `git submodule
+# update --init`. Nightjar's changes to odysseus live as a patch in
+# phase2-odysseus/odysseus-patches/ (that submodule stays a clean upstream
+# mirror). Row-Bot's shipped code is vendored under
 # phase2-mcp/nightjar_capabilities/_vendor/ (+ NOTICE + LICENSE.row-bot).
 research/*
 !research/odysseus
+!research/opencode
 # Nightjar-authored planning docs that happen to live in research/ (the README
 # links to them as the master plan) — these ARE part of the repo; only the
 # upstream CLONE directories above are ignored.

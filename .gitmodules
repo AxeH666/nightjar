@@ -6,3 +6,14 @@
 	# "dirty". ignore=dirty keeps `git status` / editors from flagging that as a
 	# change (the gitlink COMMIT is still tracked normally).
 	ignore = dirty
+[submodule "research/opencode"]
+	path = research/opencode
+	url = https://github.com/AxeH666/opencode.git
+	# The OpenCode agent engine (the ONLY agent loop; run by bun from TS source,
+	# see phase3-ui/src/main/services.ts). Pinned to sst/opencode@7a8e7c8 via the
+	# AxeH666/opencode fork so that exact commit stays fetchable even if upstream's
+	# fast-moving `dev` branch GCs it; the durable tag nightjar-pin-7a8e7c88 in the
+	# fork points at the pinned commit. node_modules (bun install; in the
+	# submodule's own .gitignore) makes the working tree dirty at runtime, so
+	# ignore=dirty keeps `git status` quiet — the gitlink COMMIT is still tracked.
+	ignore = dirty
