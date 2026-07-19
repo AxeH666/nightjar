@@ -269,16 +269,43 @@ async function testC() {
   const hooks = await NightjarDoomLoop({} as any)
   const before = hooks["tool.execute.before"]!
   const permAsk = hooks["permission.ask"]! as any
+  const onEvent = hooks["event"]! as any
 
-  const call = () => before({ tool: "grep", sessionID: "s", callID: "x" }, { args: { pattern: "foo" } })
-  check("1st identical call allowed", !(await throws(call)))
-  check("2nd identical call allowed", !(await throws(call)))
-  check("3rd identical call BLOCKED", await throws(call))
-  // different args resets independently
-  check(
-    "different args still allowed",
-    !(await throws(() => before({ tool: "grep", sessionID: "s", callID: "y" }, { args: { pattern: "bar" } }))),
-  )
+  // A side-effecting tool fired identically 3× IN A ROW is a loop → block the 3rd.
+  const bash = (sid: string) => before({ tool: "bash", sessionID: sid, callID: "x" }, { args: { command: "ls" } })
+  check("1st identical mutating call allowed", !(await throws(() => bash("s"))))
+  check("2nd identical mutating call allowed", !(await throws(() => bash("s"))))
+  check("3rd CONSECUTIVE identical mutating call BLOCKED", await throws(() => bash("s")))
+
+  // Read-only tools are EXCLUDED (P2-12): re-grepping/re-reading identically must never block.
+  const grep = () => before({ tool: "grep", sessionID: "ro", callID: "g" }, { args: { pattern: "foo" } })
+  check("read-only grep allowed 1st", !(await throws(grep)))
+  check("read-only grep allowed 2nd", !(await throws(grep)))
+  check("read-only grep allowed 3rd (excluded — never a loop)", !(await throws(grep)))
+  check("read-only grep allowed 4th (excluded)", !(await throws(grep)))
+
+  // CONSECUTIVE-reset (P2-12): the same mutating call interleaved with a DIFFERENT call
+  // resets the run, so legit repetition (A,B,A,B,A) never accumulates to a false block.
+  const rid = "reset"
+  const A = () => before({ tool: "bash", sessionID: rid, callID: "a" }, { args: { command: "make a" } })
+  const B = () => before({ tool: "bash", sessionID: rid, callID: "b" }, { args: { command: "make b" } })
+  check("interleaved A (run=1)", !(await throws(A)))
+  check("interleaved B resets run", !(await throws(B)))
+  check("interleaved A again (run=1, not 2)", !(await throws(A)))
+  check("interleaved B again", !(await throws(B)))
+  check("interleaved A once more — never 3-in-a-row, still allowed", !(await throws(A)))
+
+  // Eviction (P2-12): session.idle clears the run (both leak control AND a turn-boundary
+  // reset). After 2 consecutive, idle → the next 2 are allowed again (no stale false block).
+  const eid = "evict"
+  const w = () => before({ tool: "write", sessionID: eid, callID: "w" }, { args: { filePath: "x", content: "y" } })
+  await w()
+  await w() // run = 2 (not yet blocked)
+  await onEvent({ event: { type: "session.idle", properties: { sessionID: eid } } })
+  check("session.idle evicts the run (2 more allowed)", !(await throws(w)) && !(await throws(w)))
+  await onEvent({ event: { type: "session.deleted", properties: { info: { id: eid } } } })
+  check("session.deleted evicts too (allowed after)", !(await throws(w)))
+
   // permission.ask override
   const out = { status: "ask" as "ask" | "deny" | "allow" }
   await permAsk({ permission: "doom_loop" }, out)
