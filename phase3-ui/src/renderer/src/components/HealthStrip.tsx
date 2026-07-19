@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 export interface ServiceStatus {
   name: string
@@ -30,22 +30,31 @@ export function HealthStrip({ services }: { services: ServiceStatus[] }) {
   const [open, setOpen] = useState<string | null>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  // Synchronous mirror of `open` so an out-of-order serviceLogs response for a DIFFERENT service
+  // (switched selection, or a restart-triggered refetch) can't overwrite the current one (BugBot).
+  const openRef = useRef<string | null>(null)
 
   if (services.length === 0) return null
 
+  const select = (name: string | null) => {
+    openRef.current = name
+    setOpen(name)
+  }
   const loadLogs = async (name: string) => {
     try {
-      setLogs((await window.nightjar?.serviceLogs?.(name)) ?? [])
+      const result = (await window.nightjar?.serviceLogs?.(name)) ?? []
+      if (openRef.current !== name) return // selection changed mid-fetch → drop the stale result
+      setLogs(result)
     } catch {
-      setLogs(["(couldn't read logs)"])
+      if (openRef.current === name) setLogs(["(couldn't read logs)"])
     }
   }
   const toggle = async (name: string) => {
     if (open === name) {
-      setOpen(null)
+      select(null)
       return
     }
-    setOpen(name)
+    select(name)
     setLogs([])
     await loadLogs(name)
   }
@@ -98,7 +107,7 @@ export function HealthStrip({ services }: { services: ServiceStatus[] }) {
                 {busy ? "restarting…" : "↻ Restart"}
               </button>
             )}
-            <button onClick={() => setOpen(null)} className="ml-auto text-nightjar-text/50 hover:underline">
+            <button onClick={() => select(null)} className="ml-auto text-nightjar-text/50 hover:underline">
               close
             </button>
           </div>
