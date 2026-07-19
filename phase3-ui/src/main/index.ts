@@ -72,6 +72,12 @@ const ODYSSEUS_DATA_DIR = join(homedir(), ".nightjar", "odysseus")
 // alive on a failed seed (the old rationale): retiring the unchosen rows is a PRIVACY
 // guarantee (Offline must never keep a cloud row), so a failed seed yields "no backend"
 // rather than a silent fallback — the honest, safe outcome.
+// Bound the seed like cad.ts bounds its converters (P2-1): if seed_image_endpoint.py
+// wedges (SQLite / app-key lock — likelier under Windows's mandatory file locks), the
+// awaiting IPC (byok:set/remove, capabilities:set*) would otherwise hang forever. A
+// wall-clock kill resolves it false; the next reconcile heals the transient DB state.
+const IMAGE_SEED_TIMEOUT_MS = Number(process.env.NIGHTJAR_IMAGE_SEED_TIMEOUT_MS) || 30000
+
 function runImageSeed(extraEnv: Record<string, string>): Promise<boolean> {
   return new Promise((done) => {
     const py = venvPython(join(REPO, "phase2-odysseus", "venv"))
@@ -79,11 +85,15 @@ function runImageSeed(extraEnv: Record<string, string>): Promise<boolean> {
     const child = spawn(py, [script], {
       env: { ...process.env, NIGHTJAR_ROOT: REPO, ODYSSEUS_DATA_DIR, ...extraEnv },
       stdio: "ignore",
+      timeout: IMAGE_SEED_TIMEOUT_MS, // wall-clock kill so a wedged seed can't hang the IPC (P2-1)
+      killSignal: "SIGKILL",
+      windowsHide: true,
     })
     child.on("error", (e) => {
       console.warn("[byok] image-endpoint seed failed:", e)
       done(false)
     })
+    // A timeout kill surfaces here as exit(null, 'SIGKILL') → done(false), same as a non-zero exit.
     child.on("exit", (code) => done(code === 0))
   })
 }

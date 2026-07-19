@@ -71,7 +71,9 @@ export function buildHeroModel(): Promise<CadModelResult> {
     execFile(
       pyPath(),
       [heroScript(), "--export", stepPath],
-      { timeout: CONVERT_TIMEOUT_MS, killSignal: "SIGKILL", windowsHide: true },
+      // maxBuffer like convertStepToGlb (P3-14): chatty OCCT stderr must not overflow the
+      // default 1 MB execFile buffer and spuriously fail the (known-good) hero demo.
+      { timeout: CONVERT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, killSignal: "SIGKILL", windowsHide: true },
       async (err) => {
         if (err) {
           resolve({
