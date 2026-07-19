@@ -1,7 +1,7 @@
 """Drive the odysseus-email MCP server over stdio and call send_email; the local
 SMTP catcher (:2525) should receive the message. Proves the email send path
 works offline through MCP."""
-import asyncio, os, json
+import asyncio, os, json, sys
 from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -11,7 +11,9 @@ from mcp.client.stdio import stdio_client
 NIGHTJAR_ROOT = Path(os.environ.get("NIGHTJAR_ROOT") or Path(__file__).resolve().parents[2])
 DATA_DIR = os.environ.get("NIGHTJAR_DATA_DIR") or str(Path.home() / ".nightjar")
 REPO = str(NIGHTJAR_ROOT / "research" / "odysseus")
-PY = str(NIGHTJAR_ROOT / "phase2-odysseus" / "venv" / "bin" / "python")
+# The venv interpreter running this test drives the server subprocess too — OS-agnostic
+# (venv/bin/python on POSIX, venv/Scripts/python.exe on Windows), no hardcoded layout (P3-2).
+PY = sys.executable
 
 async def main():
     env = dict(os.environ)

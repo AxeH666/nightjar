@@ -93,6 +93,14 @@ listed tools). Defined three primary agents in `workspace/opencode.json`:
 - **assistant** → ~11 tools (PIM + Row-Bot memory + email send/list + doc search)
 - **coding** → native tools only (all MCP denied)
 
+> **Correction (post-audit, P3-26 / rule 1):** enabling a tool via the `tools` allow/deny
+> map also **auto-approves** it — that map compiles to permission `allow` rules, so
+> `permission.asked` never fires for the enabled mutating tools (`send_email`, the PIM
+> writers). The shipped `workspace/opencode.json` therefore gates mutations through the
+> **`permission`** field and uses the `tools` map only for hard visibility (hiding a tool
+> from a mode), never as an approval gate. Do **not** follow the `{"*": false, "<tool>": true}`
+> prescription above verbatim for mutating tools — see `CLAUDE.md` rule 1.
+
 Re-ran the two probes that failed at 53 tools, now under `--agent assistant`:
 - "remember I prefer tabs" → `nightjar_save_memory` ✅ (was: no tool)
 - "search my documents" → `odysseus-docs_document_search` ✅ (was: wrong `manage_rag`)

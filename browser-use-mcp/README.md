@@ -49,8 +49,12 @@ Use 0.13.x drives Chromium over CDP and manages its own browser — verify with
   empty-task guard, rule-3 timeout, failure path, browser teardown (7/7).
 
 ```
+# POSIX
 browser-use-mcp/venv/bin/python test_model_resolution.py
 browser-use-mcp/venv/bin/python test_run_browser_task.py
+# Windows
+browser-use-mcp\venv\Scripts\python.exe test_model_resolution.py
+browser-use-mcp\venv\Scripts\python.exe test_run_browser_task.py
 ```
 
 **Not covered here (needs real-app/hardware QA):** a live end-to-end run where the
