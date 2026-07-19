@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("nightjar", {
     ipcRenderer.invoke("nightjar:config"),
   getStatus: (): Promise<ServiceStatus[]> => ipcRenderer.invoke("nightjar:status"),
   restartService: (name: string): Promise<void> => ipcRenderer.invoke("nightjar:restart", name),
+  serviceLogs: (name: string): Promise<string[]> => ipcRenderer.invoke("nightjar:serviceLogs", name),
   readAudio: (path: string): Promise<ArrayBuffer> => ipcRenderer.invoke("nightjar:readAudio", path),
   // Chat attachments: native picker + read/save + read-back of generated images.
   pickFiles: (): Promise<string[]> => ipcRenderer.invoke("nightjar:pickFiles"),
