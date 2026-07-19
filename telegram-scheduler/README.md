@@ -44,8 +44,11 @@ Nightjar app  --> POST /reminders (inbound, HTTP) --------+--> core.handle_remin
 ## Run it (mock mode, no secrets)
 
 ```bash
+# POSIX
 python3.12 -m venv venv && venv/bin/pip install .
 venv/bin/nightjar-telegram-scheduler      # HTTP on :8080, MockTransport
+# Windows: py -3.12 -m venv venv && venv\Scripts\pip install .
+#          venv\Scripts\nightjar-telegram-scheduler
 curl -s localhost:8080/health
 curl -s localhost:8080/reminders -H 'content-type: application/json' \
      -d '{"telegram_id": 1, "text": "remind me in 1 minute to stretch"}'

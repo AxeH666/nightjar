@@ -8,14 +8,18 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 import websockets
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLIP = os.environ.get("NIGHTJAR_TEST_CLIP", "/tmp/nj-voice-test/hey_jarvis.wav")
-PAGE = "file:///tmp/nj-browser-test.html"
+# OS-portable temp locations (P3-3): a literal "/tmp" isn't a valid path on Windows.
+_TMP = tempfile.gettempdir()
+CLIP = os.environ.get("NIGHTJAR_TEST_CLIP", os.path.join(_TMP, "nj-voice-test", "hey_jarvis.wav"))
+PAGE = Path(_TMP, "nj-browser-test.html").as_uri()
 
 collected_events = []
 
@@ -41,10 +45,12 @@ async def main():
     await asyncio.sleep(0.5)  # let subscriber connect
 
     env = dict(os.environ)
-    env["NIGHTJAR_DATA_DIR"] = "/tmp/nj-mcp-test"
+    env["NIGHTJAR_DATA_DIR"] = os.path.join(_TMP, "nj-mcp-test")
     env["NIGHTJAR_WHISPER_SIZE"] = "base.en"
-    params = StdioServerParameters(command=f"{HERE}/venv/bin/python",
-                                   args=[f"{HERE}/mcp_server.py"], env=env)
+    # sys.executable is the venv interpreter running this test — OS-agnostic, unlike a
+    # hardcoded venv/bin/python (Windows uses venv/Scripts/python.exe) (P3-3).
+    params = StdioServerParameters(command=sys.executable,
+                                   args=[os.path.join(HERE, "mcp_server.py")], env=env)
     results = {}
     async with stdio_client(params) as (r, w):
         async with ClientSession(r, w) as session:

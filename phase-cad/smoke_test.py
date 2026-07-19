@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Offline smoke test for the Prompt-to-CAD env (Task 5). No network, no MCP host.
+r"""Offline smoke test for the Prompt-to-CAD env (Task 5). No network, no MCP host.
 
 Proves the pinned stack actually works on this machine end-to-end at the library level:
   1. build123d imports (OCP/VTK resolve) and builds real geometry,
@@ -8,7 +8,8 @@ Proves the pinned stack actually works on this machine end-to-end at the library
      nodes — the NJ-18 mitigation, exercised here so a broken env fails loudly at setup,
   4. build123d_mcp imports.
 
-Run:  phase-cad/.venv/bin/python phase-cad/smoke_test.py
+Run (POSIX):    phase-cad/.venv/bin/python phase-cad/smoke_test.py
+Run (Windows):  phase-cad\.venv\Scripts\python.exe phase-cad\smoke_test.py
 Exit: 0 on success; non-zero (with the failing step) otherwise.
 
 The full MCP tool-loop verify (execute → measure → export via the real server tools) is
