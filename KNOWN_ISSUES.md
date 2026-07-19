@@ -61,7 +61,7 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
-## NJ-34 — native Windows: opencode-serve can't parse opencode.json because NIGHTJAR_ROOT (a backslash path) is substituted into JSON strings → /agent 400 → chat dead — FLAGGED (root cause + fix verified live; fix lands as its own PR) 2026-07-19
+## NJ-34 — native Windows: opencode-serve can't parse opencode.json because NIGHTJAR_ROOT (a backslash path) is substituted into JSON strings → /agent 400 → chat dead — FIXED (fix/windows-config-path) 2026-07-19
 
 - **Severity:** **P0 on native Windows** — this, not just the missing engine, is why chat stays on
   "Connecting to the engine…" even after setup is complete. Found by **live-driving** the engine on
@@ -80,12 +80,18 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   (`ConfigJsonError`/`InvalidEscapeCharacter` at the cad MCP `command` path); `NIGHTJAR_ROOT=C:/dev/nightjar`
   (forward slashes) → `/agent` **200 in ~11 ms** with all four Nightjar agents
   (assistant/coding/research/cad). Same engine (`sst/opencode@7a8e7c8`), everything else identical.
-- **Fix (scheduled — its own PR):** normalize the path env vars to **forward slashes** in the
-  opencode-serve env — `NIGHTJAR_ROOT: REPO.replace(/\\/g, "/")` in `services.ts`, and the same for
-  the `HOME`/data-dir injection that `audit1.md` **P1-1** calls for (a backslash `HOME` would break
-  parsing identically once injected). Windows accepts forward slashes in all these paths, so
-  filesystem behavior is unchanged. Prove by re-triggering: backslash → 400, forward-slash → 200
-  (rule 6). Land together with P1-1.
+- **Fix (this PR — fix/windows-config-path):** `services.ts` now exports slash-normalized
+  `REPO_POSIX`/`HOME_POSIX` (`p.replace(/\\/g, "/")`) and the opencode-serve service-def env uses
+  `NIGHTJAR_ROOT: REPO_POSIX` + injects `HOME: HOME_POSIX`; `opencodeServeEnv()` (the authoritative
+  overlay in `index.ts`, applied via `setEnv` at startup + rebuilt on every restart) does the same.
+  Windows accepts forward slashes in all these paths, so filesystem behavior is unchanged; no-op on
+  POSIX (no backslashes). Injecting a normalized `HOME` also closes `audit1.md` **P1-1** (the MCP
+  data-dir divergence when the ambient `HOME` is unset/backslashed).
+- **Verified (rule 6, live re-trigger on this box):** backslash `NIGHTJAR_ROOT` → `/agent` **400**
+  (`ConfigJsonError`); the fix env (`NIGHTJAR_ROOT=C:/dev/nightjar` + injected `HOME=C:/Users/axehe`)
+  → `/agent` **200** with all four Nightjar agents (assistant/coding/research/cad). Plus a headless
+  unit test (`services.opencode-env.test.ts`) asserting the opencode-serve env carries no
+  backslashes in `NIGHTJAR_ROOT`/`HOME`; typecheck clean; vitest 37/37.
 
 ## NJ-33 — the OpenCode engine was obtained by no committed script (dead engine on any fresh clone) + setup was POSIX-only (broke native-Windows provisioning) — FIXED (PRs #93/#94 + build/windows-setup) 2026-07-19
 
