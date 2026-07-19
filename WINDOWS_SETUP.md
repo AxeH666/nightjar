@@ -77,8 +77,9 @@ for phase-cad; use it everywhere for consistency.
   ```bash
   ./scripts/setup.sh          # bash only (WSL, or Git Bash on Windows)
   ```
-- **Native Windows (PowerShell), per backend** (`scripts/setup.sh` is bash and won't run in
-  PowerShell — do the equivalent):
+- **Native Windows (PowerShell):** run the one-shot `powershell -ExecutionPolicy Bypass -File
+  scripts\setup.ps1` (the PowerShell equivalent of `setup.sh` — submodules incl. the engine,
+  `bun install`, the Odysseus patch, all venvs, the UI). Or do it per backend by hand:
   ```powershell
   # for each of: phase2-mcp, phase2-odysseus, browser-use-mcp
   py -3.12 -m venv phase2-mcp\venv
@@ -234,29 +235,41 @@ run). Keep your WSL clone until this passes — safety net.
   git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
   cd nightjar
   ```
+  `--recurse-submodules` is **required** — it fetches both the Odysseus and the **OpenCode
+  engine** (`research/opencode`, the only agent loop) submodules. Without it the engine is
+  absent and chat can't start. Already cloned without it? `git submodule update --init`.
 - **Why fresh, not copied:** the WSL clone's `node_modules` hold Linux-native binaries
   (Electron/esbuild) and its venvs hold Linux python + Linux OCP/VTK wheels — none run on
   Windows. Fresh clone + fresh installs is mandatory.
 
 ### 9.1 · Install (minimal: LAB/CAD via Fireworks BYOK)
-1. **Node 20 LTS** → `cd phase3-ui; npm install` (Electron's binary downloads on install).
-2. **Bun** → `powershell -c "irm bun.sh/install.ps1 | iex"` (→ `%USERPROFILE%\.bun\bin\bun.exe`,
-   found automatically). ⚠️ *Bun running OpenCode's TS is the least-tested piece on Windows — if
-   `opencode-serve` won't start, suspect this first (check its service log in the app).*
-3. **Python 3.12** → `winget install Python.Python.3.12` (confirm `py -3.12 --version`).
+First install the four prerequisites (**reopen the terminal after each** so PATH refreshes):
+1. **Node 20 LTS+** → `winget install OpenJS.NodeJS.LTS`.
+2. **Bun** → `powershell -c "irm bun.sh/install.ps1 | iex"` (→ `%USERPROFILE%\.bun\bin\bun.exe`, found automatically).
+3. **Python 3.12** (exactly — not 3.13) → `winget install Python.Python.3.12` (confirm `py -3.12 --version`).
 4. **uv** → `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`.
-5. **phase-cad venv** (the CAD lab):
-   ```powershell
-   cd phase-cad
-   uv venv --python 3.12 .venv
-   uv pip install --python .venv\Scripts\python "build123d>=0.11,<0.12" "build123d-mcp==0.3.79" "cadquery-ocp-novtk!=7.9.3.1.1"
-   .\.venv\Scripts\python smoke_test.py    # the gate — must pass
-   cd ..
-   ```
-   ⚠️ *OCP/VTK are big Windows wheels (slow but present). If a wheel fails: confirm Python
-   **3.12 exactly** (not 3.13) + recent uv.*
-6. **Skip for now** (add after the core works): `llama.cpp` (using BYOK), the other backend venvs
-   (`phase2-mcp`/`odysseus`/`browser-use`), Ollama, diffusion, the Odysseus patch.
+
+Then run the setup script — it fetches the submodules (incl. the **OpenCode engine**),
+`bun install`s the engine, applies the Odysseus patch, builds the **phase-cad** venv, and
+installs the UI's node modules:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -CoreOnly
+```
+- `-CoreOnly` is the minimal LAB/CAD-via-BYOK path (engine + phase-cad + UI). **Drop it** to
+  also build the `phase2-mcp` / `phase2-odysseus` / `browser-use` venvs and (best-effort)
+  Ollama + the diffusion backend: `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1`.
+- The engine `bun install` may print a `tree-sitter-powershell` postinstall error — **harmless**
+  (a TUI-only grammar; the script auto-retries `--ignore-scripts`, which the HTTP `serve` path
+  doesn't need).
+- OCP/VTK are big Windows wheels (slow but present). If one fails: confirm Python **3.12 exactly**
+  (not 3.13) + a recent `uv`. `smoke_test.py` is the gate — setup stops if it fails.
+
+⚠️ *Bun running OpenCode's TS is the least-tested piece on Windows. If `opencode-serve` won't
+start, the app now surfaces a clear "engine source missing — run setup" failure (rather than an
+opaque crash-loop); re-run `setup.ps1` and check that service's log in the app.*
+
+**Skip for now** (add after the core works): local `llama.cpp` (using BYOK instead), Ollama, and
+the diffusion image backend.
 
 ### 9.2 · Run (native — no WSL workarounds)
 ```powershell

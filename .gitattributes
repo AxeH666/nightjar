@@ -1,0 +1,5 @@
+# Deterministic line endings across OSes. With core.autocrlf=true, a Windows checkout
+# would otherwise convert these to CRLF — and a CR (\r) breaks bash/sh shebangs + parsing
+# and can make `git apply` reject a patch. Force LF for the files where it matters.
+*.sh    text eol=lf
+*.patch text eol=lf
