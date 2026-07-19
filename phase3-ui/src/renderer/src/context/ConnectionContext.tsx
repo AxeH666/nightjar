@@ -11,6 +11,7 @@ import type { MutableRefObject, ReactNode } from "react"
 import { OpenCodeClient } from "../lib/opencode"
 import type { AgentInfo, OpenCodeEvent } from "../lib/opencode"
 import type { ServiceStatus } from "../components/HealthStrip"
+import { connectingHint } from "../lib/connectionStatus"
 
 // The sole renderer↔main bridge surface (preload contextBridge). Declared here
 // (globally) so every context/component sees it.
@@ -84,6 +85,9 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const clientRef = useRef<OpenCodeClient | null>(null)
   const sessionRef = useRef<string>("")
   const listenersRef = useRef<Set<(e: OpenCodeEvent) => void>>(new Set())
+  // Mirror `services` into a ref so the long-lived connect-loop effect can read the LATEST
+  // supervisor status when composing its status message, without re-subscribing (P2-8).
+  const servicesRef = useRef<ServiceStatus[]>([])
 
   const subscribeEvents = useCallback((fn: (e: OpenCodeEvent) => void) => {
     listenersRef.current.add(fn)
@@ -101,6 +105,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     off = window.nightjar?.onStatus?.(setServices)
     return () => off?.()
   }, [])
+
+  // Keep servicesRef in sync so the connect loop reads the latest engine state (P2-8).
+  useEffect(() => {
+    servicesRef.current = services
+  }, [services])
 
   // ---- connect (retry until OpenCode is reachable — the supervisor may still
   // be bringing it up, esp. during a cold model load) ----
@@ -161,14 +170,15 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
             .then(() => reconnectAfterClose("stream closed — reconnecting…"))
             .catch((err) => reconnectAfterClose(`stream closed: ${err} — reconnecting…`))
           return
-        } catch (err: any) {
-          // Cold start: opencode isn't listening until the local model finishes loading,
-          // which can take up to a minute on first launch — the raw "Failed to fetch" read
-          // as a hard error and looked broken. Show a calm, honest progress message (the
-          // loop keeps retrying every 2s and connects the moment the engine is up); keep the
-          // technical detail available on hover for debugging.
-          const hint = attempt < 3 ? "starting the local engine…" : "still starting the local engine — the model can take a minute on first launch…"
-          setStatus(hint)
+        } catch {
+          // Cold start: opencode isn't listening until the local model finishes loading (up to a
+          // minute on first launch) — the raw "Failed to fetch" read as a hard error and looked
+          // broken. Show a calm, honest progress message; the loop keeps retrying every 2s and
+          // connects the moment the engine is up. But don't loop the SAME optimistic message
+          // forever (P2-8): once the supervisor marks the engine `failed`, or ~90s pass with no
+          // connection, connectingHint() surfaces an honest state that points at the Services strip.
+          const oc = servicesRef.current.find((s) => s.name === "opencode-serve")
+          setStatus(connectingHint(attempt, oc?.state, oc?.detail))
           await sleep(2000)
         }
       }
