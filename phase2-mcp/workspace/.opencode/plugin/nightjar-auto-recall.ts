@@ -36,13 +36,16 @@ export const NightjarAutoRecall: Plugin = async ({ $ }) => {
       if (userText.startsWith("[Nightjar recalled memory]")) return
 
       let recalled = ""
+      // This hook runs on EVERY substantive message before the turn proceeds, so bound the
+      // subprocess: a hung Chroma/cold-model query must not wedge the chat turn (rule 3).
+      let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        // This hook runs on EVERY substantive message before the turn proceeds, so bound the
-        // subprocess: a hung Chroma/cold-model query must not wedge the chat turn (rule 3).
         recalled = (
           await Promise.race([
             $`${PY} ${RECALL} ${userText}`.quiet().text(),
-            new Promise<string>((_, rej) => setTimeout(() => rej(new Error("recall timed out")), RECALL_TIMEOUT_MS)),
+            new Promise<string>((_, rej) => {
+              timer = setTimeout(() => rej(new Error("recall timed out")), RECALL_TIMEOUT_MS)
+            }),
           ])
         ).trim()
       } catch (e) {
@@ -52,6 +55,12 @@ export const NightjarAutoRecall: Plugin = async ({ $ }) => {
           console.error(`[nightjar-auto-recall] recall unavailable (memory offline or timed out): ${e}`)
         }
         return
+      } finally {
+        // Clear the armed timeout when recall.py won the race — otherwise it fires later (after a
+        // SUCCESSFUL recall, on nearly every message) and rejects a promise nobody awaits, an
+        // unhandled rejection. Bounded caller only: on a genuine timeout the short recall script
+        // is left to finish on its own; the chat turn is already unblocked.
+        if (timer !== undefined) clearTimeout(timer)
       }
       if (!recalled) return
 

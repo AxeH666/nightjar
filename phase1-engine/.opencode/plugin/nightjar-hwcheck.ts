@@ -24,13 +24,16 @@ export const NightjarHwCheck: Plugin = async ({ $ }) => {
   // opencode-serve startup (rule 3).
   const isWin = process.platform === "win32"
   const TIMEOUT_MS = Number(process.env.NIGHTJAR_HWCHECK_TIMEOUT_MS || 8000)
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const run = isWin
       ? $`py -3 ${HWFIT_CLI} --json --limit 3`.quiet().text()
       : $`python3 ${HWFIT_CLI} --json --limit 3`.quiet().text()
     const raw = await Promise.race([
       run,
-      new Promise<string>((_, rej) => setTimeout(() => rej(new Error(`hwcheck timed out after ${TIMEOUT_MS}ms`)), TIMEOUT_MS)),
+      new Promise<string>((_, rej) => {
+        timer = setTimeout(() => rej(new Error(`hwcheck timed out after ${TIMEOUT_MS}ms`)), TIMEOUT_MS)
+      }),
     ])
     const data = JSON.parse(raw)
     const sys = data.system ?? {}
@@ -44,6 +47,11 @@ export const NightjarHwCheck: Plugin = async ({ $ }) => {
     )
   } catch (e) {
     console.error(`[nightjar-hwcheck] llmfit hardware detection failed: ${e}`)
+  } finally {
+    // Clear the armed timeout when the subprocess won the race — otherwise it fires later and
+    // rejects a promise nobody awaits (an unhandled rejection). Bounded caller only: if the
+    // timeout won, the short llmfit script is left to finish on its own (startup is unblocked).
+    if (timer !== undefined) clearTimeout(timer)
   }
   return {}
 }
