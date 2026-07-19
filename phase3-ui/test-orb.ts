@@ -264,6 +264,59 @@ async function testStateMachine() {
   adapter.disconnect()
 }
 
+// ─── 2c. Speaking watchdog (hung TTS clip) ─────────────────────────────────────
+
+async function testSpeakingWatchdog() {
+  console.log("\n# 2c. Speaking watchdog — a hung TTS clip force-unlocks the overlay (P2-18)")
+  const level = { value: 0 }
+  const scheduler = new MockScheduler()
+  let lastAudio: MockAudio | null = null
+  MockWS.instances = 0
+
+  const adapter = createNightjarOrbAdapter({
+    WebSocketImpl: MockWS as unknown as typeof WebSocket,
+    createAudioContext: makeMockAudioContext(level),
+    getUserMedia: async () => makeMockStream(),
+    createAudioElement: () => (lastAudio = new MockAudio()) as unknown as HTMLAudioElement,
+    loadTtsAudio: async (p) => `mock://${p}`,
+    scheduler,
+    listeningTimeoutMs: 5000, // long — must not fire during this test
+    thinkingTimeoutMs: 5000,
+    speakingTimeoutMs: 60, // short watchdog so the test can observe it fire
+    reconnectMs: 30,
+    publishPlayback: true,
+  })
+  adapter.subscribe({ onStateChange: () => {}, onVolumeChange: () => {} })
+  MockWS.last!._open()
+
+  MockWS.last!._event({ kind: "wake", detected: true })
+  await flush()
+  MockWS.last!._event({ kind: "transcription", text: "read me a long story", final: true })
+  await flush()
+  MockWS.last!._event({ kind: "tts", state: "ready", path: "/home/x/.nightjar/tts_out.wav" })
+  await flush(0)
+  await flush(0)
+  check("driven to speaking", adapter.getState() === "speaking", `state=${adapter.getState()}`)
+
+  // The clip hangs: neither onended nor onerror ever fires (the P2-18 lock-up scenario).
+  await flush(90) // > speakingTimeoutMs
+  check(
+    "hung clip → watchdog forces speaking → idle",
+    adapter.getState() === "idle",
+    `state=${adapter.getState()}`,
+  )
+  check(
+    "watchdog published tts 'ended' back",
+    MockWS.last!.sent.some((s) => s.includes('"ended"')),
+  )
+  // Sanity: the real onended arriving late (after teardown) must not throw or resurrect state.
+  lastAudio!.fireEnded()
+  await flush()
+  check("late onended after watchdog is a no-op", adapter.getState() === "idle")
+
+  adapter.disconnect()
+}
+
 // ─── 3. Live integration against the REAL :8765 hub ────────────────────────────
 
 function publishToHub(event: Record<string, unknown>): Promise<void> {
@@ -344,6 +397,7 @@ async function main() {
   testPureMath()
   testMonitor()
   await testStateMachine()
+  await testSpeakingWatchdog()
   await testLiveHub()
   console.log(`\n${pass}/${pass + fail} checks passed`)
   process.exit(fail === 0 ? 0 : 1)
