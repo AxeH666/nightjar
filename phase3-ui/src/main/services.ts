@@ -115,6 +115,16 @@ export function nightjarServices(): ServiceDef[] {
       name: "opencode-serve",
       command: BUN,
       args: ["run", "--conditions=browser", OPENCODE_ENTRY, "serve", "--port", "4096", "--hostname", "127.0.0.1"],
+      // Fail fast with an actionable message when the engine SOURCE is absent, rather than
+      // spawning bun against a non-existent entry (exits nonzero → 5× crash-restart → an
+      // opaque "restarts exhausted"). audit1.md P0-2. Adoption of an already-running :4096
+      // engine is unaffected (the supervisor checks ready() before ever calling preflight).
+      preflight: () =>
+        existsSync(OPENCODE_ENTRY)
+          ? null
+          : `OpenCode engine source not found at ${OPENCODE_ENTRY} — run setup to fetch the engine ` +
+            `submodule (scripts/setup.ps1 on Windows, scripts/setup.sh on Linux/WSL; or: ` +
+            `git submodule update --init research/opencode).`,
       cwd: WORKSPACE,
       port: 4096, // NJ-5: lets the supervisor capture the PID if this engine is ADOPTED (already on :4096)
       // opencode.json uses {env:NIGHTJAR_ROOT} for repo-relative MCP paths so the
