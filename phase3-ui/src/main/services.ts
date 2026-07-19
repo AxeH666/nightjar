@@ -36,7 +36,14 @@ export const HOME_POSIX = toPosix(HOME)
 export const VENV_PY = IS_WIN ? "Scripts/python.exe" : "bin/python"
 export const venvPython = (venvDir: string): string => join(venvDir, VENV_PY)
 const OPENCODE_ENTRY = join(REPO, "research/opencode/packages/opencode/src/index.ts")
-const LLAMA_BIN = process.env.NIGHTJAR_LLAMA_BIN || join(HOME, "llama.cpp/build-cuda/bin/llama-server")
+// OS-correct default for the local llama-server binary (audit1.md P1-4): a CUDA CMake build
+// lands at build-cuda/bin/llama-server on Linux and build\bin\Release\llama-server.exe on
+// Windows. Almost always overridden by NIGHTJAR_LLAMA_BIN (local llama is a separate install);
+// the point is the default is at least the right SHAPE per-OS (`.exe` on Windows) rather than a
+// Linux path that can never resolve there — local (offline, default) chat depends on it.
+const LLAMA_BIN =
+  process.env.NIGHTJAR_LLAMA_BIN ||
+  join(HOME, IS_WIN ? "llama.cpp/build/bin/Release/llama-server.exe" : "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
 // Local IMAGE generation (NJ-6): the diffusers GPU venv + the Z-Image-Turbo model dir.
 const DIFFUSION_PY = process.env.NIGHTJAR_DIFFUSION_PY || venvPython(join(REPO, "diffusion-mcp/venv"))

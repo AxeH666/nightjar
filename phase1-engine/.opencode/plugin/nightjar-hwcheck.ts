@@ -17,8 +17,21 @@ const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
 const HWFIT_CLI = join(ROOT, "phase2-odysseus/hwfit_vendor/hwfit_cli.py")
 
 export const NightjarHwCheck: Plugin = async ({ $ }) => {
+  // hwfit_cli is pure-stdlib Python (no venv), so any interpreter works — but `python3` is not on
+  // the default Windows PATH (it's `py`/`python` there), so this silently failed on Windows
+  // (audit1.md P2-10). Resolve OS-aware. Detection-only + best-effort, and it runs during plugin
+  // init, so also bound it with a short timeout: a hung/absent interpreter must not delay
+  // opencode-serve startup (rule 3).
+  const isWin = process.platform === "win32"
+  const TIMEOUT_MS = Number(process.env.NIGHTJAR_HWCHECK_TIMEOUT_MS || 8000)
   try {
-    const raw = await $`python3 ${HWFIT_CLI} --json --limit 3`.quiet().text()
+    const run = isWin
+      ? $`py -3 ${HWFIT_CLI} --json --limit 3`.quiet().text()
+      : $`python3 ${HWFIT_CLI} --json --limit 3`.quiet().text()
+    const raw = await Promise.race([
+      run,
+      new Promise<string>((_, rej) => setTimeout(() => rej(new Error(`hwcheck timed out after ${TIMEOUT_MS}ms`)), TIMEOUT_MS)),
+    ])
     const data = JSON.parse(raw)
     const sys = data.system ?? {}
     const gpus = (sys.gpus ?? []).map((g: any) => `${g.name} ${g.vram_gb}GB`).join(", ") || "none"

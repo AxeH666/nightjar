@@ -14,8 +14,15 @@ import { homedir } from "node:os"
 // Repo-relative, not hardcoded to one machine. NIGHTJAR_ROOT is set by the
 // Electron supervisor (services.ts) and the setup script; falls back to ~/nightjar.
 const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
-const PY = join(ROOT, "phase2-mcp/venv/bin/python")
+// OS-correct venv interpreter (Scripts\python.exe on Windows). Hardcoding bin/python meant recall
+// silently never fired on Windows — the spawn threw and the catch no-op'd (audit1.md P2-11).
+// NJ_VENV_PY is set by the supervisor's opencode-serve env; fall back to a platform default.
+const VENV_PY = process.env.NJ_VENV_PY || (process.platform === "win32" ? "Scripts/python.exe" : "bin/python")
+const PY = join(ROOT, "phase2-mcp/venv", VENV_PY)
 const RECALL = join(ROOT, "phase2-mcp/recall.py")
+// Bound the per-message recall so a cold/stuck memory store can't wedge the chat turn (rule 3).
+const RECALL_TIMEOUT_MS = Number(process.env.NIGHTJAR_RECALL_TIMEOUT_MS || 8000)
+let recallWarned = false // log the "memory offline" reason ONCE, not on every message
 
 export const NightjarAutoRecall: Plugin = async ({ $ }) => {
   return {
@@ -30,9 +37,21 @@ export const NightjarAutoRecall: Plugin = async ({ $ }) => {
 
       let recalled = ""
       try {
-        recalled = (await $`${PY} ${RECALL} ${userText}`.quiet().text()).trim()
-      } catch {
-        return // memory offline — never block the turn
+        // This hook runs on EVERY substantive message before the turn proceeds, so bound the
+        // subprocess: a hung Chroma/cold-model query must not wedge the chat turn (rule 3).
+        recalled = (
+          await Promise.race([
+            $`${PY} ${RECALL} ${userText}`.quiet().text(),
+            new Promise<string>((_, rej) => setTimeout(() => rej(new Error("recall timed out")), RECALL_TIMEOUT_MS)),
+          ])
+        ).trim()
+      } catch (e) {
+        // memory offline / timed out — never block the turn; log the reason ONCE (not per message)
+        if (!recallWarned) {
+          recallWarned = true
+          console.error(`[nightjar-auto-recall] recall unavailable (memory offline or timed out): ${e}`)
+        }
+        return
       }
       if (!recalled) return
 
