@@ -73,6 +73,8 @@ export interface NightjarOrbAdapterOptions {
   listeningTimeoutMs?: number
   /** Auto-revert 'connecting' → 'idle' if no TTS arrives (text-only reply). Default 30000ms. */
   thinkingTimeoutMs?: number
+  /** Force 'speaking' → 'idle' if a TTS clip's onended/onerror never fire (hung playback). Default 60000ms. */
+  speakingTimeoutMs?: number
   /** Publish tts playing/ended back to the side-channel so it reflects real playback. Default true. */
   publishPlayback?: boolean
 }
@@ -99,6 +101,7 @@ export function createNightjarOrbAdapter(
   const reconnectMs = options.reconnectMs ?? 2000
   const listeningTimeoutMs = options.listeningTimeoutMs ?? 15000
   const thinkingTimeoutMs = options.thinkingTimeoutMs ?? 30000
+  const speakingTimeoutMs = options.speakingTimeoutMs ?? 60000
   const publishPlayback = options.publishPlayback ?? true
 
   const createAudioContext =
@@ -144,6 +147,7 @@ export function createNightjarOrbAdapter(
   // ── lifecycle timers ────────────────────────────────────────────────────────
   let listeningTimer: TimerHandle | null = null
   let thinkingTimer: TimerHandle | null = null
+  let speakingTimer: TimerHandle | null = null
   function clearTimer(t: TimerHandle | null): null {
     if (t) clearTimeout(t)
     return null
@@ -187,6 +191,7 @@ export function createNightjarOrbAdapter(
   // ── tts playback ─────────────────────────────────────────────────────────────
   function teardownTts(): void {
     ttsPlayId++ // invalidate any in-flight playTts load (from a newer playTts / enterListening / stop / disconnect) — B11
+    speakingTimer = clearTimer(speakingTimer) // drop the hung-clip watchdog for the clip being torn down
     ttsMonitor.stop()
     if (ttsAudio) {
       try {
@@ -251,6 +256,12 @@ export function createNightjarOrbAdapter(
       if (publishPlayback) publish({ kind: "tts", state: "playing", source: "orb-ui" })
       ttsMonitor.attachElement(audio)
       ttsMonitor.start(emitVolume)
+      // Watchdog: if this clip's onended/onerror never fire (hung playback), the overlay would
+      // stay in 'speaking' forever and lock input. Force back to idle after speakingTimeoutMs (P2-18).
+      speakingTimer = clearTimer(speakingTimer)
+      speakingTimer = setTimeout(() => {
+        if (state === "speaking") endTts("idle")
+      }, speakingTimeoutMs)
     }
     audio.onended = () => endTts("idle")
     audio.onerror = () => endTts("idle")
