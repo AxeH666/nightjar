@@ -13,6 +13,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
+# OS-aware interpreter path inside the uv venv: Scripts/python.exe on Windows (Git Bash),
+# bin/python on POSIX. (audit1.md — setup scripts were POSIX-only.)
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) VPY=".venv/Scripts/python.exe";;
+  *)                    VPY=".venv/bin/python";;
+esac
+
 if ! command -v uv >/dev/null 2>&1; then
   echo "error: 'uv' is required (https://docs.astral.sh/uv/). Install it and re-run." >&2
   exit 1
@@ -24,19 +31,19 @@ echo "==> creating Python 3.12 venv (.venv) via uv"
 uv venv --python 3.12 .venv
 
 echo "==> installing pinned CAD deps (this pulls OCP/VTK — sizeable, be patient)"
-VIRTUAL_ENV="$HERE/.venv" uv pip install --python .venv/bin/python \
+VIRTUAL_ENV="$HERE/.venv" uv pip install --python "$VPY" \
   'build123d>=0.11,<0.12' \
   'build123d-mcp==0.3.79' \
   'cadquery-ocp-novtk!=7.9.3.1.1'
 
 echo "==> smoke test"
-.venv/bin/python smoke_test.py
+"$VPY" smoke_test.py
 
 cat <<'DONE'
 
 ✅ phase-cad env ready.
 
-  Interpreter : phase-cad/.venv/bin/python
+  Interpreter : phase-cad/.venv/bin/python  (Windows: phase-cad/.venv/Scripts/python.exe)
   Wired into  : opencode.json (PR 9) as the build123d-mcp server command,
                 with BUILD123D_IN_PROCESS=1 in its environment (REQUIRED — the default
                 worker-subprocess mode fails under stdio/sandboxed MCP hosts, upstream #143).

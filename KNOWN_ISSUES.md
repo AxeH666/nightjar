@@ -61,6 +61,67 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-34 — native Windows: opencode-serve can't parse opencode.json because NIGHTJAR_ROOT (a backslash path) is substituted into JSON strings → /agent 400 → chat dead — FLAGGED (root cause + fix verified live; fix lands as its own PR) 2026-07-19
+
+- **Severity:** **P0 on native Windows** — this, not just the missing engine, is why chat stays on
+  "Connecting to the engine…" even after setup is complete. Found by **live-driving** the engine on
+  Windows (CLAUDE.md rules 6/8); the static `audit1.md` pass could not catch it.
+- **What:** `services.ts` (and `opencodeServeEnv()` in `index.ts`) pass `NIGHTJAR_ROOT` to
+  opencode-serve as a native-Windows path with **backslashes** (`C:\dev\nightjar`, from `resolve()`).
+  OpenCode substitutes `{env:NIGHTJAR_ROOT}` (and other `{env:…}` vars) into
+  `phase2-odysseus/workspace/opencode.json` **string values** (e.g. the MCP `command` arrays), then
+  parses the result as JSONC. The backslashes become **invalid JSON escape sequences** (`\d`, `\n`,
+  `\v`, …) → `ConfigJsonError: InvalidEscapeCharacter` → the whole config fails to parse → `GET
+  /agent` returns **400** → the supervisor's readiness probe (`httpOk(:4096/agent)`) never passes →
+  `opencode-serve` is marked unhealthy → the renderer never connects. On WSL/Linux `NIGHTJAR_ROOT`
+  is `/home/…` (forward slashes), so it never triggered — exactly why chat worked on WSL and dies
+  on native Windows.
+- **Verified (live, this box):** `NIGHTJAR_ROOT=C:\dev\nightjar` → `/agent` **400**
+  (`ConfigJsonError`/`InvalidEscapeCharacter` at the cad MCP `command` path); `NIGHTJAR_ROOT=C:/dev/nightjar`
+  (forward slashes) → `/agent` **200 in ~11 ms** with all four Nightjar agents
+  (assistant/coding/research/cad). Same engine (`sst/opencode@7a8e7c8`), everything else identical.
+- **Fix (scheduled — its own PR):** normalize the path env vars to **forward slashes** in the
+  opencode-serve env — `NIGHTJAR_ROOT: REPO.replace(/\\/g, "/")` in `services.ts`, and the same for
+  the `HOME`/data-dir injection that `audit1.md` **P1-1** calls for (a backslash `HOME` would break
+  parsing identically once injected). Windows accepts forward slashes in all these paths, so
+  filesystem behavior is unchanged. Prove by re-triggering: backslash → 400, forward-slash → 200
+  (rule 6). Land together with P1-1.
+
+## NJ-33 — the OpenCode engine was obtained by no committed script (dead engine on any fresh clone) + setup was POSIX-only (broke native-Windows provisioning) — FIXED (PRs #93/#94 + build/windows-setup) 2026-07-19
+
+- **Severity:** high — **P0 for a fresh clone.** `research/opencode` (the engine, "the only agent
+  loop", run by bun from TS source per `phase3-ui/src/main/services.ts`) was **git-ignored, NOT a
+  submodule, and cloned by no committed script** (`scripts/setup.sh` inited only the odysseus
+  submodule). A fresh clone therefore had **no engine** → `opencode-serve` crash-looped (`⚡5`) and
+  chat never connected. Surfaced on the WSL→native-Windows migration; the headline finding of
+  `audit1.md` (P0-1/P0-2/P1-5/P1-6).
+- **Compounding (Windows):** `scripts/setup.sh` (+ `phase-cad/setup.sh`) hardcoded POSIX
+  `venv/bin/python` and `python3`, so under Git Bash on Windows `make_venv` failed and `set -e`
+  aborted, leaving empty venvs; there was **no PowerShell setup path**, and `WINDOWS_SETUP.md §9`
+  never fetched the engine — following it literally could not produce a working app.
+- **Fix:**
+  - **PR #93** — `research/opencode` is now a pinned **git submodule** → `sst/opencode@7a8e7c8`,
+    sourced from the durable **`AxeH666/opencode`** fork (tag `nightjar-pin-7a8e7c88`) so the exact
+    commit stays fetchable even if upstream's `dev` branch GCs it. A fresh clone gets it via
+    `git clone --recurse-submodules` / `git submodule update --init`.
+  - **PR #94** — the supervisor gained a `preflight` hook (single `spawn()` choke point); a missing
+    engine now yields an actionable *"engine source not found — run setup"* `failed` state instead of
+    an opaque crash-loop.
+  - **build/windows-setup** — `scripts/setup.sh` is now **OS-aware** (Scripts/python.exe vs
+    bin/python; `py -3.12` vs `python3`) and inits the engine submodule + `bun install`s it +
+    provisions phase-cad; a new **`scripts/setup.ps1`** is the native-Windows one-shot (submodules
+    incl. engine, engine `bun install` with an `--ignore-scripts` retry for the TUI-only
+    tree-sitter postinstall, the Odysseus patch-apply, all venvs, the UI). `WINDOWS_SETUP.md §9/§3.3`
+    now point at it and require `--recurse-submodules`.
+- **Verified:** submodule fetch + gitlink pin at `7a8e7c88` (PR #93); the preflight unit test +
+  live `services.ts` present/absent check (PR #94); on **native Windows**, a clean `bun install` of
+  the recovered engine completes (1253 pkgs) and `opencode-serve` **boots, binds :4096, and serves
+  all four Nightjar agents** (assistant/coding/research/cad) at `/agent` — **once `NIGHTJAR_ROOT` is
+  passed with forward slashes** (backslashes break config parsing → **NJ-34**, fixed in its own PR).
+  **Remaining (user-run, network-bound):** full provisioning of the heavy backend venvs
+  (`phase2-mcp`/`odysseus`/`browser-use`/diffusion) — the script logic is OS-correct; a real
+  end-to-end run needs the user's normal network + the optional GPU deps.
+
 ## NJ-32 — local image reading fails on a 6 GB GPU: the chat model fills VRAM, so local vision (gemma3:4b) runs on CPU and times out — FLAGGED (hardware limit; decision pending) 2026-07-15
 
 - **Severity:** medium — attaching an **image** and asking about it fails (times out); TEXT/document attachments read fine. Diagnosed while chasing "not able to read files".
