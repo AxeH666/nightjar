@@ -36,11 +36,14 @@ Write-Host "== Nightjar setup (native Windows) - root: $Root ==" -ForegroundColo
 
 function Test-Cmd([string]$Name) { return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
 
-# Run git and return its exit code WITHOUT letting native stderr wrap into a throwing
-# ErrorRecord (a Windows-PowerShell 5.1 footgun). Used for the patch --check probes.
+# Run git and return its exit code. Redirect ALL streams to $null with `*> $null` (NOT
+# `2>&1 | Out-Null`): piping a native command's output can leave $LASTEXITCODE unreliable on
+# some Windows-PowerShell 5.1 builds, and a wrong "already applied" here would SKIP the Odysseus
+# patch on a fresh clone (breaking the no-Docker embedded ChromaDB). With no pipeline,
+# $LASTEXITCODE is unambiguously git's exit. Used for the patch --check probes.
 function Invoke-GitCode([string[]]$GitArgs) {
   $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-  try { & git @GitArgs 2>&1 | Out-Null; return $LASTEXITCODE } finally { $ErrorActionPreference = $old }
+  try { & git @GitArgs *> $null; return $LASTEXITCODE } finally { $ErrorActionPreference = $old }
 }
 
 # Resolve bun.exe: PATH first, then the default installer location.
