@@ -23,7 +23,7 @@ together over **MCP** rather than merged. See `NIGHTJAR_LICENSE_AND_ATTRIBUTION.
 
 | Component | Role | License | How it's included |
 |---|---|---|---|
-| **OpenCode** | the agent engine — the ONLY agent loop | MIT | vendored under `research/opencode`, run from TS source via **bun** |
+| **OpenCode** | the agent engine — the ONLY agent loop | MIT | git **submodule** at `research/opencode` (pinned to the `AxeH666/opencode` fork), run from TS source via **bun** |
 | **Row-Bot** | voice / vision / memory / browser capabilities | Apache-2.0 | vendored into `phase2-mcp/nightjar_capabilities/_vendor/` |
 | **Odysseus** | email / RAG / deep-research / calendar / notes / tasks | AGPL-3.0-or-later | **git submodule** at `research/odysseus` + a small integration patch |
 | **orb-ui** | the voice-reactive orb | MIT | forked/themed into the UI |
@@ -79,8 +79,9 @@ phase3-ui/          Electron + React desktop app (the whole UI + supervisor)    
 browser-use-mcp/    autonomous browser MCP                                          (venv)
 diffusion-mcp/      local image generation (torch/diffusers)                        (venv)
 telegram-scheduler/ always-on Telegram reminder server (separate deployable)
+research/opencode/  OpenCode engine — git SUBMODULE (the only agent loop; AxeH666/opencode fork)
 research/odysseus/  Odysseus source — git SUBMODULE (AGPL source-availability)
-scripts/setup.sh    one-shot Linux/WSL setup (bash only — NOT for native Windows)
+scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setup.ps1 (native Windows)
 ```
 
 **Docs you should know about:**
