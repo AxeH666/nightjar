@@ -22,6 +22,12 @@ const CONNECT_TIMEOUT_MS = 15000 // /agent + /session respond in ms; 15s only tr
 // opencode heartbeats GET /event ~every 10s; seeing NOTHING for this long ⇒ the stream is
 // dead (half-open) → abort so the caller reconnects instead of reading a corpse forever.
 const STREAM_IDLE_TIMEOUT_MS = 30000
+// prompt_async / permission-reply / history reads return in ms on loopback (prompt_async is
+// fire-and-forget → 204; the generation streams async over SSE). Bound them too (P2-5 extends the
+// NJ-20 rule-3 pass), so a half-open POST/GET can't wedge a send (busy stuck), a permission reply
+// (ask removed-but-paused server-side), or a history fetch FOREVER. A bit longer for prompt to
+// allow a large base64 attachment upload.
+const REQUEST_TIMEOUT_MS = 30000
 
 export interface AgentInfo {
   name: string
@@ -145,6 +151,7 @@ export class OpenCodeClient {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ agent, ...(modelRef ? { model: modelRef } : {}), parts }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), // rule 3: a half-open POST must not wedge the send (busy stuck)
     })
     if (!res.ok && res.status !== 204) {
       throw new Error(`POST prompt_async → ${res.status}: ${await res.text()}`)
@@ -156,6 +163,7 @@ export class OpenCodeClient {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ reply, ...(message ? { message } : {}) }),
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS), // rule 3: a half-open reply must not wedge the permission queue
     })
     if (!res.ok) throw new Error(`POST permission reply → ${res.status}: ${await res.text()}`)
   }
@@ -177,7 +185,7 @@ export class OpenCodeClient {
   // List all sessions (server returns most-recently-updated first). GET /session.
   // Powers the Code tab's resumable session-history list.
   async listSessions(): Promise<SessionInfo[]> {
-    const res = await fetch(this.url("/session"), { headers: this.headers() })
+    const res = await fetch(this.url("/session"), { headers: this.headers(), signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`GET /session → ${res.status}`)
     return (await res.json()) as SessionInfo[]
   }
@@ -186,14 +194,14 @@ export class OpenCodeClient {
   // GET /session/:id/message → WithParts[] = { info, parts }[]. Used to rehydrate
   // a resumed conversation; order defensively by info.time.created when mapping.
   async getMessages(sessionID: string): Promise<MessageWithParts[]> {
-    const res = await fetch(this.url(`/session/${sessionID}/message`), { headers: this.headers() })
+    const res = await fetch(this.url(`/session/${sessionID}/message`), { headers: this.headers(), signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`GET /session/${sessionID}/message → ${res.status}`)
     return (await res.json()) as MessageWithParts[]
   }
 
   // Delete a session. DELETE /session/:id → boolean.
   async deleteSession(sessionID: string): Promise<void> {
-    const res = await fetch(this.url(`/session/${sessionID}`), { method: "DELETE", headers: this.headers() })
+    const res = await fetch(this.url(`/session/${sessionID}`), { method: "DELETE", headers: this.headers(), signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`DELETE /session/${sessionID} → ${res.status}`)
   }
 
@@ -203,6 +211,7 @@ export class OpenCodeClient {
       method: "PATCH",
       headers: this.headers(),
       body: JSON.stringify({ title }),
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
     })
     if (!res.ok) throw new Error(`PATCH /session/${sessionID} → ${res.status}`)
   }
