@@ -17,6 +17,10 @@ export function CadViewer({ glb, busy }: { glb: ArrayBuffer | null; busy?: boole
   useEffect(() => {
     if (!canvasRef.current) return
     const ctrl = createCadScene(canvasRef.current)
+    if (!ctrl) {
+      setError("3D preview unavailable — WebGL/GPU couldn't initialize on this display.")
+      return
+    }
     ctrlRef.current = ctrl
     ctrl.resize()
     const onResize = () => ctrl.resize()

@@ -57,8 +57,28 @@ function hasMesh(o: THREE.Object3D): boolean {
   return found
 }
 
-export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
+export function createCadScene(canvas: HTMLCanvasElement): CadSceneController | null {
+  // WebGL may be unavailable (no GPU, software-blocked, or an already-lost context) — the
+  // constructor can THROW, or return a renderer whose canvas draws nothing. Guard both and return
+  // null so the caller shows a "3D preview unavailable" fallback instead of a crash (unhandled
+  // throw white-screens the subtree) or a permanently-blank canvas with a populated parts panel
+  // (audit1.md P2-16; mirrors createOrbScene's guard).
+  let renderer: THREE.WebGLRenderer
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
+  } catch {
+    return null
+  }
+  const gl = renderer.getContext()
+  if (!gl || (typeof gl.isContextLost === "function" && gl.isContextLost())) {
+    try {
+      renderer.dispose()
+      renderer.forceContextLoss()
+    } catch {
+      /* already-dead context → nothing to release */
+    }
+    return null
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
   const scene = new THREE.Scene()
@@ -101,6 +121,12 @@ export function createCadScene(canvas: HTMLCanvasElement): CadSceneController {
 
   function animate() {
     raf = requestAnimationFrame(animate)
+    // Skip the GPU work when the canvas isn't actually visible: the CAD screen is CSS-hidden
+    // (display:none → 0 client size) while another tab is shown, and the whole window may be
+    // hidden. Rendering then is wasted GPU/CPU/battery — and up to two live WebGL contexts on a
+    // 6 GB box (audit1.md P2-17). The rAF stays scheduled (a no-op frame is cheap; the browser
+    // throttles rAF when the document is hidden), so it resumes the instant the tab is shown.
+    if (document.hidden || canvas.clientWidth === 0 || canvas.clientHeight === 0) return
     controls.update()
     renderer.render(scene, camera)
   }
