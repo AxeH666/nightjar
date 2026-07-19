@@ -10,21 +10,24 @@ This **supplements** — it does not replace — Row-Bot's low-level browser pri
 (`navigate`/`click`/`type` by accessibility ref) in the `nightjar` MCP. Keep the
 primitives for stepwise/interactive control; use this for autonomous multi-step tasks.
 
-## Model (local-first, BYOK-preferred-for-reliability)
+## Model (local-first; cloud is an explicit opt-in)
 
-Browser Use runs its own LLM loop, which is model-demanding, so the resolver
-(`resolve_model_spec`) prefers a cloud key when one is present, falling back to the
-always-available local model:
+Browser Use runs its own LLM loop. The resolver (`resolve_model_spec`) **defaults to the local
+model** and routes to the cloud ONLY on an explicit choice — a stored BYOK key alone never sends
+browser traffic off-machine (that was the NJ-14 silent-cloud leak, now closed). Order:
 
-1. **Explicit override** — `NIGHTJAR_BROWSERUSE_BASE_URL` + `NIGHTJAR_BROWSERUSE_MODEL` (+ `_API_KEY`)
-2. **BYOK OpenRouter** — `NIGHTJAR_BYOK_OPENROUTER` (model `NIGHTJAR_BROWSERUSE_OPENROUTER_MODEL`, default `openai/gpt-4o-mini`)
-3. **BYOK OpenAI** — `NIGHTJAR_BYOK_OPENAI` (model `NIGHTJAR_BROWSERUSE_OPENAI_MODEL`, default `gpt-4o-mini`)
-4. **Local llama.cpp** — `NIGHTJAR_LLM_ENDPOINT` (default the `127.0.0.1:8086` proxy), model `qwen3-4b-instruct-2507`
+1. **Explicit override** — `NIGHTJAR_BROWSERUSE_BASE_URL` + `NIGHTJAR_BROWSERUSE_MODEL` (+ `_API_KEY`).
+2. **`NIGHTJAR_BROWSERUSE_PROVIDER`** — set by Nightjar from the browser capability pref
+   (`local` | `openai` | `openrouter`). `openrouter`/`openai` routes to that provider using
+   `NIGHTJAR_BYOK_OPENROUTER` / `NIGHTJAR_BYOK_OPENAI` (models `NIGHTJAR_BROWSERUSE_OPENROUTER_MODEL`
+   default `openai/gpt-4o-mini` · `NIGHTJAR_BROWSERUSE_OPENAI_MODEL` default `gpt-4o-mini`) — and
+   **falls back to local if that key is absent** (the tool's result line discloses which backend ran).
+3. **Local llama.cpp** — the default when nothing above selects cloud — `NIGHTJAR_LLM_ENDPOINT`
+   (default the `127.0.0.1:8086` proxy), model `qwen3-4b-instruct-2507`.
 
-Set **`NIGHTJAR_BROWSERUSE_PREFER=local`** to force the local model even when a BYOK
-key exists (pure-offline). The local proxy already carries a wall-clock timeout
-(rule 3); every run is *additionally* bounded by `timeout_s` (asyncio wall-clock) and
-`max_steps` here, because the agent loop is otherwise unbounded.
+`NIGHTJAR_BROWSERUSE_PREFER=local` is still honored as a legacy force-local. The local proxy
+already carries a wall-clock timeout (rule 3); every run is *additionally* bounded by `timeout_s`
+(asyncio wall-clock) and `max_steps` here, because the agent loop is otherwise unbounded.
 
 ## Safety
 

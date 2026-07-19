@@ -61,6 +61,24 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-35 — assistant PIM/memory WRITE tools are auto-approved ("allow", no per-call prompt) — INTENTIONAL, DOCUMENTED (maintainer decision) 2026-07-19
+
+- **Context (audit1.md P2-13):** the `assistant` agent's permission map
+  (`phase2-odysseus/workspace/opencode.json`) grants `odysseus-pim_note_create` /
+  `odysseus-pim_task_create` / `odysseus-pim_calendar_create_event` / `nightjar_save_memory` as
+  `"allow"` — they WRITE user data with no approval prompt. Mechanically rule-1-compliant (uses the
+  `permission` map, not `tools:{x:true}`), but against rule-1's *intent* that mutating tools prompt.
+- **Decision (maintainer, 2026-07-19):** keep them auto-approved. Personal-data capture (a note, a
+  task, a reminder, a memory) should be frictionless in the assistant; a per-call approval for every
+  note would make it unusable. A deliberate, recorded exception — not drift.
+- **Bounds that stay:** the consequential OS/egress actions remain `"ask"` —
+  `nightjar_analyze_image`, `odysseus-image_generate_image`, `browser-use_run_browser_task`;
+  edit/write/bash in the coding agent stay `"ask"`; `"*":"deny"` still hard-denies everything
+  unlisted. So the auto-approve is scoped to LOCAL personal-data writes only.
+- **Recorded in:** a comment above the allows in `workspace/opencode.json` + this entry (the
+  decision was to document it in both the config and here). Verified the config still parses with the
+  comment (engine `/agent` → 200).
+
 ## NJ-34 — native Windows: opencode-serve can't parse opencode.json because NIGHTJAR_ROOT (a backslash path) is substituted into JSON strings → /agent 400 → chat dead — FIXED (fix/windows-config-path) 2026-07-19
 
 - **Severity:** **P0 on native Windows** — this, not just the missing engine, is why chat stays on
