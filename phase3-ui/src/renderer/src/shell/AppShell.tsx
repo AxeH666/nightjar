@@ -12,6 +12,9 @@ import { useModel } from "../context/ModelContext"
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { LOCAL_MODEL } from "../lib/byok"
+import { applyGlobalMode } from "../lib/globalMode"
+import { capabilities } from "../lib/capabilities"
+import { useOnlineCapabilities } from "../lib/useOnlineCapabilities"
 import { TabBar, type TabId } from "./TabBar"
 import { ChatScreen } from "../screens/ChatScreen"
 import { CadScreen } from "../screens/CadScreen"
@@ -48,13 +51,36 @@ export function AppShell() {
   const { fallbackToLocal, acceptOpenRouterSwitch } = useSessions()
   const { ask, reply, abort } = usePermission()
 
+  // Cloud-active indication (privacy). `online` = the non-chat capabilities set Online; fetched
+  // once here and shared with CapabilityCloudBanner. `cloudActive` is true when ANY cloud target
+  // is active (the chat model AND/OR a capability) — it drives the persistent ☁ in the model
+  // switcher, so dismissing the (dismissible) banners never leaves zero cloud signal.
+  const online = useOnlineCapabilities(capsRefresh)
+  const cloudActive = !activeChoice.local || online.length > 0
+
+  // "Switch to local" on the chat CloudBanner must take the WHOLE app local, not just chat —
+  // otherwise image/vision/research/browser keep egressing while the user believes they went
+  // private (a label/behavior mismatch). Mirrors CapabilitiesSettings.goLocal: bulk-offline the
+  // capabilities first, then set the chat model local; if the bulk write fails, still switch chat
+  // and leave the capability banner up honestly.
+  const switchAllToLocal = async () => {
+    const plan = applyGlobalMode({ target: { kind: "local" }, catalog: [], providers: [], localModelId: LOCAL_MODEL.id })
+    try {
+      await capabilities.setBulk(plan.prefs)
+      setCapsRefresh((n) => n + 1)
+    } catch {
+      // capabilities couldn't switch (IPC/engine down) — leave them; CapabilityCloudBanner stays up.
+    }
+    setActiveModel(plan.chatModelId)
+  }
+
   return (
     <div className="flex h-full flex-col bg-nightjar-base">
       <header className="flex items-center gap-4 border-b border-nightjar-surface px-4 py-2">
         <span className="font-semibold text-nightjar-accent">June</span>
         <TabBar tab={tab} onChange={setTab} />
         <div className="ml-auto flex items-center gap-3">
-          <ModelSwitcher choices={choices} activeId={activeModel} onSelect={setActiveModel} onManageKeys={() => setShowKeys(true)} />
+          <ModelSwitcher choices={choices} activeId={activeModel} onSelect={setActiveModel} onManageKeys={() => setShowKeys(true)} cloudActive={cloudActive} />
           <span className="text-xs text-nightjar-text/40" title={status}>{status}</span>
           {/* Manual escape hatch: the connect loop auto-retries, but if it ever wedges (or the
               user just wants to force it), this always-available control re-runs the connect. */}
@@ -71,11 +97,12 @@ export function AppShell() {
         </div>
       </header>
 
-      {/* Unmissable cloud-active indicators (privacy). Render nothing when local:
-          CloudBanner covers the chat model; CapabilityCloudBanner covers image/vision/
-          research/browser set Online. */}
-      <CloudBanner model={activeChoice} onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)} />
-      <CapabilityCloudBanner refresh={capsRefresh} />
+      {/* Dismissible cloud-active indicators (privacy). Render nothing when local; they re-arm
+          when the cloud target changes, and a persistent ☁ stays in the model switcher so a
+          dismiss never leaves zero cloud signal. CloudBanner = the chat model;
+          CapabilityCloudBanner = image/vision/research/browser set Online. */}
+      <CloudBanner model={activeChoice} onSwitchLocal={switchAllToLocal} />
+      <CapabilityCloudBanner online={online} />
       <HealthStrip services={services} />
       <VisionBanner />
 
