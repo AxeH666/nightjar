@@ -257,6 +257,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const perSessionRefs = useRef<Map<string, RefBundle>>(new Map())
   const sessionsRef = useRef<Record<string, SessionState>>({})
   const slotsRef = useRef<Record<SlotId, string>>({ chat: "", code: "", cad: "" })
+  // Once the user picks a chat via the recents rail (New chat / resume), stop auto-adopting the
+  // connection's primary onto the chat slot — otherwise a (re)connect would clobber their choice.
+  const chatBoundManually = useRef(false)
   const agentsRef = useRef(agents) // stable read of the live agent list (for validAgent, without a deps cascade)
   useEffect(() => {
     sessionsRef.current = sessions
@@ -637,9 +640,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   })
 
   // ---- session lifecycle ----
-  // chat slot ← ConnectionContext's primary session (adopt + rebind on reconnect).
+  // chat slot ← ConnectionContext's primary session (adopt on first connect + follow the primary
+  // on reconnect, carrying the transcript over) — UNLESS the user has taken manual control of the
+  // chat slot via the recents rail, in which case their chosen chat must survive a (re)connect (Bugbot).
   useEffect(() => {
     if (!primaryId) return
+    if (chatBoundManually.current) return
     rebindSlot("chat", primaryId, true)
   }, [primaryId, rebindSlot])
 
@@ -971,6 +977,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       slotsRef.current = { ...slotsRef.current, [slot]: sessionId }
       setSlots((prev) => ({ ...prev, [slot]: sessionId }))
       if (isHistorySlot(slot)) markSlotSession(slot, sessionId) // remember it in this slot's history
+      if (slot === "chat") chatBoundManually.current = true // resuming a chat is a manual choice — survive (re)connect
       gcSessions() // forget the previous slot session (unless another slot uses it)
     },
     [clientRef, gcSessions, validAgent, markSlotSession],
@@ -992,6 +999,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       rebindSlot(slot, id, false) // fresh session → do not carry the old transcript
       setSessionAgent(id, validAgent(agent))
       if (isHistorySlot(slot)) markSlotSession(slot, id) // remember it in this slot's history
+      if (slot === "chat") chatBoundManually.current = true // a New chat is a manual choice — don't re-adopt over it
     },
     [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession, setStatus],
   )
