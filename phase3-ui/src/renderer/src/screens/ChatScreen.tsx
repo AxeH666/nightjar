@@ -2,12 +2,14 @@
 // Research is no longer a whole-workspace mode: it's a per-message toggle in the
 // composer's "+" menu that resolves to the research agent at send time (explicit,
 // not AI-guessed). Bound to the chat session slot.
+import { useEffect } from "react"
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { useConnection } from "../context/ConnectionContext"
 import { useArtifact } from "../context/ArtifactContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { ArtifactPanel } from "../components/ArtifactPanel"
+import { SessionList } from "../components/SessionList"
 import { capabilities } from "../lib/capabilities"
 import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
@@ -25,15 +27,23 @@ const AGENT_FOR_MODE = {
 } as const
 
 export function ChatScreen() {
-  const { slots, messagesOf, busyOf, send, createImage } = useSessions()
+  const { slots, messagesOf, busyOf, send, createImage, sessionIdsBySlot } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const { activeModel } = useModel()
-  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
+  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession, syncChatSession } = useArtifact()
   const id = slots.chat
+
+  // Reset the chat preview only when the chat slot's session id truly changes (New chat /
+  // resume / auto-adopt of a new primary) — not on a reconnect that leaves a pinned chat
+  // unchanged, and not on a bare tab-switch remount. Mirrors CodeScreen's syncCodeSession.
+  useEffect(() => {
+    syncChatSession(id)
+  }, [id, syncChatSession])
 
   return (
     <div className="flex h-full min-h-0">
+      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}

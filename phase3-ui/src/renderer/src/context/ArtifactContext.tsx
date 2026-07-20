@@ -9,11 +9,10 @@
 // (now-empty) sandbox must be dropped.
 //
 // Extracted from the former App.tsx monolith (redesign Stage 2), verbatim.
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { artifactActionFromTool, previewBridge } from "../lib/preview"
 import type { ToolCall } from "../lib/opencode"
-import { useConnection } from "./ConnectionContext"
 
 // Prefer the newest .html as the active preview entry; otherwise the latest file.
 const preferHtml = (prev: string, rel: string): string =>
@@ -51,6 +50,9 @@ interface ArtifactValue {
   // "previous id" lives here (persistent provider), so a bare CodeScreen remount
   // (Chat↔Code tab switch) with an unchanged id no longer wipes the panel.
   syncCodeSession: (codeSessionId: string) => void
+  // Same, for the chat slot — so a pinned chat's preview survives a reconnect (the chat
+  // session id is unchanged) instead of being wiped by the connection's primary changing.
+  syncChatSession: (chatSessionId: string) => void
 }
 
 const Ctx = createContext<ArtifactValue | null>(null)
@@ -62,7 +64,6 @@ export function useArtifact(): ArtifactValue {
 }
 
 export function ArtifactProvider({ children }: { children: ReactNode }) {
-  const { sessionID } = useConnection()
   const [panelOpen, setPanelOpen] = useState(false)
   const [activeEntry, setActiveEntry] = useState<string>("")
   const [previewNonce, setPreviewNonce] = useState(0)
@@ -79,6 +80,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
   // unmounts on a tab switch), so CodeScreen can call syncCodeSession on every
   // mount and we reset only on a real id change — not on a bare tab-switch remount.
   const codeSessionRef = useRef<string>("")
+  const chatSessionRef = useRef<string>("")
   const nonceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const bumpNonce = useCallback(() => {
@@ -99,25 +101,22 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     artifactSessionRef.current = ""
   }, [])
 
-  // Reset iff the code slot's session id truly changed (new/resumed code session),
-  // never on a bare CodeScreen remount from a Chat↔Code tab switch (the bug my
-  // earlier per-mount resetPreview() introduced).
-  const syncCodeSession = useCallback(
-    (codeSessionId: string) => {
-      if (codeSessionId && codeSessionId !== codeSessionRef.current) {
-        codeSessionRef.current = codeSessionId
-        resetPreview()
-      }
+  // Reset the preview when a slot's session id truly changes (new/resumed session), never on a
+  // bare tab-switch remount (unchanged id). CRUCIAL: the panel state is a SINGLETON shared by
+  // Chat + Code, so a change in one slot must NOT wipe the OTHER slot's still-valid preview — we
+  // reset only when the departing session actually owned the currently-shown artifacts. This is
+  // why a reconnect (which recreates the code session) no longer dismisses an open canvas on a
+  // pinned, unchanged chat conversation (Bugbot). Screens drive this via useEffect on their slot id.
+  const syncSlotSession = useCallback(
+    (ref: { current: string }, sessionId: string) => {
+      if (!sessionId || sessionId === ref.current) return
+      if (artifactSessionRef.current === ref.current) resetPreview() // only wipe if these are the shown artifacts
+      ref.current = sessionId
     },
     [resetPreview],
   )
-
-  // Fresh connect or a reconnect (new primary session id) → reset. A Code-tab
-  // session switch is NOT visible here (the code slot lives in SessionsContext,
-  // below this provider); CodeScreen calls resetPreview() directly for that.
-  useEffect(() => {
-    resetPreview()
-  }, [sessionID, resetPreview])
+  const syncCodeSession = useCallback((codeSessionId: string) => syncSlotSession(codeSessionRef, codeSessionId), [syncSlotSession])
+  const syncChatSession = useCallback((chatSessionId: string) => syncSlotSession(chatSessionRef, chatSessionId), [syncSlotSession])
 
   const onToolCall = useCallback(
     (call: ToolCall, sid: string) => {
@@ -218,6 +217,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     downloadArtifactContent,
     resetPreview,
     syncCodeSession,
+    syncChatSession,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
