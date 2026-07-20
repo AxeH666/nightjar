@@ -19,7 +19,7 @@ export function CodeScreen() {
   const { slots, sessions, messagesOf, busyOf, send, createImage, sessionIdsBySlot } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
-  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, syncCodeSession } = useArtifact()
+  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession, syncCodeSession } = useArtifact()
   const id = slots.code
   const title = sessions[id]?.title ?? "Coding session"
 
@@ -70,7 +70,7 @@ export function CodeScreen() {
               assistantLabel="coding"
             />
           </main>
-          {panelOpen && (
+          {panelOpen && artifactSession === id && (
             <ArtifactPanel
               sessionID={id}
               entry={activeEntry}
