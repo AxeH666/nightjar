@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
 import { deleteProjectContent, copyProjectContent } from "./projectContent"
+import { reportStorageWrite, useStorageHealthy } from "./storageHealth"
 
 // A project space. The science labs (mechanical/bio/chem) each keep their own list; "general" is
 // the top-level, non-lab Projects space surfaced in the main nav — a global work container, like
@@ -68,17 +69,21 @@ export interface ProjectsStore {
 
 export function useProjects(scope: ProjectScope): ProjectsStore {
   const [projects, setProjects] = useState<Project[]>(() => loadProjects(scope))
-  const [storageOk, setStorageOk] = useState(true)
+  // Module-level, NOT component state: this hook is remounted by ordinary navigation, and a
+  // per-component flag would reset the "changes aren't saving" warning to healthy on every
+  // remount while storage was still broken. See storageHealth.ts.
+  const storageOk = useStorageHealthy()
   // The ref is the authoritative current list, updated SYNCHRONOUSLY by every mutation; state
   // mirrors it for rendering.
   const projectsRef = useRef(projects)
 
   // Each scope (lab or the general space) has its own list — reload when the scope changes.
+  // Storage health is deliberately NOT reset here: it is a property of the origin, not of a
+  // scope, so switching labs must not clear a live warning.
   useEffect(() => {
     const loaded = loadProjects(scope)
     projectsRef.current = loaded
     setProjects(loaded)
-    setStorageOk(true) // a fresh scope hasn't attempted a write yet
   }, [scope])
 
   // Persist SYNCHRONOUSLY from the ref, so a mutation survives even when this component
@@ -88,7 +93,7 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     (fn: (prev: Project[]) => Project[]) => {
       const next = fn(projectsRef.current)
       projectsRef.current = next
-      setStorageOk(persistProjects(scope, next))
+      reportStorageWrite(persistProjects(scope, next))
       setProjects(next)
     },
     [scope],

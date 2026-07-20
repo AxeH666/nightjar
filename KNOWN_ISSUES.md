@@ -88,6 +88,17 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   `catch` back to `return true` makes exactly the two failure-path tests fail with `expected true to be
   false`, so they genuinely catch the regression rather than passing vacuously. Typecheck clean, build
   OK, vitest 65/65.
+- **Second-order bug caught in review (Bugbot, PR #125):** the first cut kept `storageOk` in
+  `useProjects` **component state**. `ProjectsHome` and `ProjectView` each call that hook and only one
+  is mounted at a time, so opening or leaving a project remounted it, re-initialized the flag to
+  healthy, and **silently cleared the "Changes not being saved" warning while storage was still
+  broken** — the same false-success this entry is about, one level up. Fixed by moving storage health
+  to a module-scoped store (`lib/storageHealth.ts`) consumed via `useSyncExternalStore`, so every
+  mounted consumer agrees and a remount inherits the current truth. Content writes
+  (`useProjectContent`) feed the same signal, since a failed content write means the origin's storage
+  is broken app-wide, not just for one chip. Worth recording: the *fix* for a false-success bug
+  reintroduced a narrower false-success, which is exactly why this class needs a test rather than an
+  inspection.
 - **Residual (rule 8):** the *rendered* failure chip was not confirmed in a real GUI — that needs a
   native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
   contract underneath it is proven headlessly; the pixels are not.
