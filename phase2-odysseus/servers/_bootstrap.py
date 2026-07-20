@@ -31,7 +31,7 @@ os.environ.setdefault("SEARCH_PROVIDER", "duckduckgo")
 # so both memory systems share ONE local embedding backend. Ollama exposes an
 # OpenAI-compatible /v1/embeddings endpoint. Fully offline (Ollama is required
 # already); avoids a second ONNX model download.
-os.environ.setdefault("EMBEDDING_URL", "http://localhost:11434/v1/embeddings")
+os.environ.setdefault("EMBEDDING_URL", "http://127.0.0.1:11434/v1/embeddings")
 os.environ.setdefault("EMBEDDING_MODEL", "nomic-embed-text")
 
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)

@@ -15,8 +15,10 @@ MEMORY_INDEX = DATA_ROOT / "memory_vectors"
 BROWSER_PROFILE = DATA_ROOT / "browser_profile"
 MODELS_DIR = DATA_ROOT / "models"
 
-# Local Ollama endpoint (reused across vision + embeddings).
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+# Local Ollama endpoint (reused across vision + embeddings). 127.0.0.1, not localhost:
+# on Windows `localhost` can resolve to IPv6 ::1 and dead-hop past Ollama's IPv4 bind,
+# silently failing vision/embeddings (P3-6).
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 EMBED_MODEL = os.environ.get("NIGHTJAR_EMBED_MODEL", "nomic-embed-text")
 VISION_MODEL = os.environ.get("NIGHTJAR_VISION_MODEL", "gemma3:4b")
 
