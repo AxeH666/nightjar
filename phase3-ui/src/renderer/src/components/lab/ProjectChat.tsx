@@ -19,23 +19,37 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const { connected, sessionID } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
   const [id, setId] = useState("")
+  const [resolving, setResolving] = useState(true)
 
   // Resolve (resume-or-create) this project's chat session: on open, on project switch, and on
   // reconnect. `sessionID` is the connection's primary — it changes on every (re)connect and goes
   // from empty→set when the client first becomes ready, so depending on it makes this (a) retry
-  // once the engine is up (Bugbot: the open otherwise stuck on "Connecting…") and (b) re-bind to
-  // a live session after a reconnect (the reconnect handler cleared the stale binding). Clear the
-  // id first so a dead/previous session's transcript never flashes.
+  // once the engine is up (Bugbot: the open otherwise stuck on "Connecting…") and (b) revalidate
+  // the binding after a reconnect. Clear the id first so a dead/previous session never flashes.
   useEffect(() => {
     let alive = true
+    setResolving(true)
     setId("")
     openProjectChat(projectId).then((sid) => {
-      if (alive) setId(sid)
+      if (!alive) return
+      setId(sid)
+      setResolving(false)
     })
     return () => {
       alive = false
     }
   }, [projectId, sessionID, openProjectChat])
+
+  // Distinguish the states so a FAILED open doesn't masquerade as a hung connection (Bugbot):
+  // engine down → "Connecting"; connected but still resolving → "Opening"; connected, resolved,
+  // but no id → the open genuinely failed (createSession error, already surfaced via setStatus).
+  const blockedReason = !connected
+    ? "Connecting to the engine…"
+    : resolving
+      ? "Opening this project's chat…"
+      : !id
+        ? "Couldn't open this project's chat — check the engine, then reopen the project."
+        : null
 
   // NOTE: deliberately does NOT call ArtifactContext.syncChatSession — that drives the GENERAL
   // chat's shared chatSessionRef, so using it here let ChatScreen's reconnect reset THIS project's
@@ -48,7 +62,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
         <ChatSurface
           messages={messagesOf(id)}
           busy={busyOf(id)}
-          blockedReason={connected && id ? null : "Connecting to the engine…"}
+          blockedReason={blockedReason}
           artifactSessionID={id}
           onSend={(text, { attachments, mode }) => send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })}
           onCreateImage={(prompt) => createImage(id, prompt)}
