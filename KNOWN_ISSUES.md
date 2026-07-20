@@ -61,6 +61,104 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-39 — live-preview never rendered: the renderer CSP declared no `frame-src` (and no `img-src`, silently breaking every `data:` image) — FIXED (fix/preview-csp-frame-src) 2026-07-20
+
+- **Severity:** **P1** — the whole live-preview/Artifacts panel was dead in **both** dev and packaged
+  builds, and (via the same root cause) every `data:` URL image in the app was refused at render time.
+- **Found by:** maintainer **GUI testing** of PR #120 on native Windows — "Download works, Open shows
+  nothing" (a blank white pane). Exactly the class of defect CLAUDE.md rules 6/8 exist for: the code,
+  the IPC seam, the mirror, and the loopback bind were **all** healthy and every headless check passed.
+- **What (frame-src):** `phase3-ui/src/renderer/index.html` declared `default-src 'self'` with no
+  `frame-src` and no `child-src`. Per CSP3 fallback (`frame-src` → `child-src` → `default-src`), the
+  preview `<iframe>` was judged by `default-src 'self'` — but `main/preview-server.ts` serves at
+  `http://127.0.0.1:<ephemeral>`, cross-origin to the renderer in dev (`http://localhost:5173`) **and**
+  in production (`file://`, whose `'self'` cannot match any `http:` URL). Chromium refuses the
+  navigation and **renders no error page**, so the frame stayed an empty document over
+  `ArtifactPanel`'s `bg-white` wrapper → "a blank white panel". The trap: `connect-src` *already*
+  whitelisted `http://127.0.0.1:*`, which reads reassuring but is inert — **`connect-src` governs
+  fetch/XHR/WebSocket only and has no authority over frame navigation.** The loopback exemption had
+  been granted to the one directive that does not cover framing.
+- **What (img-src, same root cause, separately discovered — rule 7):** `img-src` was also absent, so it
+  too fell back to `default-src 'self'` — and **`'self'` does not match the `data:` scheme**. Four live
+  render paths push `data:` URLs into `<img>`: composer attachment thumbnails
+  (`ChatSurface.tsx`), optimistic user-message images and rehydrated history images
+  (`SessionsContext.tsx`), and **`generate_image` results** (`main/index.ts` returns a `data:` URL by
+  construction). The image-gen case is the worst shape of this bug: the model generates, the file is
+  written, main reads it back, and the renderer is refused at the **last** step — so the feature reads
+  as broken on complete success.
+- **Fix (this PR):** declare both directives explicitly —
+  `frame-src 'self' http://127.0.0.1:*` and `img-src 'self' data: blob:`. Purely additive; no directive
+  was loosened and `default-src 'self'` still governs everything else. `frame-src` must use a port
+  wildcard because the preview server binds `listen(0, …)`, so the port differs every launch; this
+  grants no trust beyond what `connect-src` already grants the same origin, and the frame keeps
+  `sandbox="allow-scripts allow-forms"` (no `allow-same-origin`), so the preview document stays
+  isolated from the app origin.
+- **Also fixed:** the bare `.catch(() => {})` swallows in `ArtifactContext`/`ArtifactPanel` that made
+  this invisible now `console.error` with context. A failure in this seam left **no trace at all**,
+  which is why DevTools was the only available diagnostic.
+- **Deliberately NOT added:** `worker-src`. Flagged during review, but no worker is instantiated
+  anywhere in the renderer (the orb explicitly avoids them) and a same-origin worker would already be
+  permitted by the `default-src` fallback — only a `blob:`-constructed one would be refused. Adding it
+  would be noise, not hardening.
+- **Scope — BOTH preview surfaces were dead, not just chat.** `CodeScreen` renders the identical
+  `ArtifactPanel`/iframe fed by the coding agent's `write`/`edit` mirror, so the **Code tab's** Preview
+  was blank too. It went unnoticed because that panel's Code and Files tabs use `previewRead`/
+  `previewList` over IPC (no iframe, so they worked), and the streaming choreography parks the user on
+  the Code tab during a write, only flipping to Preview 1200 ms after it settles.
+- **Alternative considered, not taken:** register a custom `nightjar-preview://` standard/secure scheme
+  so the preview is same-origin-ish and needs no CSP widening at all. Tighter than a loopback port
+  wildcard — the wildcard does let the renderer frame *any* loopback port, not only ours — but a
+  materially larger change to the serving path. Recorded here as the natural hardening follow-up if the
+  loopback allowance ever becomes uncomfortable; the wildcard grants nothing `connect-src` didn't
+  already grant that same origin.
+- **Verification (rule 6 — OPEN, needs the maintainer's real GUI run):** static analysis is *not*
+  sufficient for this class. To close: run the app on native Windows with DevTools open and confirm
+  (a) the `Refused to frame 'http://127.0.0.1:…'` console error is **gone** and the artifact actually
+  **paints** in the Preview pane — on **both** the Chat artifact card and a coding-agent `write` in the
+  Code tab, two different entry points into the same iframe — and (b) an attached image thumbnail
+  renders (the `img-src` half). Headless/typecheck passes prove nothing here: the previous, broken
+  state passed every one of those same checks, and NJ-8's corrected entry above shows the existing
+  e2e test structurally cannot catch it.
+
+## NJ-38 — `preview-server` reflects any caller's `Origin` into `Access-Control-Allow-Origin` — OPEN 2026-07-20
+
+- **What:** `phase3-ui/src/main/preview-server.ts` sets
+  `resp.setHeader("Access-Control-Allow-Origin", req.headers.origin ?? "*")` unconditionally, echoing
+  whatever `Origin` the caller sent. Any origin able to reach the loopback port can therefore read the
+  per-session preview sandbox (generated artifacts, mirrored agent `write`/`edit` content).
+- **Bounds:** the server binds `127.0.0.1` only (not routable off-box) and the port is ephemeral, so
+  exploitation needs local code execution or a browser on this machine being induced to request the
+  right port. Not remotely reachable.
+- **Discovered:** during the NJ-39 diagnosis; **pre-existing and independent** of that bug. Filed
+  rather than drive-by fixed (rule 7) because tightening it means deciding what the legitimate origin
+  set actually is — the framed document itself is cross-origin and sandboxed, so a naive lock to the
+  renderer origin needs checking against the real frame load first.
+
+## NJ-37 — orb TTS falls back to a `file://` URL that `media-src` refuses → silent silence — OPEN 2026-07-20
+
+- **What:** `NightjarOrb.tsx`'s `loadTtsAudio()` prefers the IPC path (`nightjar.readAudio` → bytes →
+  `blob:` URL, which is allowed). When that bridge is unavailable it falls back to
+  `return path.startsWith("file:") ? path : \`file://${path}\`` — and the CSP's `media-src 'self' blob:`
+  refuses the `file:` scheme. The result is **no audio and no error surfaced to the user**.
+- **Why it matters (rule 8):** this is a textbook silent no-op — the degraded path was written *as* a
+  fallback but cannot work under the app's own CSP, so TTS just goes quiet with no visible signal.
+  A correct fallback either surfaces a visible "audio unavailable" state or is removed as dead code.
+- **Not fixed here** (rule 7): out of scope for the CSP/preview fix, and choosing between "surface a
+  fallback UI" and "delete the unreachable branch" needs a real run to see whether the IPC path is
+  ever actually absent in practice.
+
+## NJ-36 — stale `ArtifactContext` header docs + inconsistent `nonce` dep in `ArtifactPanel` — OPEN (docs/nit) 2026-07-20
+
+- **What:** `ArtifactContext.tsx`'s header comment states the provider "Resets on sessionID change — a
+  fresh connect or a reconnect gets a new session id". No such effect exists any more: after PR #122
+  resets are driven **only** by screens calling `syncCodeSession`/`syncChatSession`, precisely so a
+  reconnect does *not* wipe a pinned chat's open canvas. The comment now describes the behavior the
+  #122 fix deliberately removed, which actively misleads anyone auditing this path.
+- **Secondary:** `ArtifactPanel`'s preview-URL effect omits `nonce` from its dep array while the
+  sibling file-list effect includes it. Harmless today because `iframeSrc` appends the nonce as a query
+  param anyway — but it is a real inconsistency for whoever next touches the cache-busting.
+- **Filed not fixed** (rule 7): found during the NJ-39 diagnosis, unrelated to the CSP defect.
+
 ## NJ-35 — assistant PIM/memory WRITE tools are auto-approved ("allow", no per-call prompt) — INTENTIONAL, DOCUMENTED (maintainer decision) 2026-07-19
 
 - **Context (audit1.md P2-13):** the `assistant` agent's permission map
@@ -413,7 +511,8 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 
 ## NJ-8 — live-preview: large single-file artifacts truncate on the local 4B — MITIGATED (runtime-verify pending) 2026-07-09
 - **Resolution (PR #30, Phase 1):** this is a local-model *capacity* limit, not a bug, so it's **mitigated** rather than closed. The coding prompt now steers the local 4B toward **concise, multi-file** writes (each under budget); an opt-in `NIGHTJAR_DESIGN_PROFILE=1` raises the predict/context caps **and** the matching wall-clock timeouts **together** and each stays finite (rule 3 — never the global default, `services.ts`); a truncated `write` still fails cleanly (empty part → `error`, no partial file). **To close (rule 6):** on a real local 4B ask for a large single-file page → confirm it emits multi-file (or a clean error), never a silent/garbage artifact; a stronger BYOK model renders big artifacts directly.
-- **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → iframe + markdown render + download) is implemented and **verified end-to-end** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 18/18). Only the model's ability to emit a *big* artifact in one tool call is limited.
+- **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → markdown render + download) is implemented and verified **up to but NOT including the iframe render** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 18/18). Only the model's ability to emit a *big* artifact in one tool call is limited.
+- **⚠ Verification-scope correction (2026-07-20, rule 8).** This entry previously claimed the mechanism was "verified end-to-end" **including the iframe**. That was a **false green**: `test-preview-e2e.ts` asserts via a Node-side `await fetch(url)`, which has **no CSP enforcement**, and the test's own header says "The only piece NOT covered here is the literal Electron `<iframe>` pixels (needs a display)." The iframe render was therefore never verified — and it was in fact **broken the entire time** by the missing `frame-src` (see **NJ-39**). A proxy (a Node fetch) had been standing in for the real path (a Chromium frame load), which is exactly the failure mode rule 8 names. Corrected so the next person to touch preview does not again assume the render path is covered by the existing suite and skip the GUI check.
 - **Detail:** the coding agent writes files via its `write` tool. The local **Qwen3-4B** is capped at `--predict 2048` tokens (a rule-3 safety backstop, `services.ts`). An elaborate single self-contained page can exceed that, so the `write` tool-call JSON is **truncated → the part goes `pending → error` with empty `input`** (observed). The preview correctly renders nothing for an errored write (no partial/garbage file). A **concise** page or a **markdown doc** fits the budget and renders fine; so does any artifact on a **stronger BYOK/OpenRouter model**.
 - **Mitigations in place:** the coding-mode system prompt steers previewable artifacts under a (gitignored) `preview/` dir **using the write tool** (not inline), and toward concise output; multi-file output (separate `index.html`/`style.css`/`script.js`) also keeps each write within budget.
 - **Fix ideas:** encourage multi-file/concise generation more strongly; raise `--predict` only behind a "design" profile (never the global default — rule 3); rely on a BYOK model for large artifacts.

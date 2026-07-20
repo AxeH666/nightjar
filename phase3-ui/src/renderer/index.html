@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src 'self' blob:" />
+    <!--
+      CSP note: `frame-src` and `img-src` are declared EXPLICITLY. Neither can be left to
+      the `default-src 'self'` fallback, and both were silent breakages:
+      - frame-src: the live-preview panel frames the loopback preview server
+        (main/preview-server.ts, `http://127.0.0.1:<ephemeral>`), which is cross-origin to
+        the renderer in BOTH dev (http://localhost:5173) and packaged (file://) builds.
+        `connect-src` already allowed loopback, but connect-src governs fetch/XHR/WS only —
+        it has NO authority over frame navigation, so the frame fell back to default-src
+        and was refused. Chromium renders no error page for a CSP-blocked frame, so this
+        showed up only as a blank preview pane.
+      - img-src: `'self'` does NOT match the `data:` scheme, so every `data:` URL image
+        (attachment thumbnails, optimistic + rehydrated chat images, generate_image
+        results) was refused at render time even when every layer beneath succeeded.
+      Deliberately NOT added: `worker-src` (no worker is instantiated anywhere in the
+      renderer; a same-origin one would already be permitted by the default-src fallback).
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src 'self' http://127.0.0.1:*; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
     <title>June</title>
   </head>
   <body>

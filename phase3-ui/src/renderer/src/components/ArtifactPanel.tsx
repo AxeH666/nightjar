@@ -60,7 +60,9 @@ export function ArtifactPanel({ sessionID, entry, nonce, live, onSelectEntry, on
       setSrc("")
       return
     }
-    b.url(sessionID, entry).then((u) => alive && setSrc(u)).catch(() => {})
+    b.url(sessionID, entry)
+      .then((u) => alive && setSrc(u))
+      .catch((e) => console.error("[artifact] preview URL resolution failed", { sessionID, entry }, e))
     return () => {
       alive = false
     }
@@ -68,7 +70,9 @@ export function ArtifactPanel({ sessionID, entry, nonce, live, onSelectEntry, on
 
   // Refresh the file list whenever a new mirror write lands (nonce bump).
   useEffect(() => {
-    b?.list(sessionID).then(setFiles).catch(() => {})
+    b?.list(sessionID)
+      .then(setFiles)
+      .catch((e) => console.error("[artifact] preview file list failed", { sessionID }, e))
   }, [b, sessionID, nonce])
 
   // Choreography: jump to Code while a file streams, back to Preview when it settles.
