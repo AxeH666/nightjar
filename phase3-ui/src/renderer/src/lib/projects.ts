@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
 import { deleteProjectContent, copyProjectContent } from "./projectContent"
-import { reportStorageWrite, useStorageHealthy } from "./storageHealth"
 
 // A project space. The science labs (mechanical/bio/chem) each keep their own list; "general" is
 // the top-level, non-lab Projects space surfaced in the main nav — a global work container, like
@@ -55,6 +54,10 @@ export function persistProjects(scope: ProjectScope, projects: Project[]): boole
 export function persistDuplicate(srcId: string, copyId: string, writeList: () => boolean): boolean {
   if (!copyProjectContent(srcId, copyId)) return false
   if (!writeList()) {
+    // Best-effort cleanup: the copied content is removed so it doesn't orphan under an id no
+    // list references. If THIS delete also fails (storage still broken), the content lingers —
+    // there is no clean recovery for a failure during the cleanup of a failure without a
+    // transactional store. That residual is tracked under NJ-41 (Bugbot).
     deleteProjectContent(copyId)
     return false
   }
@@ -80,18 +83,10 @@ export interface ProjectsStore {
   duplicate: (id: string) => void
   toggleFavorite: (id: string) => void
   get: (id: string) => Project | undefined
-  // False once any mutation has failed to persist. The list still renders (we keep the
-  // in-memory copy so the session stays usable), but the UI must say the changes aren't
-  // being saved rather than let them look durable.
-  storageOk: boolean
 }
 
 export function useProjects(scope: ProjectScope): ProjectsStore {
   const [projects, setProjects] = useState<Project[]>(() => loadProjects(scope))
-  // Module-level, NOT component state: this hook is remounted by ordinary navigation, and a
-  // per-component flag would reset the "changes aren't saving" warning to healthy on every
-  // remount while storage was still broken. See storageHealth.ts.
-  const storageOk = useStorageHealthy()
   // The ref is the authoritative current list, updated SYNCHRONOUSLY by every mutation; state
   // mirrors it for rendering.
   const projectsRef = useRef(projects)
@@ -108,11 +103,8 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
   // Persist SYNCHRONOUSLY from the ref, so a mutation survives even when this component
   // unmounts in the same React batch — e.g. "create → immediately open the project" navigates
   // away and unmounts Projects home before a setState-scheduled persist could ever run.
-  // Returns whether the list actually persisted. It deliberately does NOT report storage health
-  // itself: an operation can perform several writes (duplicate copies content AND writes the
-  // list), and reporting each one separately lets a later small success clear the flag a larger
-  // failure just set — masking exactly the case this is meant to catch. So every operation
-  // below reports ONCE, combining every write it made. (Bugbot, PR #125.)
+  // Returns whether the list actually persisted, which create/duplicate use to decide whether
+  // to keep or revert the in-memory change.
   const mutate = useCallback(
     (fn: (prev: Project[]) => Project[]): boolean => {
       const next = fn(projectsRef.current)
@@ -124,9 +116,6 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     [scope],
   )
 
-  // All list ops report health under ONE key per scope — never per-write — so that a small
-  // later success can't clear a failure from a different write in the same operation.
-  const healthKey = `projects:${scope}`
   // Restore the in-memory list to a snapshot after a failed persist, so a create/duplicate that
   // didn't survive to disk doesn't leave a clickable card behind. That card is the real hazard:
   // ProjectView mounts its OWN useProjects loaded from disk, so it could never find such a
@@ -141,36 +130,33 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
       const before = projectsRef.current
       const now = Date.now()
       const p: Project = { id: newId(), name: name.trim() || "Untitled project", description, favorite: false, createdAt: now, updatedAt: now }
-      const ok = mutate((prev) => [p, ...prev])
-      if (!ok) revertTo(before) // don't leave an unpersisted card the caller might navigate into
-      reportStorageWrite(healthKey, ok)
-      return { project: p, persisted: ok }
+      const persisted = mutate((prev) => [p, ...prev])
+      if (!persisted) revertTo(before) // don't leave an unpersisted card the caller might navigate into
+      return { project: p, persisted }
     },
-    [mutate, healthKey, revertTo],
+    [mutate, revertTo],
   )
   const rename = useCallback(
     (id: string, name: string) => {
-      reportStorageWrite(healthKey, mutate((prev) => prev.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name, updatedAt: Date.now() } : p))))
+      mutate((prev) => prev.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name, updatedAt: Date.now() } : p)))
     },
-    [mutate, healthKey],
+    [mutate],
   )
   const setDescription = useCallback(
     (id: string, description: string) => {
-      reportStorageWrite(healthKey, mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p))))
+      mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p)))
     },
-    [mutate, healthKey],
+    [mutate],
   )
   const remove = useCallback(
     (id: string) => {
       // Drop the project's Memory/Instructions/Files too — must not linger on disk. If that
       // fails we still remove the card: the user asked for the project to go, and leaving it
-      // would be a worse failure than the content residue. Both results are combined into ONE
-      // health report so a successful list write can't mask the failed content delete.
-      const contentOk = deleteProjectContent(id)
-      const listOk = mutate((prev) => prev.filter((p) => p.id !== id))
-      reportStorageWrite(healthKey, contentOk && listOk)
+      // would be a worse failure than the content residue.
+      deleteProjectContent(id)
+      mutate((prev) => prev.filter((p) => p.id !== id))
     },
-    [mutate, healthKey],
+    [mutate],
   )
   const duplicate = useCallback(
     (id: string) => {
@@ -182,22 +168,21 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
       // Content is copied FIRST: a duplicate whose Memory/Instructions/Files silently didn't
       // come across is not a duplicate, it is an empty project wearing the source's name — and
       // the projects-list write is small enough that it would usually succeed even when the
-      // content copy hit quota, leaving the card looking perfectly correct.
+      // content copy hit quota, leaving the card looking perfectly correct. persistDuplicate
+      // rolls its own writes back on failure; here we also revert the in-memory insert so the
+      // user isn't left holding a duplicate that is empty now and gone after a reload.
       const ok = persistDuplicate(src.id, copy.id, () => mutate((prev) => [copy, ...prev]))
-      // If mutate ran but didn't persist, revert the in-memory insert too, so the user isn't
-      // left holding a duplicate that is empty now and gone after a reload.
       if (!ok && projectsRef.current !== before) revertTo(before)
-      reportStorageWrite(healthKey, ok)
     },
-    [mutate, healthKey, revertTo],
+    [mutate, revertTo],
   )
   const toggleFavorite = useCallback(
     (id: string) => {
-      reportStorageWrite(healthKey, mutate((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite, updatedAt: Date.now() } : p))))
+      mutate((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite, updatedAt: Date.now() } : p)))
     },
-    [mutate, healthKey],
+    [mutate],
   )
   const get = useCallback((id: string) => projectsRef.current.find((p) => p.id === id), [])
 
-  return { projects, create, rename, setDescription, remove, duplicate, toggleFavorite, get, storageOk }
+  return { projects, create, rename, setDescription, remove, duplicate, toggleFavorite, get }
 }

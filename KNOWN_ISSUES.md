@@ -67,19 +67,36 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   mount. Every call site (`ProjectsHome`, `ProjectView`, `ProjectsScreen`) gets its OWN copy. They
   agree only because localStorage is the shared source of truth — so the instant a write fails, the
   instances diverge, and a project that exists in one hook's memory is invisible to another.
-- **Why it matters:** this is the common root of the five storage bugs found reviewing PR #125.
-  Finding #1 (health reset on remount) and finding #6 (a failed `create` that still navigated into a
-  project `ProjectView` can't see) are both direct consequences; the rest are the same "one instance's
-  view isn't another's" shape. Each was patched at the symptom in #125 (module-scoped health, revert
-  on failed create/duplicate, don't-navigate-on-failure) — but the divergence itself remains.
+- **Why it matters:** this is the common root of the SIX storage bugs found reviewing PR #125 across
+  six BugBot rounds. Finding #1 (health reset on remount) and finding #6 (a failed `create` that still
+  navigated into a project `ProjectView` can't see) are direct consequences; the rest are the same
+  "one instance's view isn't another's" shape. The per-operation correctness fixes (revert on failed
+  create/duplicate, `persistDuplicate` rollback, don't-navigate-on-failure) stayed in #125; the
+  cross-instance *storage-health* signalling did not — see next bullet.
+- **Why the global "storage health" banner was REMOVED from #125 (maintainer, 2026-07-21):** the
+  app-wide "Changes not being saved" banner needed a shared health signal, and the two stopgaps for it
+  (first a module-scoped boolean, then a module-scoped set of failing keys) each grew their own
+  lifecycle bugs — round 5 was the boolean being cleared by an unrelated success, round 6 was set keys
+  that were never cleared on delete/unmount and a `persistDuplicate` cleanup that ignored its own
+  delete failure. That signal is a facet of *this* store-consistency problem, so it does not belong in
+  a hand-rolled stopgap. #125 now keeps only the **per-part `Saved`/`Not saved` chip**, which is
+  accurate by construction (it reports that part's own last write, no cross-part reconciliation), and
+  the whole app-wide storage-health model — including a failure signal for project-list ops
+  (create/rename/duplicate/delete), which #125 no longer surfaces beyond the visible revert — is
+  deferred to this refactor.
 - **The fix (its own PR, not #125):** make the projects list a module-level, per-scope store consumed
-  via `useSyncExternalStore` — the same shape `lib/storageHealth.ts` already uses — so every consumer
-  shares one list and create→open works because the destination view sees the same data. It touches
-  the lab scopes (`MechanicalLab` etc.) as well as the general space, so it deserves its own diff and
-  its own BugBot cycle rather than riding along mid-PR. Deferred deliberately (maintainer, 2026-07-20).
-- **Also fold in during that refactor:** `ProjectView` should stop reading `store.get(id)` (memoized
-  against a ref with empty deps) — #125 already moved it to `store.projects.find(...)`, but the store
-  refactor is the moment to make that the only pattern.
+  via `useSyncExternalStore` (the shape the now-removed `storageHealth.ts` had used) so every consumer
+  shares one list and create→open works because the destination view sees the same data. Build the
+  storage-health signal ON that shared store, where key lifecycle is natural, rather than as a side
+  channel. It touches the lab scopes (`MechanicalLab` etc.) as well as the general space, so it
+  deserves its own diff and its own BugBot cycle rather than riding along mid-PR.
+- **Must handle in the refactor (the two deferred findings):** (7) a `persistDuplicate` cleanup-delete
+  that itself fails leaves content orphaned on disk — needs the transactional all-or-nothing the
+  shared store enables; (8) per-key health must be cleared when a project/part is deleted or the last
+  editor unmounts, or a stale key pins the banner forever.
+- **Also fold in:** `ProjectView` should stop reading `store.get(id)` (memoized against a ref with
+  empty deps) — #125 already moved it to `store.projects.find(...)`, but the store refactor is the
+  moment to make that the only pattern.
 
 ## NJ-40 — every Projects localStorage write swallowed its exception, so a failed save presented a fully successful UI — FIXED (feat/projects-ux-save-rename) 2026-07-20
 
@@ -159,7 +176,19 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   in-memory insert on failure so `submitNew` can decline to navigate. Both root-caused to **NJ-41**
   (per-component store divergence); at four-plus rounds of the same class the maintainer chose minimal
   keyed fixes here and a dedicated store-refactor PR for the cause, rather than a fifth ordering patch.
-- **Residual (rule 8):** the *rendered* failure chip was not confirmed in a real GUI — that needs a
+- **Seventh state — the scope decision that ended the cycle (maintainer, 2026-07-21):** the round-6
+  findings (stale content keys pinning the banner; `persistDuplicate` cleanup ignoring its own delete
+  failure) were both inside the keyed-set stopgap that the round-5 fix had introduced — the fix was
+  generating the next finding. Rather than a seventh patch, the maintainer chose to **remove the global
+  storage-health banner and its entire hand-rolled signal** from #125, keeping only the per-part chip
+  (accurate by construction — it reports that part's own last write, no cross-part reconciliation).
+  `create` still returns `{ project, persisted }` and both `create`/`duplicate` still revert on failure
+  — those are per-operation correctness, not the cross-instance signal. The app-wide health model and
+  both round-6 findings are deferred to **NJ-41**, where the shared store makes them tractable.
+  `storageHealth.ts` and its test were deleted; the `reportStorageWrite`/`storageOk` plumbing removed.
+  The transferable lesson, recorded: when a fix keeps producing adjacent findings of its own defect
+  class, the abstraction is wrong — stop patching and remove or rebuild it rather than chase round N+1.
+- **Residual (rule 8):** the *rendered* per-part chip was not confirmed in a real GUI — that needs a
   native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
   contract underneath it is proven headlessly; the pixels are not.
 

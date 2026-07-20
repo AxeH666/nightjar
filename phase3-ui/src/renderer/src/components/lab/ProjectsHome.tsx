@@ -96,14 +96,6 @@ export function ProjectsHome({
           >
             New project
           </button>
-          {!store.storageOk && (
-            <span
-              className="text-[11px] font-medium text-nightjar-alert"
-              title="Browser storage is full or unavailable, so project changes are not being written to disk. They will be lost when the app closes."
-            >
-              Changes not being saved
-            </span>
-          )}
         </div>
 
         {visible.length === 0 ? (

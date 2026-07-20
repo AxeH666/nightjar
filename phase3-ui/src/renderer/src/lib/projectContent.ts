@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { reportStorageWrite } from "./storageHealth"
 
 // Per-project content (Lab.md §4.6): Memory, Instructions, and Files, each scoped to ONE
 // project and persisted in localStorage. This is the data layer + it powers the editable
@@ -132,16 +131,13 @@ export function useProjectContent(projectId: string): ProjectContent {
   const [saveState, setSaveState] = useState<Partial<Record<ContentPart, SaveResult>>>({})
   const filesRef = useRef(files)
 
-  // Record what a write ACTUALLY did, so the UI reports the real outcome per part. Also feeds
-  // the shared storage-health signal under a per-(project, part) key, so the app-wide warning
-  // reflects THIS part's outcome without a success elsewhere clearing a still-failing part.
-  const noteSave = useCallback(
-    (part: ContentPart, ok: boolean) => {
-      reportStorageWrite(`content:${projectId}:${part}`, ok)
-      setSaveState((s) => ({ ...s, [part]: { ok, at: Date.now() } }))
-    },
-    [projectId],
-  )
+  // Record what a write ACTUALLY did, so the per-part chip reports the real outcome. This is a
+  // property of THIS part's own last write, so it is accurate by construction and needs no
+  // cross-part reconciliation — the app-wide "storage health" signal that did try to reconcile
+  // was removed as a stopgap with lifecycle edges of its own (see NJ-41).
+  const noteSave = useCallback((part: ContentPart, ok: boolean) => {
+    setSaveState((s) => ({ ...s, [part]: { ok, at: Date.now() } }))
+  }, [])
 
   // Reload when the project changes (this hook is reused across projects).
   useEffect(() => {

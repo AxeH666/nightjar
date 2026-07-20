@@ -31,14 +31,6 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
         ) : (
           <span className="font-medium text-nightjar-text">Project</span>
         )}
-        {!store.storageOk && (
-          <span
-            className="ml-auto text-[11px] font-medium text-nightjar-alert"
-            title="Browser storage is full or unavailable, so project changes are not being written to disk. They will be lost when the app closes."
-          >
-            Changes not being saved
-          </span>
-        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
