@@ -1,15 +1,14 @@
 import { useState, type ReactNode } from "react"
-import { useProjects } from "../../lib/projects"
+import { useProjects, type ProjectScope } from "../../lib/projects"
 import { useProjectContent, type ProjectContent } from "../../lib/projectContent"
-import type { LabId } from "./labs"
 
 // A project's home (Lab.md §4.6): the breadcrumb + the three per-project areas — Memory,
 // Instructions, and Files — now REAL and editable (persisted per project). Wiring
 // Instructions into the lab agent's prompt and isolating this project's chats (sessions
 // keyed by (slot, projectId)) is the next PR; it needs live session work + on-device
 // verification (rules 6/8), so it's called out here rather than faked.
-export function ProjectView({ labId, projectId, onBack }: { labId: LabId; projectId: string; onBack: () => void }) {
-  const store = useProjects(labId)
+export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope; projectId: string; onBack: () => void }) {
+  const store = useProjects(scope)
   const project = store.get(projectId)
   const content = useProjectContent(projectId)
 

@@ -83,12 +83,13 @@ export function MechanicalLab({ onBack, onOpenSettings }: { onBack: () => void; 
 
       {view.kind === "projects" && (
         <ProjectsHome
-          labId="mechanical"
+          scope="mechanical"
+          backLabel={labById("mechanical").label}
           onBack={() => setView({ kind: "workspace" })}
           onOpen={(pid) => setView({ kind: "project", id: pid })}
         />
       )}
-      {view.kind === "project" && <ProjectView labId="mechanical" projectId={view.id} onBack={() => setView({ kind: "projects" })} />}
+      {view.kind === "project" && <ProjectView scope="mechanical" projectId={view.id} onBack={() => setView({ kind: "projects" })} />}
     </div>
   )
 }

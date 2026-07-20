@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
 import { deleteProjectContent, copyProjectContent } from "./projectContent"
 
+// A project space. The science labs (mechanical/bio/chem) each keep their own list; "general" is
+// the top-level, non-lab Projects space surfaced in the main nav — a global work container, like
+// the reference product's Projects. Per-project chat isolation is layered on in the 5b PR.
+export type ProjectScope = LabId | "general"
+
 // Per-lab Projects (Lab.md §4.6): a project is an isolated container so related work stays
 // separate ("openforge" and "manohiti" never bleed together). This module is the STORE —
 // the Project record + localStorage-backed CRUD, scoped per lab. Per-project isolation of
@@ -16,20 +21,20 @@ export interface Project {
   updatedAt: number
 }
 
-function projectsKey(lab: LabId): string {
-  return `nightjar.projects.${lab}`
+function projectsKey(scope: ProjectScope): string {
+  return `nightjar.projects.${scope}`
 }
-function loadProjects(lab: LabId): Project[] {
+function loadProjects(scope: ProjectScope): Project[] {
   try {
-    const raw = localStorage.getItem(projectsKey(lab))
+    const raw = localStorage.getItem(projectsKey(scope))
     return raw ? (JSON.parse(raw) as Project[]) : []
   } catch {
     return []
   }
 }
-function persistProjects(lab: LabId, projects: Project[]): void {
+function persistProjects(scope: ProjectScope, projects: Project[]): void {
   try {
-    localStorage.setItem(projectsKey(lab), JSON.stringify(projects))
+    localStorage.setItem(projectsKey(scope), JSON.stringify(projects))
   } catch {
     /* localStorage unavailable → this run keeps projects in memory only */
   }
@@ -53,18 +58,18 @@ export interface ProjectsStore {
   get: (id: string) => Project | undefined
 }
 
-export function useProjects(lab: LabId): ProjectsStore {
-  const [projects, setProjects] = useState<Project[]>(() => loadProjects(lab))
+export function useProjects(scope: ProjectScope): ProjectsStore {
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects(scope))
   // The ref is the authoritative current list, updated SYNCHRONOUSLY by every mutation; state
   // mirrors it for rendering.
   const projectsRef = useRef(projects)
 
-  // Each lab has its own list — reload when the lab changes.
+  // Each scope (lab or the general space) has its own list — reload when the scope changes.
   useEffect(() => {
-    const loaded = loadProjects(lab)
+    const loaded = loadProjects(scope)
     projectsRef.current = loaded
     setProjects(loaded)
-  }, [lab])
+  }, [scope])
 
   // Persist SYNCHRONOUSLY from the ref, so a mutation survives even when this component
   // unmounts in the same React batch — e.g. "create → immediately open the project" navigates
@@ -73,10 +78,10 @@ export function useProjects(lab: LabId): ProjectsStore {
     (fn: (prev: Project[]) => Project[]) => {
       const next = fn(projectsRef.current)
       projectsRef.current = next
-      persistProjects(lab, next)
+      persistProjects(scope, next)
       setProjects(next)
     },
-    [lab],
+    [scope],
   )
 
   const create = useCallback(
