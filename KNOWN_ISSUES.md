@@ -61,6 +61,137 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-41 — `useProjects` is per-component state, not a shared store — the root cause behind the PR-#125 whack-a-mole — OPEN (refactor deferred to its own PR) 2026-07-20
+
+- **What:** `useProjects(scope)` holds the projects list in `useState`, loaded from localStorage on
+  mount. Every call site (`ProjectsHome`, `ProjectView`, `ProjectsScreen`) gets its OWN copy. They
+  agree only because localStorage is the shared source of truth — so the instant a write fails, the
+  instances diverge, and a project that exists in one hook's memory is invisible to another.
+- **Why it matters:** this is the common root of the SIX storage bugs found reviewing PR #125 across
+  six BugBot rounds. Finding #1 (health reset on remount) and finding #6 (a failed `create` that still
+  navigated into a project `ProjectView` can't see) are direct consequences; the rest are the same
+  "one instance's view isn't another's" shape. The per-operation correctness fixes (revert on failed
+  create/duplicate, `persistDuplicate` rollback, don't-navigate-on-failure) stayed in #125; the
+  cross-instance *storage-health* signalling did not — see next bullet.
+- **Why the global "storage health" banner was REMOVED from #125 (maintainer, 2026-07-21):** the
+  app-wide "Changes not being saved" banner needed a shared health signal, and the two stopgaps for it
+  (first a module-scoped boolean, then a module-scoped set of failing keys) each grew their own
+  lifecycle bugs — round 5 was the boolean being cleared by an unrelated success, round 6 was set keys
+  that were never cleared on delete/unmount and a `persistDuplicate` cleanup that ignored its own
+  delete failure. That signal is a facet of *this* store-consistency problem, so it does not belong in
+  a hand-rolled stopgap. #125 now keeps only the **per-part `Saved`/`Not saved` chip**, which is
+  accurate by construction (it reports that part's own last write, no cross-part reconciliation), and
+  the whole app-wide storage-health model — including a failure signal for project-list ops
+  (create/rename/duplicate/delete), which #125 no longer surfaces beyond the visible revert — is
+  deferred to this refactor.
+- **The fix (its own PR, not #125):** make the projects list a module-level, per-scope store consumed
+  via `useSyncExternalStore` (the shape the now-removed `storageHealth.ts` had used) so every consumer
+  shares one list and create→open works because the destination view sees the same data. Build the
+  storage-health signal ON that shared store, where key lifecycle is natural, rather than as a side
+  channel. It touches the lab scopes (`MechanicalLab` etc.) as well as the general space, so it
+  deserves its own diff and its own BugBot cycle rather than riding along mid-PR.
+- **Must handle in the refactor (the two deferred findings):** (7) a `persistDuplicate` cleanup-delete
+  that itself fails leaves content orphaned on disk — needs the transactional all-or-nothing the
+  shared store enables; (8) per-key health must be cleared when a project/part is deleted or the last
+  editor unmounts, or a stale key pins the banner forever.
+- **Also fold in:** `ProjectView` should stop reading `store.get(id)` (memoized against a ref with
+  empty deps) — #125 already moved it to `store.projects.find(...)`, but the store refactor is the
+  moment to make that the only pattern.
+
+## NJ-40 — every Projects localStorage write swallowed its exception, so a failed save presented a fully successful UI — FIXED (feat/projects-ux-save-rename) 2026-07-20
+
+- **What:** all four write paths in the Projects feature (`saveStr`, `saveFiles` in
+  `projectContent.ts`; `persistProjects` in `projects.ts`; and `copyProjectContent`) caught their
+  exception and returned `void`. The comments anticipated "localStorage unavailable", but the same
+  bare `catch` also absorbs **`QuotaExceededError`** — realistic here, since localStorage has a ~5MB
+  per-origin cap and pasting a large reference into a project's Files is an ordinary way to reach it.
+- **Consequence:** the state update ran regardless of whether the write landed, so the UI reported
+  success over a total persistence failure — the file appeared in the list, the project card appeared
+  in the grid, and nothing had been written.
+- **Why it was a blocker, not a filing (maintainer, 2026-07-20):** this was originally going to be
+  recorded as a deferred item alongside NJ-36/37/38. It was correctly reclassified as a **prerequisite**
+  of the Save indicator shipped in the same PR: an indicator layered on a write that cannot report
+  failure would render "Saved" for writes that silently failed — **worse than no indicator**, because
+  it makes an untrustworthy thing look trustworthy. Shipping the indicator without this fix would have
+  been a regression, so the two shipped together.
+- **Fix:** `saveStr`/`saveFiles`/`persistProjects` now return a boolean. `useProjectContent` records a
+  per-part `SaveResult` and `ProjectView` renders **"Saved"** or **"Not saved"** from the actual result;
+  `useProjects` exposes `storageOk` and both Projects surfaces show a "Changes not being saved" warning.
+  No write path was moved, debounced, or buffered — the per-keystroke synchronous write is deliberate
+  (it is what makes an edit survive an immediate unmount), and the indicator only *reports* it.
+- **Verified (headless, rule 6 as far as it goes):** `projectContent.test.ts` forces the real failure —
+  a `localStorage` stub whose `setItem` throws `QuotaExceededError`, plus the storage-entirely-absent
+  case — and asserts the helpers return `false`. The tests were **mutation-checked**: flipping the
+  `catch` back to `return true` makes exactly the two failure-path tests fail with `expected true to be
+  false`, so they genuinely catch the regression rather than passing vacuously. Typecheck clean, build
+  OK, vitest 65/65.
+- **Second-order bug caught in review (Bugbot, PR #125):** the first cut kept `storageOk` in
+  `useProjects` **component state**. `ProjectsHome` and `ProjectView` each call that hook and only one
+  is mounted at a time, so opening or leaving a project remounted it, re-initialized the flag to
+  healthy, and **silently cleared the "Changes not being saved" warning while storage was still
+  broken** — the same false-success this entry is about, one level up. Fixed by moving storage health
+  to a module-scoped store (`lib/storageHealth.ts`) consumed via `useSyncExternalStore`, so every
+  mounted consumer agrees and a remount inherits the current truth. Content writes
+  (`useProjectContent`) feed the same signal, since a failed content write means the origin's storage
+  is broken app-wide, not just for one chip. Worth recording: the *fix* for a false-success bug
+  reintroduced a narrower false-success, which is exactly why this class needs a test rather than an
+  inspection.
+- **Third-order bug, also caught in review (Bugbot, second pass on PR #125):** `copyProjectContent`
+  and `deleteProjectContent` still swallowed their exceptions. On **duplicate**, a content copy that
+  failed on quota while the much smaller projects-list write succeeded produced a duplicate card with
+  none of its Memory/Instructions/Files carried across — and `storageOk` stayed `true`, because
+  reporting each write separately let the later small success clear the flag the larger failure had
+  just set. Fixed three ways: both helpers now return a boolean; `copyProjectContent` **rolls back its
+  partial writes** so a failed duplicate leaves no half-populated project behind; and every store
+  operation now reports storage health **once**, combining every write it made (`mutate` returns its
+  result instead of reporting). `duplicate` aborts rather than creating a contentless copy.
+- **Fourth-order bug (Bugbot, third pass on PR #125):** the *reverse* failure ordering. The content
+  copy can SUCCEED and the projects-list write then fail — leaving Memory/Instructions/Files in storage
+  under an id that appears in no list. That is orphaned **permanently**, because only `remove()` ever
+  deletes content and it cannot reach an id it cannot see. Fixed by extracting `persistDuplicate()`
+  (storage-side sequencing, rollback on either ordering) and reverting the in-memory insert too, so a
+  failed duplicate is simply a duplicate that did not happen. The extraction also made this testable
+  without a React renderer, which is why it has a test at all.
+- **The pattern worth remembering from this entry:** four successive rounds of the *same* defect class
+  — a storage failure the UI reported as success — each found only because something actively looked
+  for it. Three were caught by Bugbot; the others by **mutation-checking**, which twice caught
+  **vacuous tests** that a careful reading did not:
+  1. The rollback test used a quota boundary that made the copy throw on its *first* write, so nothing
+     was ever partially written and the orphan assertion passed with **or without** the rollback it
+     claimed to verify. Deleting the rollback left the suite green.
+  2. The "content copy fails" test never seeded the source, so `copyProjectContent` found no parts,
+     trivially succeeded, and the failure scenario never occurred. It asserted nothing.
+  Both looked entirely reasonable on the page. The rule this earns: for any guard whose whole purpose
+  is a failure path, **assert then mutate** — break the guard and watch the specific test go red — or
+  the test is decoration, and a green suite is evidence of nothing.
+- **Fifth/sixth findings (Bugbot, high-effort pass on PR #125) — and the decision to stop patching.**
+  (5, Medium) storage health was a single global boolean, so a success on ANY key cleared the
+  app-wide banner while a different panel still (correctly) showed "Not saved" — e.g. Files hit quota,
+  then a one-character Memory edit or a rename cleared the banner over still-unsaved Files. (6, High)
+  a failed `create` still called `onOpen`, navigating into a project that only existed in the store's
+  memory; `ProjectView` mounts its own `useProjects` from disk and could not find it, so the user got
+  an empty, un-renameable shell — and content edited there still showed "Saved". Fixed: health is now
+  a **set of failing keys** (a success clears only its own key; chip and banner derive from the same
+  per-key data and cannot contradict), and `create` returns `{ project, persisted }` + reverts the
+  in-memory insert on failure so `submitNew` can decline to navigate. Both root-caused to **NJ-41**
+  (per-component store divergence); at four-plus rounds of the same class the maintainer chose minimal
+  keyed fixes here and a dedicated store-refactor PR for the cause, rather than a fifth ordering patch.
+- **Seventh state — the scope decision that ended the cycle (maintainer, 2026-07-21):** the round-6
+  findings (stale content keys pinning the banner; `persistDuplicate` cleanup ignoring its own delete
+  failure) were both inside the keyed-set stopgap that the round-5 fix had introduced — the fix was
+  generating the next finding. Rather than a seventh patch, the maintainer chose to **remove the global
+  storage-health banner and its entire hand-rolled signal** from #125, keeping only the per-part chip
+  (accurate by construction — it reports that part's own last write, no cross-part reconciliation).
+  `create` still returns `{ project, persisted }` and both `create`/`duplicate` still revert on failure
+  — those are per-operation correctness, not the cross-instance signal. The app-wide health model and
+  both round-6 findings are deferred to **NJ-41**, where the shared store makes them tractable.
+  `storageHealth.ts` and its test were deleted; the `reportStorageWrite`/`storageOk` plumbing removed.
+  The transferable lesson, recorded: when a fix keeps producing adjacent findings of its own defect
+  class, the abstraction is wrong — stop patching and remove or rebuild it rather than chase round N+1.
+- **Residual (rule 8):** the *rendered* per-part chip was not confirmed in a real GUI — that needs a
+  native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
+  contract underneath it is proven headlessly; the pixels are not.
+
 ## NJ-39 — live-preview never rendered: the renderer CSP declared no `frame-src` (and no `img-src`, silently breaking every `data:` image) — FIXED (fix/preview-csp-frame-src) 2026-07-20
 
 - **Severity:** **P1** — the whole live-preview/Artifacts panel was dead in **both** dev and packaged

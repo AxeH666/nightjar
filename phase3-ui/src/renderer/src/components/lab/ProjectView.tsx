@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { useProjects, type ProjectScope } from "../../lib/projects"
-import { useProjectContent, type ProjectContent } from "../../lib/projectContent"
+import { useProjectContent, type ProjectContent, type SaveResult } from "../../lib/projectContent"
 
 // A project's home (Lab.md §4.6): the breadcrumb + the three per-project areas — Memory,
 // Instructions, and Files — now REAL and editable (persisted per project). Wiring
@@ -9,7 +9,11 @@ import { useProjectContent, type ProjectContent } from "../../lib/projectContent
 // verification (rules 6/8), so it's called out here rather than faked.
 export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope; projectId: string; onBack: () => void }) {
   const store = useProjects(scope)
-  const project = store.get(projectId)
+  // Read from `projects` state, NOT store.get(): `get` is memoized against the ref with an
+  // empty dep array, so it only reflects a rename incidentally (because mutate also
+  // re-renders). Reading state directly makes the name genuinely reactive — which matters
+  // now that this view can rename in place.
+  const project = store.projects.find((p) => p.id === projectId)
   const content = useProjectContent(projectId)
 
   return (
@@ -22,22 +26,32 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
         >
           ‹ Projects
         </button>
-        <span className="font-medium text-nightjar-text">{project?.name ?? "Project"}</span>
+        {project ? (
+          <ProjectTitle name={project.name} onRename={(v) => store.rename(project.id, v)} />
+        ) : (
+          <span className="font-medium text-nightjar-text">Project</span>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-4">
-          <Panel emoji="📋" title="Instructions" note="Prepended to the lab agent's prompt for this project's chats (wired in the next step).">
+          <Panel
+            emoji="📋"
+            title="Instructions"
+            optional
+            save={content.saveState.instructions}
+            note="If set, prepended to this project's chats (wired in the next step). Leave empty and the project works exactly the same."
+          >
             <textarea
               value={content.instructions}
               onChange={(e) => content.setInstructions(e.target.value)}
-              placeholder="e.g. Act as my technical co-founder and systems architect…"
+              placeholder="Optional — how the agent should behave in this project"
               rows={4}
               className="w-full resize-y rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
             />
           </Panel>
 
-          <Panel emoji="💾" title="Memory" note="Durable context for this project. Private to you.">
+          <Panel emoji="💾" title="Memory" optional save={content.saveState.memory} note="Durable context for this project. Private to you.">
             <textarea
               value={content.memory}
               onChange={(e) => content.setMemory(e.target.value)}
@@ -47,7 +61,13 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
             />
           </Panel>
 
-          <Panel emoji="📎" title="Files" note="Reference snippets the agent can draw on within this project (distinct from generated Downloads).">
+          <Panel
+            emoji="📎"
+            title="Files"
+            optional
+            save={content.saveState.files}
+            note="Reference snippets the agent can draw on within this project (distinct from generated Downloads)."
+          >
             <FilesEditor content={content} />
           </Panel>
 
@@ -60,11 +80,105 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
   )
 }
 
-function Panel({ emoji, title, note, children }: { emoji: string; title: string; note: string; children: ReactNode }) {
+// Inline-editable project title. Mirrors the ProjectCard rename pattern (click to edit, Enter
+// commits, Escape discards, blur commits) including the cancelRef guard — unmounting the
+// focused input still fires onBlur, so Escape needs that flag to genuinely discard.
+//
+// This is REQUIRED, not a nicety: creating a project auto-navigates straight into it, so once
+// a nameless create is allowed you would otherwise land inside "Untitled project" with no way
+// to name it without going back to the grid and finding it among identically-named cards.
+function ProjectTitle({ name, onRename }: { name: string; onRename: (v: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const cancelRef = useRef(false)
+
+  function commit() {
+    if (cancelRef.current) {
+      cancelRef.current = false
+      setEditing(false)
+      return
+    }
+    onRename(draft)
+    setEditing(false)
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => {
+          setDraft(name) // start from the current name, never a stale edit
+          setEditing(true)
+        }}
+        title="Rename project"
+        className="rounded px-1 font-medium text-nightjar-text hover:bg-nightjar-surface"
+      >
+        {name}
+      </button>
+    )
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit()
+        if (e.key === "Escape") {
+          cancelRef.current = true // suppress the onBlur-on-unmount commit
+          setDraft(name)
+          setEditing(false)
+        }
+      }}
+      onBlur={commit}
+      className="rounded bg-nightjar-base px-1 font-medium text-nightjar-text focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
+    />
+  )
+}
+
+// Reports what the last write to this part ACTUALLY did. Never renders an unearned "Saved":
+// `save` is undefined until something has been written, and a failed write says so plainly.
+function SaveChip({ save }: { save: SaveResult }) {
+  return save.ok ? (
+    <span className="ml-auto text-[11px] text-nightjar-text/40" title="Saved on this device">
+      Saved
+    </span>
+  ) : (
+    <span
+      className="ml-auto text-[11px] font-medium text-nightjar-alert"
+      title="Browser storage is full or unavailable — this edit exists in memory only and will be lost when the app closes."
+    >
+      Not saved
+    </span>
+  )
+}
+
+function Panel({
+  emoji,
+  title,
+  note,
+  optional,
+  save,
+  children,
+}: {
+  emoji: string
+  title: string
+  note: string
+  optional?: boolean
+  save?: SaveResult
+  children: ReactNode
+}) {
   return (
     <div className="rounded-xl border border-nightjar-surface bg-nightjar-surface/20 p-4">
-      <div className="font-medium text-nightjar-text">
-        {emoji} {title}
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-nightjar-text">
+          {emoji} {title}
+        </span>
+        {optional && (
+          <span className="rounded bg-nightjar-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-nightjar-text/40">
+            Optional
+          </span>
+        )}
+        {save && <SaveChip save={save} />}
       </div>
       <p className="mb-2 text-xs text-nightjar-text/40">{note}</p>
       {children}
@@ -99,13 +213,21 @@ function FilesEditor({ content }: { content: ProjectContent }) {
           rows={3}
           className="resize-y rounded bg-nightjar-surface px-2 py-1 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
         />
-        <button
-          onClick={add}
-          disabled={!name.trim() && !body.trim()}
-          className="self-start rounded-lg bg-nightjar-accent px-3 py-1 text-xs font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
-        >
-          Add reference
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={add}
+            disabled={!name.trim() && !body.trim()}
+            className="self-start rounded-lg bg-nightjar-accent px-3 py-1 text-xs font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
+          >
+            Add reference
+          </button>
+          {/* Unlike Instructions/Memory (persisted per keystroke), this composer is local
+              component state — navigating away discards it. It is the one genuinely unsaved
+              edit in this view, so it says so instead of looking saved. */}
+          {(name.trim() || body.trim()) && (
+            <span className="text-[11px] text-nightjar-text/40">Not added yet — click Add reference</span>
+          )}
+        </div>
       </div>
 
       {content.files.length === 0 ? (

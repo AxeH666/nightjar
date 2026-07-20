@@ -38,12 +38,19 @@ export function ProjectsHome({
     })
   }, [store.projects, query, sort])
 
+  // A name is NOT required. The store already defaults an empty name to "Untitled project"
+  // (projects.ts create), and the project opens straight into ProjectView, which can rename
+  // in place — so naming is something you do when you know the name, not a gate on starting.
+  //
+  // Only navigate if the project actually persisted. If storage failed, the project exists
+  // only in the store's memory and ProjectView (which loads its own copy from disk) could not
+  // find it — so we stay here, keep the typed name for a retry, and let the "Changes not being
+  // saved" warning explain why. (Bugbot, PR #125.)
   function submitNew() {
-    const name = newName.trim()
-    if (!name) return
-    const p = store.create(name)
+    const { project, persisted } = store.create(newName)
+    if (!persisted) return
     setNewName("")
-    onOpen(p.id)
+    onOpen(project.id)
   }
 
   return (
@@ -80,13 +87,12 @@ export function ProjectsHome({
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submitNew()}
-            placeholder="New project name…"
+            placeholder="New project name (optional)…"
             className="w-64 rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
           />
           <button
             onClick={submitNew}
-            disabled={!newName.trim()}
-            className="rounded-lg bg-nightjar-accent px-3 py-2 text-sm font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
+            className="rounded-lg bg-nightjar-accent px-3 py-2 text-sm font-medium text-nightjar-base hover:brightness-110"
           >
             New project
           </button>
