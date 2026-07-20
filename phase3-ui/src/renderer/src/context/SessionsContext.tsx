@@ -76,7 +76,7 @@ const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June c
 // resumable history rail need this (code + each lab, e.g. cad); the chat slot is the
 // adopted primary and has no list. localStorage is renderer-only and can be unavailable/
 // blocked, so every access is guarded and degrades to in-memory-only for the current run.
-const HISTORY_SLOTS: SlotId[] = ["code", "cad"]
+const HISTORY_SLOTS: SlotId[] = ["code", "cad", "chat"]
 const isHistorySlot = (slot: SlotId): boolean => HISTORY_SLOTS.includes(slot)
 // The code slot keeps its ORIGINAL key so existing users' history survives the generalization.
 function sessionIdsKey(slot: SlotId): string {
@@ -232,7 +232,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // Per-slot persisted sets of session ids that have served each history slot (see the
   // module-level helpers). Each slot's history rail filters GET /session down to its set.
   const [sessionIdsBySlot, setSessionIdsBySlot] = useState<Record<SlotId, Set<string>>>(() => ({
-    chat: new Set(),
+    chat: loadSessionIds("chat"),
     code: loadSessionIds("code"),
     cad: loadSessionIds("cad"),
   }))
@@ -642,6 +642,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     if (!primaryId) return
     rebindSlot("chat", primaryId, true)
   }, [primaryId, rebindSlot])
+
+  // Chat is a history slot now: mark whatever session the chat slot currently holds — the
+  // adopted primary (not marked anywhere else), a New chat, or a resumed one — so it shows in
+  // the Chat recents rail. Idempotent (Set) + persisted; covers the reconnect-adopt case that
+  // newSession/resumeSession don't.
+  useEffect(() => {
+    if (isHistorySlot("chat") && slots.chat) markSlotSession("chat", slots.chat)
+  }, [slots.chat, markSlotSession])
 
   // code slot ← created here; (re)created whenever the primary reconnects.
   useEffect(() => {

@@ -8,6 +8,7 @@ import { useConnection } from "../context/ConnectionContext"
 import { useArtifact } from "../context/ArtifactContext"
 import { ChatSurface } from "../components/ChatSurface"
 import { ArtifactPanel } from "../components/ArtifactPanel"
+import { SessionList } from "../components/SessionList"
 import { capabilities } from "../lib/capabilities"
 import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
@@ -25,7 +26,7 @@ const AGENT_FOR_MODE = {
 } as const
 
 export function ChatScreen() {
-  const { slots, messagesOf, busyOf, send, createImage } = useSessions()
+  const { slots, messagesOf, busyOf, send, createImage, sessionIdsBySlot } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const { activeModel } = useModel()
@@ -34,6 +35,7 @@ export function ChatScreen() {
 
   return (
     <div className="flex h-full min-h-0">
+      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}
