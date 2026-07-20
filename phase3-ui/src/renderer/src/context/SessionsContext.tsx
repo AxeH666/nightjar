@@ -590,31 +590,38 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         } else {
           refs.cadExport = undefined // no build this turn (plain chat) → nothing to export
         }
-        // Honesty guardrail (false-success): if the last assistant message CLAIMS it saved a
-        // file but this turn produced no completed write/edit AND no previewable artifact
-        // (canvas-from-message), that claim would otherwise be the only thing the user sees —
-        // a hallucinated write tool can leave no error card at all. Correct it, non-silently.
-        // Idempotent (deterministic id) + self-limiting (the note becomes the last assistant msg).
-        updateMessages(sid, (prev) => {
-          const lastA = [...prev].reverse().find((m) => m.role === "assistant")
-          if (!lastA) return prev
-          const warnId = `save-warn-${lastA.id}`
-          if (prev.some((m) => m.id === warnId)) return prev
-          if (!claimsFileButNoneWritten(lastA)) return prev
-          return [
-            ...prev,
-            {
-              id: warnId,
-              role: "assistant",
-              blocks: [
-                {
-                  kind: "text",
-                  text: "⚠ No file was actually written — I can't save files to disk from Chat. Ask me to include the file's contents and I'll show it here with a Download button.",
-                },
-              ],
-            },
-          ]
-        })
+        // Honesty guardrail (false-success): if the assistant CLAIMS it saved a file but this
+        // turn produced no completed write/edit AND no previewable artifact (canvas-from-message),
+        // that claim would otherwise be the only thing the user sees — a hallucinated write tool
+        // can leave no error card at all. Correct it, non-silently. CHAT SLOT ONLY: the wording
+        // is Chat-specific (the assistant has no write tool); Code's truncated-write case is
+        // covered by the ToolCallCard isTruncatedWrite hint, and firing "can't save from Chat"
+        // on Code would mislead (Bugbot). Idempotent (deterministic id) + self-limiting.
+        if (slotsRef.current.chat === sid) {
+          updateMessages(sid, (prev) => {
+            // Skip messages THIS handler may have appended earlier (imgfail / cad-noexport / a
+            // prior warn), so a synthetic message never masks the real reply's claim (Bugbot).
+            const synthetic = (id: string) => /^(local-imgfail-|cad-noexport-|save-warn-)/.test(id)
+            const lastA = [...prev].reverse().find((m) => m.role === "assistant" && !synthetic(m.id))
+            if (!lastA) return prev
+            const warnId = `save-warn-${lastA.id}`
+            if (prev.some((m) => m.id === warnId)) return prev
+            if (!claimsFileButNoneWritten(lastA)) return prev
+            return [
+              ...prev,
+              {
+                id: warnId,
+                role: "assistant",
+                blocks: [
+                  {
+                    kind: "text",
+                    text: "⚠ No file was actually written — I can't save files to disk from Chat. Ask me to include the file's contents and I'll show it here with a Download button.",
+                  },
+                ],
+              },
+            ]
+          })
+        }
         break
       }
       case "session.error": {
