@@ -35,8 +35,12 @@
 > engine as backslash Windows paths, which OpenCode splices into `opencode.json` string values →
 > invalid JSON escapes → config parse fails → `/agent` 400 → chat dead; fixed by forward-slashing
 > those env vars (PR #96, verified live: backslash → 400, forward-slash → 200 with all agents). A
-> fresh Windows clone + `setup.ps1` + a BYOK key now reaches working chat. Pile 2 (§4 P1–P3) is
-> still open pending your go-ahead.
+> fresh Windows clone + `setup.ps1` + a BYOK key now reaches working chat. Pile 2 (§4 P1–P3) has since been worked through in **PRs #98–#117** (dismissible banners,
+> observability, wall-clock timeouts, safety-gate fixes, scheduler status, config hygiene) plus a
+> repo-wide **consistency sweep** — many findings below (P2-1/5/6/7/8/12/14/15/16/17/18/20,
+> P3-6/7/8/9/10/11/14/16/19/27, NJ-16/17, …) are now **RESOLVED**. This body is the **original
+> 2026-07-19 snapshot**, retained unedited as a point-in-time record; for current state see
+> `KNOWN_ISSUES.md` and the merged PRs, not §0/§2/§3/§4 here.
 
 ## 0. TL;DR
 
