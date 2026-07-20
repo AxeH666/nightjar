@@ -7,6 +7,7 @@ import {
   projectOf,
   saveProjectChatId,
   sessionIdsKey,
+  shouldReuseStoredChat,
 } from "./sessionScope"
 
 // The load-bearing test for 5b's migration safety: the General (no-project) keys MUST equal the
@@ -120,5 +121,27 @@ describe("project chat id — the single persistent chat's persistence (PR-B)", 
     delete (globalThis as { localStorage?: unknown }).localStorage
     expect(loadProjectChatId("p_1")).toBeNull() // no storage at all
     expect(saveProjectChatId("p_1", "x")).toBe(false)
+  })
+})
+
+describe("shouldReuseStoredChat — never repoint on a transient list failure (Bugbot)", () => {
+  it("reuses a stored id the engine still lists", () => {
+    expect(shouldReuseStoredChat("ses_1", ["ses_1", "ses_2"])).toBe(true)
+  })
+
+  it("creates fresh only when a SUCCESSFUL listing proves the id is gone", () => {
+    expect(shouldReuseStoredChat("ses_1", ["ses_2", "ses_3"])).toBe(false)
+    expect(shouldReuseStoredChat("ses_1", [])).toBe(false) // empty list = engine has no sessions = dead
+  })
+
+  it("REUSES on a failed check (null) — a transient blip must not repoint the project", () => {
+    // This is the whole point: null means listSessions itself failed, which is NOT proof of
+    // death. Treating it as dead would create a new session and abandon a live conversation.
+    expect(shouldReuseStoredChat("ses_1", null)).toBe(true)
+  })
+
+  it("never reuses when there is no stored id", () => {
+    expect(shouldReuseStoredChat(null, ["ses_1"])).toBe(false)
+    expect(shouldReuseStoredChat(null, null)).toBe(false)
   })
 })

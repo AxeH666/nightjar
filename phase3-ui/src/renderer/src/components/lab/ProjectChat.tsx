@@ -16,13 +16,16 @@ const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "as
 export function ProjectChat({ projectId }: { projectId: string }) {
   const { messagesOf, busyOf, send, createImage, openProjectChat } = useSessions()
   const { abortSession } = usePermission()
-  const { connected } = useConnection()
-  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession, syncChatSession } =
-    useArtifact()
+  const { connected, sessionID } = useConnection()
+  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
   const [id, setId] = useState("")
 
-  // Resolve (resume-or-create) this project's chat session on open, and whenever the project
-  // switches. Clear the id first so a stale session's transcript never flashes for the new project.
+  // Resolve (resume-or-create) this project's chat session: on open, on project switch, and on
+  // reconnect. `sessionID` is the connection's primary — it changes on every (re)connect and goes
+  // from empty→set when the client first becomes ready, so depending on it makes this (a) retry
+  // once the engine is up (Bugbot: the open otherwise stuck on "Connecting…") and (b) re-bind to
+  // a live session after a reconnect (the reconnect handler cleared the stale binding). Clear the
+  // id first so a dead/previous session's transcript never flashes.
   useEffect(() => {
     let alive = true
     setId("")
@@ -32,13 +35,12 @@ export function ProjectChat({ projectId }: { projectId: string }) {
     return () => {
       alive = false
     }
-  }, [projectId, openProjectChat])
+  }, [projectId, sessionID, openProjectChat])
 
-  // Reset the live-preview when the bound session changes (mirrors ChatScreen.syncChatSession) so
-  // a project's canvas doesn't bleed into another's.
-  useEffect(() => {
-    if (id) syncChatSession(id)
-  }, [id, syncChatSession])
+  // NOTE: deliberately does NOT call ArtifactContext.syncChatSession — that drives the GENERAL
+  // chat's shared chatSessionRef, so using it here let ChatScreen's reconnect reset THIS project's
+  // canvas (Bugbot). Per-project preview isolation is handled by the panel's `artifactSession ===
+  // id` gate below: a different session never owns this project's panel.
 
   return (
     <div className="flex h-full min-h-0">

@@ -88,3 +88,17 @@ export function saveProjectChatId(projectId: string, sessionId: string): boolean
     return false
   }
 }
+
+// When reopening a project chat, decide whether to REUSE the persisted session id or discard it
+// and create a fresh one. `listedIds` is the engine's current session ids, or `null` if that
+// check itself FAILED (transient network/API error).
+//
+// The rule that matters (Bugbot): only a SUCCESSFUL listing that OMITS the id proves the session
+// is gone. A failed check (`null`) must NOT be treated as death — otherwise a transient blip
+// would create a new session and permanently repoint the project away from a still-live
+// conversation. So: reuse when there's no listing to contradict us; create only on proof of death.
+export function shouldReuseStoredChat(stored: string | null, listedIds: string[] | null): boolean {
+  if (!stored) return false
+  if (listedIds === null) return true // couldn't verify → reuse optimistically, never repoint on a blip
+  return listedIds.includes(stored)
+}

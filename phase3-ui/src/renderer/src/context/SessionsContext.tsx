@@ -22,7 +22,7 @@ import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
-import { loadProjectChatId, saveProjectChatId } from "../lib/sessionScope"
+import { loadProjectChatId, saveProjectChatId, shouldReuseStoredChat } from "../lib/sessionScope"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -277,6 +277,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // assistant chat). See research/5b_PLAN.md.
   const [projectChats, setProjectChats] = useState<Record<string, string>>({})
   const projectChatsRef = useRef<Record<string, string>>({})
+  // In-flight openProjectChat promises, keyed by projectId, so concurrent opens for the same
+  // project share ONE resolve instead of racing to create duplicate sessions (Bugbot).
+  const projectChatOpening = useRef<Map<string, Promise<string>>>(new Map())
   useEffect(() => {
     projectChatsRef.current = projectChats
   }, [projectChats])
@@ -690,6 +693,24 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     if (isHistorySlot("chat") && slots.chat) markSlotSession("chat", slots.chat)
   }, [slots.chat, markSlotSession])
 
+  // 5b — a (re)connect is a fresh engine generation: any project-chat binding from the previous
+  // connection may now be dead server-side. Drop the in-memory bindings (and any in-flight open)
+  // so the next render re-resolves each open project chat against the NEW engine
+  // (resume-if-listed-else-create). This is what makes a project chat survive a reconnect instead
+  // of holding a dead id — the General chat gets the same treatment via the adopt effect above.
+  // gcSessions (fired by that adopt's rebindSlot) then drops the now-unbound old project session;
+  // the re-resolve re-registers a live one. Skips the very first connect (nothing bound yet).
+  const hadPrimary = useRef(false)
+  useEffect(() => {
+    if (!primaryId) return
+    if (hadPrimary.current) {
+      projectChatsRef.current = {}
+      projectChatOpening.current.clear()
+      setProjectChats({})
+    }
+    hadPrimary.current = true
+  }, [primaryId])
+
   // code slot ← created here; (re)created whenever the primary reconnects.
   useEffect(() => {
     if (!primaryId) return
@@ -1037,54 +1058,67 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession, setStatus],
   )
 
-  // 5b — resolve a project's single persistent chat: return the binding if already open this
-  // run; else reuse the persisted session IF it still exists on the engine (the engine may have
-  // restarted — sessions don't reliably survive that, which is why the code slot recreates too —
-  // and a dead id would 404 on first send); else create a fresh one. Registers the id in the
-  // parallel map (never in `slots`), so the base chat/code/cad machinery is untouched.
+  // 5b — resolve a project's single persistent chat. Returns the current-generation binding if
+  // already resolved (the map is cleared on every reconnect, below, so a cached id is never
+  // stale across engine generations — Bugbot); coalesces concurrent opens via projectChatOpening
+  // so two callers can't create two sessions (Bugbot); else reuses the persisted session IF the
+  // engine still lists it, else creates fresh. The id lives in the parallel map, never in `slots`.
   const openProjectChat = useCallback(
     async (projectId: string): Promise<string> => {
       if (!projectId) return ""
-      const existing = projectChatsRef.current[projectId]
-      if (existing) return existing
+      const bound = projectChatsRef.current[projectId]
+      if (bound) return bound
+      const inflight = projectChatOpening.current.get(projectId)
+      if (inflight) return inflight
       const client = clientRef.current
-      if (!client) return ""
-      const stored = loadProjectChatId(projectId)
-      let id = ""
-      let messages: UiMessage[] = []
-      if (stored) {
-        const alive = await client
-          .listSessions()
-          .then((ss) => ss.some((s) => s.id === stored))
-          .catch(() => false)
-        if (alive) {
-          id = stored
-          try {
-            messages = messagesFromHistory(await client.getMessages(stored))
-          } catch {
-            /* alive but history read failed → still bind, just with no prior messages */
+      if (!client) return "" // not connected yet — the caller's effect re-runs when the primary arrives
+      const run = (async (): Promise<string> => {
+        const stored = loadProjectChatId(projectId)
+        let id = ""
+        let messages: UiMessage[] = []
+        if (stored) {
+          // Reuse the persisted session unless the engine CONFIRMS it's gone (shouldReuseStoredChat
+          // — a transient listSessions failure returns null and must NOT repoint the project). Only
+          // a successful list that omits the id is proof of death → fall through to create.
+          const ids = await client
+            .listSessions()
+            .then((ss) => ss.map((s) => s.id))
+            .catch(() => null)
+          if (shouldReuseStoredChat(stored, ids)) {
+            id = stored
+            try {
+              messages = messagesFromHistory(await client.getMessages(stored))
+            } catch {
+              /* history read failed → still bind, just with no prior messages */
+            }
           }
         }
-      }
-      if (!id) {
-        try {
-          id = await client.createSession(DEFAULT_TITLE.chat)
-        } catch (err: any) {
-          setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
-          return ""
+        if (!id) {
+          try {
+            id = await client.createSession(DEFAULT_TITLE.chat)
+          } catch (err: any) {
+            setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
+            return ""
+          }
+          saveProjectChatId(projectId, id) // persist only a CONFIRMED-new id (never on a transient list failure)
         }
-        saveProjectChatId(projectId, id) // persist the (possibly replacement) id
+        // Bind the REF first (gcSessions reads it synchronously), then perSessionRefs, then state
+        // — so no interleaved gcSessions can forget this id between registration and the update.
+        projectChatsRef.current = { ...projectChatsRef.current, [projectId]: id }
+        perSessionRefs.current.set(id, freshRefs())
+        setProjectChats((prev) => ({ ...prev, [projectId]: id }))
+        setSessions((prev) => ({
+          ...prev,
+          [id]: { id, agent: validAgent(DEFAULT_AGENT.chat), title: prev[id]?.title ?? DEFAULT_TITLE.chat, messages, busy: false },
+        }))
+        return id
+      })()
+      projectChatOpening.current.set(projectId, run)
+      try {
+        return await run
+      } finally {
+        projectChatOpening.current.delete(projectId)
       }
-      // Bind the REF first (gcSessions reads it synchronously), then perSessionRefs, then state —
-      // so no interleaved gcSessions can forget this id between registration and the map update.
-      projectChatsRef.current = { ...projectChatsRef.current, [projectId]: id }
-      perSessionRefs.current.set(id, freshRefs())
-      setProjectChats((prev) => ({ ...prev, [projectId]: id }))
-      setSessions((prev) => ({
-        ...prev,
-        [id]: { id, agent: validAgent(DEFAULT_AGENT.chat), title: prev[id]?.title ?? DEFAULT_TITLE.chat, messages, busy: false },
-      }))
-      return id
     },
     [clientRef, validAgent, setStatus],
   )
