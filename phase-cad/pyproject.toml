@@ -2,6 +2,7 @@
 name = "nightjar-phase-cad"
 version = "0.1.0"
 description = "Nightjar Prompt-to-CAD (Task 5): build123d code-CAD + build123d-mcp tool loop, driven by the chat model over MCP."
+license = { text = "AGPL-3.0-or-later" }
 requires-python = "==3.12.*"
 # Pins verified end-to-end headless on 2026-07-15 (see smoke_test.py / research/probes).
 # Rationale for each pin is in README.md.

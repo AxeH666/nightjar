@@ -274,7 +274,14 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 
 ---
 
-## NJ-17 — no scheduler daemon: JUNE has no long-lived process that could ever fire a reminder — FLAGGED (Task-6 prerequisite) 2026-07-14
+## NJ-17 — no scheduler daemon: JUNE has no long-lived process that could ever fire a reminder — RESOLVED (Task-6 local scheduler shipped) 2026-07-14
+
+> **Update (Task 6, shipped):** RESOLVED. JUNE now has a long-lived poller — `phase3-ui/src/main/scheduler.ts`
+> polls `phase2-odysseus/servers/task_poller.py` every 60 s and fires a desktop `Notification` for each due
+> task while the app is open (wired in `phase3-ui/src/main/index.ts` via `startLocalScheduler(pushScheduler)`;
+> its availability is surfaced to the UI by `SchedulerBanner`, P2-20). The paid always-on path is
+> `telegram-scheduler/`. The "no long-lived host process" structural gap described below is **closed**; what
+> remains is NJ-16's live-fire verification (a reminder actually firing on a running instance).
 
 - **Severity:** high for the reminders feature; it is the structural reason NJ-16's dead rows are never noticed.
 - **What:** JUNE has **no long-lived host process**. The MCP servers are **stdio** children of the OpenCode engine (they exist only for the duration of a tool call), and the Electron main process runs **no scheduler/poller**. Odysseus upstream *does* ship a scheduler (`research/odysseus/` even has a `test_scheduler_restart_doublefire.py`), but Nightjar runs only the MCP wrappers — **not** Odysseus's Flask/FastAPI app or its scheduler. So even a correctly-written `next_run` would have nothing to act on it.
@@ -297,6 +304,10 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 > yet — that's the missing daemon (**NJ-17**), supplied by the local scheduler (Task-6 PR 15,
 > free tier) and the always-on server (Task-6 PR 17, paid). NJ-16 graduates to RESOLVED when a
 > reminder actually fires on a running instance.
+
+> **Update (Task 6, shipped):** the poller now **exists** — `phase3-ui/src/main/scheduler.ts` polls `task_due`
+> via `task_poller.py` every 60 s (see NJ-17), so the "nothing polls `task_due` yet" line above is superseded.
+> NJ-16 now remains open **only** on the rule-6 live-fire check: a reminder actually firing on a running instance.
 
 - **Severity:** high — it is a **silent** failure. The tool returns `{"id", "name", "schedule"}` and the model cheerfully tells the user the reminder is set. Nothing ever fires.
 - **Root cause:** `phase2-odysseus/servers/pim_server.py` `task_create` inserts a `ScheduledTask` with `status="active"` but writes only `name`/`prompt`/`task_type`/`schedule`/`scheduled_time`. It never computes **`next_run`** — even though `ScheduledTask.next_run` is a real, **indexed** column (`core/database.py`) that exists exactly to be polled. It also leaves `scheduled_date` (the "once" case) and `scheduled_day` (weekly/monthly) `NULL`, so the row does not even carry enough information to derive a fire time later.

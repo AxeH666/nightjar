@@ -124,7 +124,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 - **Local vision:** **Ollama** + **gemma3:4b** (`:11434`).
 - **Local image gen:** **Z-Image-Turbo** via **diffusers** (`:8100`, needs ~6 GB VRAM).
 - **Cloud (BYOK, opt-in):** OpenRouter / Fireworks / OpenAI / Anthropic / etc. — encrypted key
-  storage + a model switcher + an unmissable "cloud active" banner.
+  storage + a model switcher + a dismissible "cloud active" banner backed by a persistent ☁ indicator in the switcher.
 
 ### 4.4 Python backends (each an isolated venv — deliberately)
 | Component | Purpose | Notable deps |
