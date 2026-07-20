@@ -20,7 +20,9 @@ and a small **WebSocket side-channel**, rather than merging codebases:
 | **OpenCode** | Core agent engine (the only agent loop) | MIT |
 | **Row-Bot** (vendored) | Voice / vision / memory / browser, as an MCP server | Apache-2.0 |
 | **Odysseus** (sidecar) | Email / RAG / deep-research / calendar / notes / tasks | AGPL-3.0-or-later |
-| **orb-ui** (forked theme) | Voice-reactive orb in the UI | MIT |
+| **three.js** | Custom voice-reactive vortex orb (WebGL) — replaced orb-ui | MIT |
+| **React / React-DOM** | UI framework + DOM renderer for the Electron shell | MIT |
+| **marked** | Markdown→HTML in the live-preview panel | MIT |
 
 The UI is a custom **Electron + React + Vite + Tailwind** shell that talks to a
 local `opencode serve` (chat / tools / permissions over HTTP+SSE) and to the
@@ -37,7 +39,7 @@ Phases 1–4 are built and reported:
 - **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): orb-ui integrated as a voice-reactive orb + a Siri-style overlay, wired to the live pipeline.
 
 **Since Phase 4:** BYOK cloud-key slots shipped (encrypted key storage + model
-switcher + unmissable cloud indicator; PRs #6/#8) and the desktop app is verified
+switcher + a dismissible cloud banner backed by a persistent ☁ indicator; PRs #6/#8/#98) and the desktop app is verified
 running end-to-end. **The final product name is JUNE** — the rename lands with the
 UI redesign (Step 7); current strings still say "Nightjar" until then.
 
