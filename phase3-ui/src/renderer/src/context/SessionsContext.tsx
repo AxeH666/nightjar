@@ -18,6 +18,7 @@ import type { ReactNode } from "react"
 import { toolCallFromPart } from "../lib/opencode"
 import type { OpenCodeEvent, FilePart, SessionInfo, MessageWithParts } from "../lib/opencode"
 import { type UiMessage, type UiBlock } from "../components/ChatSurface"
+import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
@@ -589,6 +590,31 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         } else {
           refs.cadExport = undefined // no build this turn (plain chat) → nothing to export
         }
+        // Honesty guardrail (false-success): if the last assistant message CLAIMS it saved a
+        // file but this turn produced no completed write/edit AND no previewable artifact
+        // (canvas-from-message), that claim would otherwise be the only thing the user sees —
+        // a hallucinated write tool can leave no error card at all. Correct it, non-silently.
+        // Idempotent (deterministic id) + self-limiting (the note becomes the last assistant msg).
+        updateMessages(sid, (prev) => {
+          const lastA = [...prev].reverse().find((m) => m.role === "assistant")
+          if (!lastA) return prev
+          const warnId = `save-warn-${lastA.id}`
+          if (prev.some((m) => m.id === warnId)) return prev
+          if (!claimsFileButNoneWritten(lastA)) return prev
+          return [
+            ...prev,
+            {
+              id: warnId,
+              role: "assistant",
+              blocks: [
+                {
+                  kind: "text",
+                  text: "⚠ No file was actually written — I can't save files to disk from Chat. Ask me to include the file's contents and I'll show it here with a Download button.",
+                },
+              ],
+            },
+          ]
+        })
         break
       }
       case "session.error": {
