@@ -12,9 +12,10 @@ const STATUS: Record<ToolCall["status"], { label: string; dot: string; ring: str
 
 export function ToolCallCard({ call }: { call: ToolCall }) {
   const s = STATUS[call.status]
+  const errored = call.status === "error"
   const argStr = call.input ? JSON.stringify(call.input) : ""
   return (
-    <div className={`my-2 rounded-lg border ${s.ring} bg-nightjar-surface/60 px-3 py-2 font-mono text-sm`}>
+    <div className={`my-2 rounded-lg border ${s.ring} ${errored ? "bg-nightjar-alert/10" : "bg-nightjar-surface/60"} px-3 py-2 font-mono text-sm`}>
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${s.dot}`} />
         <span className="text-nightjar-accent">{call.tool}</span>
@@ -30,8 +31,11 @@ export function ToolCallCard({ call }: { call: ToolCall }) {
           {call.output.length > 800 ? call.output.slice(0, 800) + "\n…(truncated)" : call.output}
         </pre>
       )}
-      {call.status === "error" && call.error && (
-        <div className="mt-2 text-nightjar-alert text-xs">{call.error}</div>
+      {errored && (
+        <div className="mt-2 rounded border border-nightjar-alert/50 bg-nightjar-alert/10 px-2 py-1.5 text-nightjar-alert text-xs">
+          <span className="font-semibold">✕ Failed — no result.</span>{" "}
+          {call.error || "the tool call errored (nothing was produced)."}
+        </div>
       )}
       {isTruncatedWrite(call) && (
         <div className="mt-2 rounded border border-nightjar-alert/40 bg-nightjar-alert/10 px-2 py-1.5 text-nightjar-text/80 text-xs">
