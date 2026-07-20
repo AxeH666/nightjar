@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
 import { deleteProjectContent, copyProjectContent } from "./projectContent"
+import { deleteProjectSessionIds } from "./sessionScope"
 
 // A project space. The science labs (mechanical/bio/chem) each keep their own list; "general" is
 // the top-level, non-lab Projects space surfaced in the main nav — a global work container, like
@@ -62,6 +63,15 @@ export function persistDuplicate(srcId: string, copyId: string, writeList: () =>
     return false
   }
   return true
+}
+
+// The single authoritative "delete every per-project key" fan-out. Pure + exported so the
+// COMPLETE set of per-project storage families lives in one place and is tested together — the
+// NJ-40/41 leak class came from a delete path that didn't cover every family. Any future
+// per-project key (e.g. the cloud-consent part in PR-C) MUST be added here.
+export function purgeProjectStorage(projectId: string): void {
+  deleteProjectContent(projectId) // Memory / Instructions / Files
+  deleteProjectSessionIds(projectId) // the project chat's session-id set (populated from PR-B)
 }
 
 // A collision-resistant id (renderer Date.now() is fine — only workflow scripts forbid it).
@@ -150,10 +160,12 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
   )
   const remove = useCallback(
     (id: string) => {
-      // Drop the project's Memory/Instructions/Files too — must not linger on disk. If that
-      // fails we still remove the card: the user asked for the project to go, and leaving it
-      // would be a worse failure than the content residue.
-      deleteProjectContent(id)
+      // Delete EVERY per-project storage family via the one authoritative fan-out, or a deleted
+      // project leaks (the NJ-40/41 class). The chat session-id set is a no-op until PR-B starts
+      // writing project chat scopes, but wired now so the delete path is complete before anything
+      // populates it. If a storage op fails we still remove the card: the user asked for the
+      // project to go, and leaving it would be a worse failure than the storage residue.
+      purgeProjectStorage(id)
       mutate((prev) => prev.filter((p) => p.id !== id))
     },
     [mutate],
@@ -171,6 +183,11 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
       // content copy hit quota, leaving the card looking perfectly correct. persistDuplicate
       // rolls its own writes back on failure; here we also revert the in-memory insert so the
       // user isn't left holding a duplicate that is empty now and gone after a reload.
+      //
+      // Chat history is DELIBERATELY NOT copied (5b decision): a duplicate carries the project's
+      // knowledge (Memory/Instructions/Files) but starts an EMPTY chat scope. Copying the chat
+      // session-id set would make two projects share the same live engine sessions and bleed
+      // messages between them — the exact isolation projects exist to prevent.
       const ok = persistDuplicate(src.id, copy.id, () => mutate((prev) => [copy, ...prev]))
       if (!ok && projectsRef.current !== before) revertTo(before)
     },

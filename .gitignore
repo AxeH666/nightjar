@@ -105,6 +105,7 @@ research/*
 !research/AUDIT_REPORT.md
 !research/ODYSSEUS_INTEGRATION_PLAN.md
 !research/PROVIDER_SELECTION_PLAN.md
+!research/5b_PLAN.md
 
 # ── OS / editor cruft ─────────────────────────────────────────────────────────
 .DS_Store
