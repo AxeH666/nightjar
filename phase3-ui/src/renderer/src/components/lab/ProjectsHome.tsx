@@ -41,10 +41,16 @@ export function ProjectsHome({
   // A name is NOT required. The store already defaults an empty name to "Untitled project"
   // (projects.ts create), and the project opens straight into ProjectView, which can rename
   // in place — so naming is something you do when you know the name, not a gate on starting.
+  //
+  // Only navigate if the project actually persisted. If storage failed, the project exists
+  // only in the store's memory and ProjectView (which loads its own copy from disk) could not
+  // find it — so we stay here, keep the typed name for a retry, and let the "Changes not being
+  // saved" warning explain why. (Bugbot, PR #125.)
   function submitNew() {
-    const p = store.create(newName)
+    const { project, persisted } = store.create(newName)
+    if (!persisted) return
     setNewName("")
-    onOpen(p.id)
+    onOpen(project.id)
   }
 
   return (

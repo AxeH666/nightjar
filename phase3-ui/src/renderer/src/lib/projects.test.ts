@@ -76,4 +76,14 @@ describe("persistDuplicate leaves storage clean on any failure", () => {
     expect(contentKeys(store, "dst")).toEqual([]) // the whole point
     expect(contentKeys(store, "src")).toHaveLength(2) // source untouched
   })
+
+  it("does not write the list when there is no content and the copy is a no-op", () => {
+    installStorage() // nothing seeded
+    const writeList = vi.fn(() => true)
+    // With no content to copy the copy trivially succeeds, so the list write DOES run — this
+    // guards the boundary the vacuous-test correction exposed: a no-content source is the happy
+    // path, not the failure path.
+    expect(persistDuplicate("src", "dst", writeList)).toBe(true)
+    expect(writeList).toHaveBeenCalledTimes(1)
+  })
 })

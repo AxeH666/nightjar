@@ -1,21 +1,26 @@
 import { useSyncExternalStore } from "react"
 
-// Whether the browser storage backing Projects is actually accepting writes.
+// Whether the browser storage backing Projects is accepting writes — tracked as the SET of
+// currently-failing write keys, not a single boolean.
 //
-// This deliberately lives at MODULE scope rather than in component state. Storage health is a
-// property of the origin — not of a component, a project, or a lab scope. `useProjects` and
-// `useProjectContent` are mounted and unmounted by ordinary navigation (Projects home ⇄ an
-// open project), so per-component state would re-initialize to "healthy" on the next remount
-// and silently clear the "Changes not being saved" warning while storage was still broken.
+// Two reasons for the set rather than a flag:
+//  1. Module scope, not component state. `useProjects`/`useProjectContent` are mounted and
+//     unmounted by ordinary navigation (Projects home ⇄ an open project), so a per-component
+//     flag would re-initialize to "healthy" on the next remount and silently clear the
+//     "Changes not being saved" warning while storage was still broken. (Bugbot #1, PR #125.)
+//  2. Per KEY, not one global bool. Storage failures are per-key: Files can hit quota while a
+//     later one-character Memory edit — or a rename — succeeds. A single boolean let that
+//     later success clear the banner while the failed panel still (correctly) showed
+//     "Not saved". Keying means a success only clears ITS OWN key, so the banner stays up
+//     until the thing that actually failed succeeds. (Bugbot #5, PR #125.)
 //
-// That failure mode is the whole reason this module exists: a warning that quietly resets is
-// the same false-success the save indicator was built to eliminate, just one level up. Caught
-// by Bugbot on PR #125.
-let healthy = true
+// This is a stopgap consistent view over a deeper problem — `useProjects` is per-component
+// state, so instances agree only through localStorage — tracked as NJ-41 for a store refactor.
+const failingKeys = new Set<string>()
 const listeners = new Set<() => void>()
 
 export function isStorageHealthy(): boolean {
-  return healthy
+  return failingKeys.size === 0
 }
 
 export function subscribeStorageHealth(onChange: () => void): () => void {
@@ -25,21 +30,21 @@ export function subscribeStorageHealth(onChange: () => void): () => void {
   }
 }
 
-// Record the real outcome of a storage write. Returns `ok` unchanged so callers can wrap a
-// write expression inline: `noteSave(part, reportStorageWrite(saveStr(...)))`.
-//
-// A later SUCCESS clears the warning: if the user frees space, storage genuinely is working
-// again and saying otherwise would be its own inaccuracy.
-export function reportStorageWrite(ok: boolean): boolean {
-  if (healthy !== ok) {
-    healthy = ok
+// Record the real outcome of a storage write under a stable key (e.g. `content:<pid>:files`,
+// `projects:<scope>`). A success clears only that key; a failure adds it. Returns `ok` so a
+// caller can wrap a write inline: `reportStorageWrite(key, saveStr(...))`.
+export function reportStorageWrite(key: string, ok: boolean): boolean {
+  const had = failingKeys.has(key)
+  if (ok) failingKeys.delete(key)
+  else failingKeys.add(key)
+  if (had !== failingKeys.has(key)) {
     for (const notify of listeners) notify()
   }
   return ok
 }
 
-// Subscribes to the module-level flag, so every mounted consumer agrees and a remount inherits
-// the current truth instead of resetting it.
+// Subscribes to the module-level set, so every mounted consumer agrees and a remount inherits
+// the current truth instead of resetting it. True when NO key is currently failing.
 export function useStorageHealthy(): boolean {
   return useSyncExternalStore(subscribeStorageHealth, isStorageHealthy, isStorageHealthy)
 }

@@ -133,12 +133,15 @@ export function useProjectContent(projectId: string): ProjectContent {
   const filesRef = useRef(files)
 
   // Record what a write ACTUALLY did, so the UI reports the real outcome per part. Also feeds
-  // the shared storage-health signal: a failed content write means storage is broken for the
-  // whole origin, so the app-wide warning should reflect it too, not just this one chip.
-  const noteSave = useCallback((part: ContentPart, ok: boolean) => {
-    reportStorageWrite(ok)
-    setSaveState((s) => ({ ...s, [part]: { ok, at: Date.now() } }))
-  }, [])
+  // the shared storage-health signal under a per-(project, part) key, so the app-wide warning
+  // reflects THIS part's outcome without a success elsewhere clearing a still-failing part.
+  const noteSave = useCallback(
+    (part: ContentPart, ok: boolean) => {
+      reportStorageWrite(`content:${projectId}:${part}`, ok)
+      setSaveState((s) => ({ ...s, [part]: { ok, at: Date.now() } }))
+    },
+    [projectId],
+  )
 
   // Reload when the project changes (this hook is reused across projects).
   useEffect(() => {

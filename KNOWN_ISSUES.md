@@ -61,6 +61,26 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-41 — `useProjects` is per-component state, not a shared store — the root cause behind the PR-#125 whack-a-mole — OPEN (refactor deferred to its own PR) 2026-07-20
+
+- **What:** `useProjects(scope)` holds the projects list in `useState`, loaded from localStorage on
+  mount. Every call site (`ProjectsHome`, `ProjectView`, `ProjectsScreen`) gets its OWN copy. They
+  agree only because localStorage is the shared source of truth — so the instant a write fails, the
+  instances diverge, and a project that exists in one hook's memory is invisible to another.
+- **Why it matters:** this is the common root of the five storage bugs found reviewing PR #125.
+  Finding #1 (health reset on remount) and finding #6 (a failed `create` that still navigated into a
+  project `ProjectView` can't see) are both direct consequences; the rest are the same "one instance's
+  view isn't another's" shape. Each was patched at the symptom in #125 (module-scoped health, revert
+  on failed create/duplicate, don't-navigate-on-failure) — but the divergence itself remains.
+- **The fix (its own PR, not #125):** make the projects list a module-level, per-scope store consumed
+  via `useSyncExternalStore` — the same shape `lib/storageHealth.ts` already uses — so every consumer
+  shares one list and create→open works because the destination view sees the same data. It touches
+  the lab scopes (`MechanicalLab` etc.) as well as the general space, so it deserves its own diff and
+  its own BugBot cycle rather than riding along mid-PR. Deferred deliberately (maintainer, 2026-07-20).
+- **Also fold in during that refactor:** `ProjectView` should stop reading `store.get(id)` (memoized
+  against a ref with empty deps) — #125 already moved it to `store.projects.find(...)`, but the store
+  refactor is the moment to make that the only pattern.
+
 ## NJ-40 — every Projects localStorage write swallowed its exception, so a failed save presented a fully successful UI — FIXED (feat/projects-ux-save-rename) 2026-07-20
 
 - **What:** all four write paths in the Projects feature (`saveStr`, `saveFiles` in
@@ -127,6 +147,18 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   Both looked entirely reasonable on the page. The rule this earns: for any guard whose whole purpose
   is a failure path, **assert then mutate** — break the guard and watch the specific test go red — or
   the test is decoration, and a green suite is evidence of nothing.
+- **Fifth/sixth findings (Bugbot, high-effort pass on PR #125) — and the decision to stop patching.**
+  (5, Medium) storage health was a single global boolean, so a success on ANY key cleared the
+  app-wide banner while a different panel still (correctly) showed "Not saved" — e.g. Files hit quota,
+  then a one-character Memory edit or a rename cleared the banner over still-unsaved Files. (6, High)
+  a failed `create` still called `onOpen`, navigating into a project that only existed in the store's
+  memory; `ProjectView` mounts its own `useProjects` from disk and could not find it, so the user got
+  an empty, un-renameable shell — and content edited there still showed "Saved". Fixed: health is now
+  a **set of failing keys** (a success clears only its own key; chip and banner derive from the same
+  per-key data and cannot contradict), and `create` returns `{ project, persisted }` + reverts the
+  in-memory insert on failure so `submitNew` can decline to navigate. Both root-caused to **NJ-41**
+  (per-component store divergence); at four-plus rounds of the same class the maintainer chose minimal
+  keyed fixes here and a dedicated store-refactor PR for the cause, rather than a fifth ordering patch.
 - **Residual (rule 8):** the *rendered* failure chip was not confirmed in a real GUI — that needs a
   native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
   contract underneath it is proven headlessly; the pixels are not.

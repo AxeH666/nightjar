@@ -70,7 +70,10 @@ function newId(): string {
 
 export interface ProjectsStore {
   projects: Project[]
-  create: (name: string, description?: string) => Project
+  // Returns the new project AND whether it actually persisted. Callers must NOT navigate into
+  // a project whose `persisted` is false — it exists only in this hook's memory, and the
+  // destination view mounts its own store from disk and would not find it (NJ-41).
+  create: (name: string, description?: string) => { project: Project; persisted: boolean }
   rename: (id: string, name: string) => void
   setDescription: (id: string, description: string) => void
   remove: (id: string) => void
@@ -121,26 +124,41 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     [scope],
   )
 
+  // All list ops report health under ONE key per scope — never per-write — so that a small
+  // later success can't clear a failure from a different write in the same operation.
+  const healthKey = `projects:${scope}`
+  // Restore the in-memory list to a snapshot after a failed persist, so a create/duplicate that
+  // didn't survive to disk doesn't leave a clickable card behind. That card is the real hazard:
+  // ProjectView mounts its OWN useProjects loaded from disk, so it could never find such a
+  // project (NJ-41) — the user would open an empty, un-renameable shell. Reverting removes it.
+  const revertTo = useCallback((snapshot: Project[]) => {
+    projectsRef.current = snapshot
+    setProjects(snapshot)
+  }, [])
+
   const create = useCallback(
-    (name: string, description?: string): Project => {
+    (name: string, description?: string): { project: Project; persisted: boolean } => {
+      const before = projectsRef.current
       const now = Date.now()
       const p: Project = { id: newId(), name: name.trim() || "Untitled project", description, favorite: false, createdAt: now, updatedAt: now }
-      reportStorageWrite(mutate((prev) => [p, ...prev]))
-      return p
+      const ok = mutate((prev) => [p, ...prev])
+      if (!ok) revertTo(before) // don't leave an unpersisted card the caller might navigate into
+      reportStorageWrite(healthKey, ok)
+      return { project: p, persisted: ok }
     },
-    [mutate],
+    [mutate, healthKey, revertTo],
   )
   const rename = useCallback(
     (id: string, name: string) => {
-      reportStorageWrite(mutate((prev) => prev.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name, updatedAt: Date.now() } : p))))
+      reportStorageWrite(healthKey, mutate((prev) => prev.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name, updatedAt: Date.now() } : p))))
     },
-    [mutate],
+    [mutate, healthKey],
   )
   const setDescription = useCallback(
     (id: string, description: string) => {
-      reportStorageWrite(mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p))))
+      reportStorageWrite(healthKey, mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p))))
     },
-    [mutate],
+    [mutate, healthKey],
   )
   const remove = useCallback(
     (id: string) => {
@@ -150,9 +168,9 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
       // health report so a successful list write can't mask the failed content delete.
       const contentOk = deleteProjectContent(id)
       const listOk = mutate((prev) => prev.filter((p) => p.id !== id))
-      reportStorageWrite(contentOk && listOk)
+      reportStorageWrite(healthKey, contentOk && listOk)
     },
-    [mutate],
+    [mutate, healthKey],
   )
   const duplicate = useCallback(
     (id: string) => {
@@ -168,19 +186,16 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
       const ok = persistDuplicate(src.id, copy.id, () => mutate((prev) => [copy, ...prev]))
       // If mutate ran but didn't persist, revert the in-memory insert too, so the user isn't
       // left holding a duplicate that is empty now and gone after a reload.
-      if (!ok && projectsRef.current !== before) {
-        projectsRef.current = before
-        setProjects(before)
-      }
-      reportStorageWrite(ok)
+      if (!ok && projectsRef.current !== before) revertTo(before)
+      reportStorageWrite(healthKey, ok)
     },
-    [mutate],
+    [mutate, healthKey, revertTo],
   )
   const toggleFavorite = useCallback(
     (id: string) => {
-      reportStorageWrite(mutate((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite, updatedAt: Date.now() } : p))))
+      reportStorageWrite(healthKey, mutate((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite, updatedAt: Date.now() } : p))))
     },
-    [mutate],
+    [mutate, healthKey],
   )
   const get = useCallback((id: string) => projectsRef.current.find((p) => p.id === id), [])
 
