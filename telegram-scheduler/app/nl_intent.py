@@ -2,7 +2,8 @@
 
 VENDORED COPY — the authoritative source is phase2-odysseus/servers/nl_intent.py. This server
 deploys as a standalone Docker image and cannot import from the odysseus tree, so the parser is
-duplicated here verbatim. Keep the two in sync when either changes.
+duplicated here verbatim. Keep the two in sync when either changes — enforced by
+tests/test_nl_intent_sync.py (AST-compares the two copies; module docstrings may differ).
 
 "meeting with xyz at 2, remind me at 1" → {title, when (UTC), repeat}. Provider-AGNOSTIC: the
 LLM is an injected `llm_call(system, user) -> str` callable, so the parser is built + fully
