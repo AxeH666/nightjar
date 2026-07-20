@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { persistDuplicate } from "./projects"
-import { saveStr } from "./projectContent"
+import { persistDuplicate, purgeProjectStorage } from "./projects"
+import { saveStr, saveFiles } from "./projectContent"
 
 // Regression cover for the third Bugbot finding on PR #125: duplicating a project performs TWO
 // storage writes (the content copy, then the projects list) and either can fail. The second
@@ -85,5 +85,30 @@ describe("persistDuplicate leaves storage clean on any failure", () => {
     // path, not the failure path.
     expect(persistDuplicate("src", "dst", writeList)).toBe(true)
     expect(writeList).toHaveBeenCalledTimes(1)
+  })
+})
+
+// 5b PR-A: the single authoritative per-project delete fan-out must clear EVERY storage family,
+// so a deleted project leaves nothing behind (the NJ-40/41 leak class). This is the one place
+// the complete key set is asserted together — a future per-project key that forgets to join
+// purgeProjectStorage would leave this test passing while leaking, so extend it alongside any
+// new part.
+describe("purgeProjectStorage clears every per-project storage family", () => {
+  it("removes content AND the chat session-id set, touching no other project", () => {
+    const store = installStorage()
+    // Seed all of project p_1's families...
+    saveStr("p_1", "instructions", "x")
+    saveStr("p_1", "memory", "y")
+    saveFiles("p_1", [{ id: "f1", name: "a.md", content: "z" }])
+    store.set("nightjar.sessionIds.chat.p_1", JSON.stringify(["s1"])) // the PR-B key, seeded directly
+    // ...and a bystander project + General history that must survive.
+    saveStr("p_2", "instructions", "keep me")
+    store.set("nightjar.sessionIds.chat", JSON.stringify(["general"]))
+
+    purgeProjectStorage("p_1")
+
+    expect([...store.keys()].filter((k) => k.includes(".p_1"))).toEqual([])
+    expect(store.get("nightjar.project.p_2.instructions")).toBe("keep me")
+    expect(store.get("nightjar.sessionIds.chat")).toBe(JSON.stringify(["general"]))
   })
 })
