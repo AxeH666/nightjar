@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type ClipboardEvent, type DragEvent } from "react"
 import type { ToolCall } from "../lib/opencode"
 import { ToolCallCard } from "./ToolCallCard"
+import { AssistantText } from "./AssistantText"
 import { ToolsMenu } from "./composer/ToolsMenu"
 import { type Attachment, type AttachmentResult, pickAttachments, attachmentsFromDataTransfer, windowsClipboardImageAttachment, fmtSize } from "../lib/attachments"
 import { useModel } from "../context/ModelContext"
@@ -80,6 +81,7 @@ export function ChatSurface({
   placeholder = "Message June…  (Enter to send · paste or drop files)",
   assistantLabel = "june",
   blockedReason = null,
+  artifactSessionID,
 }: {
   messages: UiMessage[]
   busy: boolean
@@ -98,6 +100,10 @@ export function ChatSurface({
   // typed text + attachments instead of dispatching into the void (which silently
   // vanished the message), and show this reason.
   blockedReason?: string | null
+  // When set, assistant replies that generate a renderable file (an html/svg/markdown fenced
+  // block) surface it as a canvas card (Open/Download) instead of dumping raw source, mirrored
+  // into THIS session's preview sandbox. Enables "generate a file → preview it" in Chat.
+  artifactSessionID?: string
 }) {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -251,7 +257,12 @@ export function ChatSurface({
             </div>
             <div className={m.role === "user" ? "rounded-lg bg-nightjar-surface px-4 py-2 text-nightjar-text" : "text-nightjar-text/90"}>
               {m.blocks.map((b, i) => {
-                if (b.kind === "text") return <p key={i} className="whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                if (b.kind === "text")
+                  return artifactSessionID && m.role === "assistant" ? (
+                    <AssistantText key={i} text={b.text} sessionID={artifactSessionID} />
+                  ) : (
+                    <p key={i} className="whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                  )
                 if (b.kind === "tool") return <ToolCallCard key={b.call.callID} call={b.call} />
                 if (b.kind === "image")
                   return (

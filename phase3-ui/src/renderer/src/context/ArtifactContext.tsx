@@ -33,8 +33,16 @@ interface ArtifactValue {
   setActiveEntry: (v: string) => void
   previewNonce: number
   liveCode: LiveCode | null
+  // Which session the current panel content belongs to. The panel state is a singleton but
+  // multiple screens (Chat, Code) consume it against DIFFERENT session sandboxes, so each
+  // screen renders its panel only when artifactSession === its own session id (no cross-talk).
+  artifactSession: string
   // Mirror a coding-agent write/edit tool-call into the session sandbox + open the panel.
   onToolCall: (call: ToolCall, sessionID: string) => void
+  // "Canvas from message": mirror raw content the user chose to open/download from a chat
+  // artifact card into the session sandbox (open → panel; download → native save dialog).
+  openArtifactFromContent: (sid: string, name: string, content: string) => void
+  downloadArtifactContent: (sid: string, name: string, content: string) => void
   // Drop all live-preview state. Called on any underlying-session change this
   // provider can't observe itself — notably a Code-tab session switch (CodeScreen);
   // this provider sits above SessionsContext and so never sees the code slot's id.
@@ -59,6 +67,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
   const [activeEntry, setActiveEntry] = useState<string>("")
   const [previewNonce, setPreviewNonce] = useState(0)
   const [liveCode, setLiveCode] = useState<LiveCode | null>(null)
+  const [artifactSession, setArtifactSession] = useState<string>("")
   // callID → last mirrored content length, so we only re-mirror on growth/completion
   // (a tool part arrives repeatedly as pending→running→completed snapshots).
   const artifactSeen = useRef<Map<string, number>>(new Map())
@@ -85,6 +94,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     setActiveEntry("")
     setLiveCode(null)
     setPreviewNonce(0)
+    setArtifactSession("")
     artifactSeen.current.clear()
     artifactSessionRef.current = ""
   }, [])
@@ -141,6 +151,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
       }
       artifactSeen.current.set(call.callID, len)
       setPanelOpen(true)
+      setArtifactSession(sid) // this write's session owns the panel now (screen gates on it)
       if (action.kind === "write") {
         setLiveCode({ rel: action.filePath.split(/[\\/]/).pop() || action.filePath, content: action.content, streaming, callID: call.callID })
         pv.write(sid, action.filePath, action.content)
@@ -162,6 +173,38 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     [bumpNonce],
   )
 
+  // Canvas from a chat message: mirror content the assistant emitted (a detected artifact
+  // card) into the session sandbox and open the panel — the "open" path. No streaming; the
+  // user explicitly chose THIS artifact, so it becomes the active entry.
+  const openArtifactFromContent = useCallback(
+    (sid: string, name: string, content: string) => {
+      const pv = previewBridge()
+      if (!pv || !sid) return
+      artifactSessionRef.current = sid
+      setArtifactSession(sid)
+      setPanelOpen(true)
+      setLiveCode({ rel: name, content, streaming: false, callID: `msg:${sid}:${name}` })
+      pv.write(sid, name, content)
+        .then(({ rel }) => {
+          setActiveEntry(rel)
+          setLiveCode((lc) => (lc ? { ...lc, rel } : lc))
+          bumpNonce()
+        })
+        .catch(() => {})
+    },
+    [bumpNonce],
+  )
+
+  // Download path for a chat artifact card: mirror the content, then open the native
+  // save-as dialog on the mirrored file.
+  const downloadArtifactContent = useCallback((sid: string, name: string, content: string) => {
+    const pv = previewBridge()
+    if (!pv || !sid) return
+    pv.write(sid, name, content)
+      .then(({ rel }) => pv.saveAs(sid, rel))
+      .catch(() => {})
+  }, [])
+
   const value: ArtifactValue = {
     panelOpen,
     setPanelOpen,
@@ -169,7 +212,10 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     setActiveEntry,
     previewNonce,
     liveCode,
+    artifactSession,
     onToolCall,
+    openArtifactFromContent,
+    downloadArtifactContent,
     resetPreview,
     syncCodeSession,
   }

@@ -5,7 +5,9 @@
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { useConnection } from "../context/ConnectionContext"
+import { useArtifact } from "../context/ArtifactContext"
 import { ChatSurface } from "../components/ChatSurface"
+import { ArtifactPanel } from "../components/ArtifactPanel"
 import { capabilities } from "../lib/capabilities"
 import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
@@ -27,13 +29,17 @@ export function ChatScreen() {
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const { activeModel } = useModel()
+  const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
   const id = slots.chat
 
   return (
-    <ChatSurface
+    <div className="flex h-full min-h-0">
+      <main className="min-h-0 flex-1">
+        <ChatSurface
       messages={messagesOf(id)}
       busy={busyOf(id)}
       blockedReason={connected && id ? null : "Connecting to the engine…"}
+      artifactSessionID={id}
       onSend={(text, { attachments, mode }) =>
         send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })
       }
@@ -57,6 +63,19 @@ export function ChatScreen() {
       }}
       onStop={() => abortSession(id)}
       menu={{ research: true, webSearch: true, createImage: true }}
-    />
+        />
+      </main>
+      {panelOpen && artifactSession === id && (
+        <ArtifactPanel
+          sessionID={id}
+          entry={activeEntry}
+          nonce={previewNonce}
+          live={liveCode}
+          onSelectEntry={setActiveEntry}
+          onClose={() => setPanelOpen(false)}
+          className="min-h-0 w-[45%] border-l border-nightjar-surface"
+        />
+      )}
+    </div>
   )
 }
