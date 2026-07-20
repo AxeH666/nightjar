@@ -17,6 +17,7 @@ import { capabilities } from "../lib/capabilities"
 import { useOnlineCapabilities } from "../lib/useOnlineCapabilities"
 import { TabBar, type TabId } from "./TabBar"
 import { ChatScreen } from "../screens/ChatScreen"
+import { ProjectsScreen } from "../screens/ProjectsScreen"
 import { CadScreen } from "../screens/CadScreen"
 import { LabScreen } from "../screens/LabScreen"
 import { CodeScreen } from "../screens/CodeScreen"
@@ -153,6 +154,9 @@ export function AppShell() {
             or the Code tab's live-preview state (B10). */}
         <div className={tab === "chat" ? "h-full" : "hidden"}>
           <ChatScreen />
+        </div>
+        <div className={tab === "projects" ? "h-full" : "hidden"}>
+          <ProjectsScreen />
         </div>
         <div className={tab === "cad" ? "h-full" : "hidden"}>
           <CadScreen />

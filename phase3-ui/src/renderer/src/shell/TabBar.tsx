@@ -12,10 +12,11 @@
 //
 // LAB (Lab.md) is added as a launcher tab beside CAD; CAD stays standalone until LAB's
 // shared shell is proven, then folds into LAB → Mechanical (§2/§10).
-export type TabId = "chat" | "cad" | "lab" | "code"
+export type TabId = "chat" | "projects" | "cad" | "lab" | "code"
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "chat", label: "Chat" },
+  { id: "projects", label: "Projects" },
   { id: "cad", label: "CAD" },
   { id: "lab", label: "LAB" },
   { id: "code", label: "Code" },

@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react"
-import { useProjects, type Project, type ProjectsStore } from "../../lib/projects"
-import { labById, type LabId } from "./labs"
+import { useProjects, type Project, type ProjectsStore, type ProjectScope } from "../../lib/projects"
 
 // Projects home (Lab.md §4.6): a grid of the lab's project cards with New project, search,
 // and sort (favorites first, then Last-updated or Name). Managing projects
@@ -11,15 +10,19 @@ function fmtWhen(ts: number): string {
 }
 
 export function ProjectsHome({
-  labId,
+  scope,
   onBack,
   onOpen,
+  backLabel,
 }: {
-  labId: LabId
-  onBack: () => void
+  scope: ProjectScope
   onOpen: (projectId: string) => void
+  // A lab passes onBack (+ its label) to return to the workspace; the top-level Projects tab
+  // omits them (it IS a top-level tab), so no back button renders.
+  onBack?: () => void
+  backLabel?: string
 }) {
-  const store = useProjects(labId)
+  const store = useProjects(scope)
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<"updated" | "name">("updated")
   const [newName, setNewName] = useState("")
@@ -43,17 +46,18 @@ export function ProjectsHome({
     onOpen(p.id)
   }
 
-  const lab = labById(labId)
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-nightjar-surface px-4 py-2">
-        <button
-          onClick={onBack}
-          title="Back to the workspace"
-          className="rounded px-2 py-1 text-xs text-nightjar-text/50 hover:bg-nightjar-surface hover:text-nightjar-text"
-        >
-          ‹ {lab.label}
-        </button>
+        {onBack && (
+          <button
+            onClick={onBack}
+            title="Back to the workspace"
+            className="rounded px-2 py-1 text-xs text-nightjar-text/50 hover:bg-nightjar-surface hover:text-nightjar-text"
+          >
+            ‹ {backLabel ?? "Back"}
+          </button>
+        )}
         <span className="font-medium text-nightjar-text">📁 Projects</span>
         <input
           value={query}
