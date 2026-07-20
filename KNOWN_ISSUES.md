@@ -99,6 +99,22 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   is broken app-wide, not just for one chip. Worth recording: the *fix* for a false-success bug
   reintroduced a narrower false-success, which is exactly why this class needs a test rather than an
   inspection.
+- **Third-order bug, also caught in review (Bugbot, second pass on PR #125):** `copyProjectContent`
+  and `deleteProjectContent` still swallowed their exceptions. On **duplicate**, a content copy that
+  failed on quota while the much smaller projects-list write succeeded produced a duplicate card with
+  none of its Memory/Instructions/Files carried across — and `storageOk` stayed `true`, because
+  reporting each write separately let the later small success clear the flag the larger failure had
+  just set. Fixed three ways: both helpers now return a boolean; `copyProjectContent` **rolls back its
+  partial writes** so a failed duplicate leaves no half-populated project behind; and every store
+  operation now reports storage health **once**, combining every write it made (`mutate` returns its
+  result instead of reporting). `duplicate` aborts rather than creating a contentless copy.
+- **The pattern worth remembering from this entry:** three successive rounds of the *same* defect
+  class — a storage failure that the UI reported as success — each one found only because something
+  actively looked for it. Two were caught by Bugbot, and the third (a **vacuous test**) was caught by
+  mutation-checking: the rollback test used a quota boundary that made the copy fail on its *first*
+  write, so nothing was ever partially written and the orphan assertion passed with **or without** the
+  rollback it claimed to verify. Reading the test would not have revealed that. For this class,
+  assert-then-mutate, or the test is decoration.
 - **Residual (rule 8):** the *rendered* failure chip was not confirmed in a real GUI — that needs a
   native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
   contract underneath it is proven headlessly; the pixels are not.

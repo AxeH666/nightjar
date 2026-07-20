@@ -83,22 +83,39 @@ export function saveFiles(projectId: string, files: ProjectFile[]): boolean {
 // a duplicated project's content to the new id, without knowing the key layout.
 const CONTENT_PARTS = ["instructions", "memory", "files"] as const
 
-export function deleteProjectContent(projectId: string): void {
+export function deleteProjectContent(projectId: string): boolean {
   try {
     for (const part of CONTENT_PARTS) localStorage.removeItem(key(projectId, part))
+    return true
   } catch {
-    /* localStorage unavailable → nothing was persisted */
+    return false // content may linger on disk — the caller must surface that, not hide it
   }
 }
 
-export function copyProjectContent(fromId: string, toId: string): void {
+// Copies a project's content to a new id. Returns false if ANY part failed to copy.
+//
+// On failure it rolls back whatever it had already written, so a failed duplicate never leaves
+// a half-populated project behind — the same "must not linger on disk" concern
+// deleteProjectContent exists for. Without this, a quota failure partway through would strand
+// orphaned keys under an id that may not even become a real project.
+export function copyProjectContent(fromId: string, toId: string): boolean {
+  const written: string[] = []
   try {
     for (const part of CONTENT_PARTS) {
       const v = localStorage.getItem(key(fromId, part))
-      if (v !== null) localStorage.setItem(key(toId, part), v)
+      if (v !== null) {
+        localStorage.setItem(key(toId, part), v)
+        written.push(part)
+      }
     }
+    return true
   } catch {
-    /* localStorage unavailable → nothing to copy */
+    try {
+      for (const part of written) localStorage.removeItem(key(toId, part))
+    } catch {
+      /* storage is already failing; the rollback is best-effort */
+    }
+    return false
   }
 }
 

@@ -89,12 +89,18 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
   // Persist SYNCHRONOUSLY from the ref, so a mutation survives even when this component
   // unmounts in the same React batch — e.g. "create → immediately open the project" navigates
   // away and unmounts Projects home before a setState-scheduled persist could ever run.
+  // Returns whether the list actually persisted. It deliberately does NOT report storage health
+  // itself: an operation can perform several writes (duplicate copies content AND writes the
+  // list), and reporting each one separately lets a later small success clear the flag a larger
+  // failure just set — masking exactly the case this is meant to catch. So every operation
+  // below reports ONCE, combining every write it made. (Bugbot, PR #125.)
   const mutate = useCallback(
-    (fn: (prev: Project[]) => Project[]) => {
+    (fn: (prev: Project[]) => Project[]): boolean => {
       const next = fn(projectsRef.current)
       projectsRef.current = next
-      reportStorageWrite(persistProjects(scope, next))
+      const ok = persistProjects(scope, next)
       setProjects(next)
+      return ok
     },
     [scope],
   )
@@ -103,23 +109,32 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     (name: string, description?: string): Project => {
       const now = Date.now()
       const p: Project = { id: newId(), name: name.trim() || "Untitled project", description, favorite: false, createdAt: now, updatedAt: now }
-      mutate((prev) => [p, ...prev])
+      reportStorageWrite(mutate((prev) => [p, ...prev]))
       return p
     },
     [mutate],
   )
   const rename = useCallback(
-    (id: string, name: string) => mutate((prev) => prev.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name, updatedAt: Date.now() } : p))),
+    (id: string, name: string) => {
+      reportStorageWrite(mutate((prev) => prev.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name, updatedAt: Date.now() } : p))))
+    },
     [mutate],
   )
   const setDescription = useCallback(
-    (id: string, description: string) => mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p))),
+    (id: string, description: string) => {
+      reportStorageWrite(mutate((prev) => prev.map((p) => (p.id === id ? { ...p, description, updatedAt: Date.now() } : p))))
+    },
     [mutate],
   )
   const remove = useCallback(
     (id: string) => {
-      deleteProjectContent(id) // drop the project's Memory/Instructions/Files too — must not linger on disk
-      mutate((prev) => prev.filter((p) => p.id !== id))
+      // Drop the project's Memory/Instructions/Files too — must not linger on disk. If that
+      // fails we still remove the card: the user asked for the project to go, and leaving it
+      // would be a worse failure than the content residue. Both results are combined into ONE
+      // health report so a successful list write can't mask the failed content delete.
+      const contentOk = deleteProjectContent(id)
+      const listOk = mutate((prev) => prev.filter((p) => p.id !== id))
+      reportStorageWrite(contentOk && listOk)
     },
     [mutate],
   )
@@ -129,13 +144,23 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
       if (!src) return
       const now = Date.now()
       const copy: Project = { ...src, id: newId(), name: `${src.name} (copy)`, favorite: false, createdAt: now, updatedAt: now }
-      copyProjectContent(src.id, copy.id) // carry Memory/Instructions/Files into the duplicate
-      mutate((prev) => [copy, ...prev])
+      // Copy content FIRST and abort if it fails. A duplicate whose Memory/Instructions/Files
+      // silently didn't come across is not a duplicate — it is an empty project wearing the
+      // source's name, and the projects-list write is small enough that it would usually
+      // succeed even when the content copy hit quota, leaving the card looking correct.
+      // copyProjectContent rolls back its partial writes, so aborting orphans nothing.
+      if (!copyProjectContent(src.id, copy.id)) {
+        reportStorageWrite(false)
+        return
+      }
+      reportStorageWrite(mutate((prev) => [copy, ...prev]))
     },
     [mutate],
   )
   const toggleFavorite = useCallback(
-    (id: string) => mutate((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite, updatedAt: Date.now() } : p))),
+    (id: string) => {
+      reportStorageWrite(mutate((prev) => prev.map((p) => (p.id === id ? { ...p, favorite: !p.favorite, updatedAt: Date.now() } : p))))
+    },
     [mutate],
   )
   const get = useCallback((id: string) => projectsRef.current.find((p) => p.id === id), [])
