@@ -45,6 +45,22 @@ export function persistProjects(scope: ProjectScope, projects: Project[]): boole
   }
 }
 
+// The storage side of duplicate(), extracted from the hook so its FAILURE ORDERING is testable
+// without a React renderer — the two orderings fail differently and both leak if unhandled:
+//   1. content copy fails            → copyProjectContent rolls back its own partial writes
+//   2. content copies, list write fails → the content must be removed here, or storage keeps
+//      Memory/Instructions/Files under an id that appears in no list. That is orphaned forever,
+//      because only remove() ever deletes content and it cannot reach an id it cannot see.
+// Returns whether the duplicate fully landed; on ANY failure storage is left as it was found.
+export function persistDuplicate(srcId: string, copyId: string, writeList: () => boolean): boolean {
+  if (!copyProjectContent(srcId, copyId)) return false
+  if (!writeList()) {
+    deleteProjectContent(copyId)
+    return false
+  }
+  return true
+}
+
 // A collision-resistant id (renderer Date.now() is fine — only workflow scripts forbid it).
 let seq = 0
 function newId(): string {
@@ -142,18 +158,21 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     (id: string) => {
       const src = projectsRef.current.find((p) => p.id === id)
       if (!src) return
+      const before = projectsRef.current
       const now = Date.now()
       const copy: Project = { ...src, id: newId(), name: `${src.name} (copy)`, favorite: false, createdAt: now, updatedAt: now }
-      // Copy content FIRST and abort if it fails. A duplicate whose Memory/Instructions/Files
-      // silently didn't come across is not a duplicate — it is an empty project wearing the
-      // source's name, and the projects-list write is small enough that it would usually
-      // succeed even when the content copy hit quota, leaving the card looking correct.
-      // copyProjectContent rolls back its partial writes, so aborting orphans nothing.
-      if (!copyProjectContent(src.id, copy.id)) {
-        reportStorageWrite(false)
-        return
+      // Content is copied FIRST: a duplicate whose Memory/Instructions/Files silently didn't
+      // come across is not a duplicate, it is an empty project wearing the source's name — and
+      // the projects-list write is small enough that it would usually succeed even when the
+      // content copy hit quota, leaving the card looking perfectly correct.
+      const ok = persistDuplicate(src.id, copy.id, () => mutate((prev) => [copy, ...prev]))
+      // If mutate ran but didn't persist, revert the in-memory insert too, so the user isn't
+      // left holding a duplicate that is empty now and gone after a reload.
+      if (!ok && projectsRef.current !== before) {
+        projectsRef.current = before
+        setProjects(before)
       }
-      reportStorageWrite(mutate((prev) => [copy, ...prev]))
+      reportStorageWrite(ok)
     },
     [mutate],
   )

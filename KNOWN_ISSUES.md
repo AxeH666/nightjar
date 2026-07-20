@@ -108,13 +108,25 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   partial writes** so a failed duplicate leaves no half-populated project behind; and every store
   operation now reports storage health **once**, combining every write it made (`mutate` returns its
   result instead of reporting). `duplicate` aborts rather than creating a contentless copy.
-- **The pattern worth remembering from this entry:** three successive rounds of the *same* defect
-  class — a storage failure that the UI reported as success — each one found only because something
-  actively looked for it. Two were caught by Bugbot, and the third (a **vacuous test**) was caught by
-  mutation-checking: the rollback test used a quota boundary that made the copy fail on its *first*
-  write, so nothing was ever partially written and the orphan assertion passed with **or without** the
-  rollback it claimed to verify. Reading the test would not have revealed that. For this class,
-  assert-then-mutate, or the test is decoration.
+- **Fourth-order bug (Bugbot, third pass on PR #125):** the *reverse* failure ordering. The content
+  copy can SUCCEED and the projects-list write then fail — leaving Memory/Instructions/Files in storage
+  under an id that appears in no list. That is orphaned **permanently**, because only `remove()` ever
+  deletes content and it cannot reach an id it cannot see. Fixed by extracting `persistDuplicate()`
+  (storage-side sequencing, rollback on either ordering) and reverting the in-memory insert too, so a
+  failed duplicate is simply a duplicate that did not happen. The extraction also made this testable
+  without a React renderer, which is why it has a test at all.
+- **The pattern worth remembering from this entry:** four successive rounds of the *same* defect class
+  — a storage failure the UI reported as success — each found only because something actively looked
+  for it. Three were caught by Bugbot; the others by **mutation-checking**, which twice caught
+  **vacuous tests** that a careful reading did not:
+  1. The rollback test used a quota boundary that made the copy throw on its *first* write, so nothing
+     was ever partially written and the orphan assertion passed with **or without** the rollback it
+     claimed to verify. Deleting the rollback left the suite green.
+  2. The "content copy fails" test never seeded the source, so `copyProjectContent` found no parts,
+     trivially succeeded, and the failure scenario never occurred. It asserted nothing.
+  Both looked entirely reasonable on the page. The rule this earns: for any guard whose whole purpose
+  is a failure path, **assert then mutate** — break the guard and watch the specific test go red — or
+  the test is decoration, and a green suite is evidence of nothing.
 - **Residual (rule 8):** the *rendered* failure chip was not confirmed in a real GUI — that needs a
   native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
   contract underneath it is proven headlessly; the pixels are not.
