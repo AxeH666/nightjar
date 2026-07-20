@@ -36,7 +36,7 @@ Phases 1–4 are built and reported:
 - **Phase 2 — capabilities** ([report](phase2-mcp/PHASE2_REPORT.md)): Row-Bot's voice/vision/memory/browser re-exposed as a 14-tool MCP server; a live **wake-word daemon** (`phase2-mcp/wake_daemon.py`) drives the "Hey Nightjar" loop.
 - **Phase 2b — Odysseus** ([report](phase2-odysseus/PHASE2B_REPORT.md)): email/RAG/research/PIM as MCP sidecars, **embedded ChromaDB (no docker)**.
 - **Phase 3 — UI shell** ([report](phase3-ui/PHASE3_REPORT.md)): chat + tool-call cards + explicit mode selector + permission/approval panel + a multi-sidecar supervisor.
-- **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): orb-ui integrated as a voice-reactive orb + a Siri-style overlay, wired to the live pipeline.
+- **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): a voice-reactive orb + a Siri-style overlay, wired to the live pipeline. *(Phase 4 integrated orb-ui; Step 7 later replaced it with a custom three.js orb.)*
 
 **Since Phase 4:** BYOK cloud-key slots shipped (encrypted key storage + model
 switcher + a dismissible cloud banner backed by a persistent ☁ indicator; PRs #6/#8/#98) and the desktop app is verified

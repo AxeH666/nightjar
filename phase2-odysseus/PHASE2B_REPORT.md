@@ -60,7 +60,7 @@ The scoped E2E hung once at `init` (no session) — the same memory-pressure sta
 ## Artifacts (`phase2-odysseus/`)
 - `servers/{deep_research_server,docs_query_server,pim_server,nightjar_odysseus_config,_bootstrap}.py`
 - `hwfit_vendor/` (vendored llmfit + `hwfit_cli.py` + MIT license)
-- `workspace/opencode.json` (all 7 servers), `workspace-scoped/opencode.json` (per-mode scoping demo)
+- `workspace/opencode.json` (all 7 servers), `workspace-scoped/opencode.json` (per-mode scoping demo) — *`workspace-scoped/opencode.json` was later **removed** (drifted, unused, ungated demo config; PR #115)*
 - Patches to Odysseus clone (env-gated, marked `NIGHTJAR`): `src/chroma_client.py` (embedded), `services/docs/service.py` (doc-key fix)
 - `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md` (top-level, AGPL-3.0-or-later)
 

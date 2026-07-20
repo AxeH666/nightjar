@@ -114,6 +114,10 @@ Bundle spot-check (`out/renderer/assets/*.js`): all five amber state colors,
 `ws://127.0.0.1:8765` are present — the orb is wired, not tree-shaken.
 
 ## orb-ui version pin
+> **Superseded (Step 7):** `orb-ui` was later **dropped** for a custom three.js vortex orb and is no
+> longer in `package.json`/`package-lock.json`. The pin note below is historical — see
+> `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md` Step 7.
+
 `orb-ui@0.2.4` (exact, in `package.json` + `package-lock.json`). Pre-1.0 → pinned
 without a caret so a `0.3.x` doesn't silently change the adapter/theme contract.
 If bumping: re-check `OrbAdapter`/`OrbState` shapes and re-sync `AmberCircleTheme`
