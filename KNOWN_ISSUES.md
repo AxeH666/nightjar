@@ -100,11 +100,25 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   anywhere in the renderer (the orb explicitly avoids them) and a same-origin worker would already be
   permitted by the `default-src` fallback — only a `blob:`-constructed one would be refused. Adding it
   would be noise, not hardening.
+- **Scope — BOTH preview surfaces were dead, not just chat.** `CodeScreen` renders the identical
+  `ArtifactPanel`/iframe fed by the coding agent's `write`/`edit` mirror, so the **Code tab's** Preview
+  was blank too. It went unnoticed because that panel's Code and Files tabs use `previewRead`/
+  `previewList` over IPC (no iframe, so they worked), and the streaming choreography parks the user on
+  the Code tab during a write, only flipping to Preview 1200 ms after it settles.
+- **Alternative considered, not taken:** register a custom `nightjar-preview://` standard/secure scheme
+  so the preview is same-origin-ish and needs no CSP widening at all. Tighter than a loopback port
+  wildcard — the wildcard does let the renderer frame *any* loopback port, not only ours — but a
+  materially larger change to the serving path. Recorded here as the natural hardening follow-up if the
+  loopback allowance ever becomes uncomfortable; the wildcard grants nothing `connect-src` didn't
+  already grant that same origin.
 - **Verification (rule 6 — OPEN, needs the maintainer's real GUI run):** static analysis is *not*
   sufficient for this class. To close: run the app on native Windows with DevTools open and confirm
   (a) the `Refused to frame 'http://127.0.0.1:…'` console error is **gone** and the artifact actually
-  **paints** in the Preview pane, and (b) an attached image thumbnail renders. Headless/typecheck
-  passes prove nothing here — the previous state passed all of them.
+  **paints** in the Preview pane — on **both** the Chat artifact card and a coding-agent `write` in the
+  Code tab, two different entry points into the same iframe — and (b) an attached image thumbnail
+  renders (the `img-src` half). Headless/typecheck passes prove nothing here: the previous, broken
+  state passed every one of those same checks, and NJ-8's corrected entry above shows the existing
+  e2e test structurally cannot catch it.
 
 ## NJ-38 — `preview-server` reflects any caller's `Origin` into `Access-Control-Allow-Origin` — OPEN 2026-07-20
 
@@ -497,7 +511,8 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 
 ## NJ-8 — live-preview: large single-file artifacts truncate on the local 4B — MITIGATED (runtime-verify pending) 2026-07-09
 - **Resolution (PR #30, Phase 1):** this is a local-model *capacity* limit, not a bug, so it's **mitigated** rather than closed. The coding prompt now steers the local 4B toward **concise, multi-file** writes (each under budget); an opt-in `NIGHTJAR_DESIGN_PROFILE=1` raises the predict/context caps **and** the matching wall-clock timeouts **together** and each stays finite (rule 3 — never the global default, `services.ts`); a truncated `write` still fails cleanly (empty part → `error`, no partial file). **To close (rule 6):** on a real local 4B ask for a large single-file page → confirm it emits multi-file (or a clean error), never a silent/garbage artifact; a stronger BYOK model renders big artifacts directly.
-- **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → iframe + markdown render + download) is implemented and **verified end-to-end** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 18/18). Only the model's ability to emit a *big* artifact in one tool call is limited.
+- **Severity:** low — the live-preview panel *mechanism* (mirror write/edit tool-call content → sandbox → loopback server → markdown render + download) is implemented and verified **up to but NOT including the iframe render** (`phase3-ui/test-preview-e2e.ts`: coffee-shop HTML + markdown doc, 5/5; `test-preview-server.ts` 18/18). Only the model's ability to emit a *big* artifact in one tool call is limited.
+- **⚠ Verification-scope correction (2026-07-20, rule 8).** This entry previously claimed the mechanism was "verified end-to-end" **including the iframe**. That was a **false green**: `test-preview-e2e.ts` asserts via a Node-side `await fetch(url)`, which has **no CSP enforcement**, and the test's own header says "The only piece NOT covered here is the literal Electron `<iframe>` pixels (needs a display)." The iframe render was therefore never verified — and it was in fact **broken the entire time** by the missing `frame-src` (see **NJ-39**). A proxy (a Node fetch) had been standing in for the real path (a Chromium frame load), which is exactly the failure mode rule 8 names. Corrected so the next person to touch preview does not again assume the render path is covered by the existing suite and skip the GUI check.
 - **Detail:** the coding agent writes files via its `write` tool. The local **Qwen3-4B** is capped at `--predict 2048` tokens (a rule-3 safety backstop, `services.ts`). An elaborate single self-contained page can exceed that, so the `write` tool-call JSON is **truncated → the part goes `pending → error` with empty `input`** (observed). The preview correctly renders nothing for an errored write (no partial/garbage file). A **concise** page or a **markdown doc** fits the budget and renders fine; so does any artifact on a **stronger BYOK/OpenRouter model**.
 - **Mitigations in place:** the coding-mode system prompt steers previewable artifacts under a (gitignored) `preview/` dir **using the write tool** (not inline), and toward concise output; multi-file output (separate `index.html`/`style.css`/`script.js`) also keeps each write within budget.
 - **Fix ideas:** encourage multi-file/concise generation more strongly; raise `--predict` only behind a "design" profile (never the global default — rule 3); rely on a BYOK model for large artifacts.
