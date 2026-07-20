@@ -23,13 +23,7 @@
     "mistral": { "options": { "apiKey": "{env:NIGHTJAR_BYOK_MISTRAL}", "headerTimeout": 30000, "chunkTimeout": 90000, "timeout": 300000 } },
     "deepseek": { "options": { "apiKey": "{env:NIGHTJAR_BYOK_DEEPSEEK}", "headerTimeout": 30000, "chunkTimeout": 90000, "timeout": 300000 } },
     "xai": { "options": { "apiKey": "{env:NIGHTJAR_BYOK_XAI}", "headerTimeout": 30000, "chunkTimeout": 90000, "timeout": 300000 } },
-    "fireworks-ai": { "options": { "apiKey": "{env:NIGHTJAR_BYOK_FIREWORKS}", "headerTimeout": 30000, "chunkTimeout": 90000, "timeout": 300000 } },
-    "byoktest": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "BYOK Test (mock)",
-      "options": { "baseURL": "http://127.0.0.1:8099/v1", "apiKey": "{env:NIGHTJAR_BYOK_BYOKTEST}" },
-      "models": { "mock-model": { "name": "Mock Model" } }
-    }
+    "fireworks-ai": { "options": { "apiKey": "{env:NIGHTJAR_BYOK_FIREWORKS}", "headerTimeout": 30000, "chunkTimeout": 90000, "timeout": 300000 } }
   },
   "agent": {
     "research": {

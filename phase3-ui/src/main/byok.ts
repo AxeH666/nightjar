@@ -69,19 +69,8 @@ export const BYOK_PROVIDERS: ByokProvider[] = [
   { id: "fireworks-ai", name: "Fireworks AI", envVar: "NIGHTJAR_BYOK_FIREWORKS", defaultModel: "accounts/fireworks/models/gpt-oss-120b", keyHint: "fw_…" },
 ]
 
-// Optional mock provider for end-to-end testing without burning a real cloud key
-// (a local OpenAI-compatible server that validates the injected Bearer token).
-// Only surfaced when NIGHTJAR_BYOK_TEST_PROVIDER=1.
-export const TEST_PROVIDER: ByokProvider = {
-  id: "byoktest",
-  name: "BYOK Test (mock)",
-  envVar: "NIGHTJAR_BYOK_BYOKTEST",
-  defaultModel: "mock-model",
-  keyHint: "any-test-key",
-}
-
 export function providerCatalog(): ByokProvider[] {
-  return process.env.NIGHTJAR_BYOK_TEST_PROVIDER === "1" ? [...BYOK_PROVIDERS, TEST_PROVIDER] : BYOK_PROVIDERS
+  return BYOK_PROVIDERS
 }
 
 function providerById(id: string): ByokProvider | undefined {
