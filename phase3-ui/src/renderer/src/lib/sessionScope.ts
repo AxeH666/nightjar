@@ -66,3 +66,25 @@ export function deleteProjectSessionIds(projectId: string): boolean {
     return false // storage blocked → the id set may linger; caller decides how to surface it
   }
 }
+
+// A project has a SINGLE persistent chat (5b decision), so its "session-id set" holds exactly
+// one id. Stored the same shape as loadSessionIds/persistSessionIds (a JSON string[]) under the
+// same key, so deleteProjectSessionIds clears it — one key family, one delete path.
+export function loadProjectChatId(projectId: string): string | null {
+  try {
+    const raw = localStorage.getItem(sessionIdsKey(chatScope(projectId)))
+    const arr = raw ? (JSON.parse(raw) as string[]) : []
+    return arr[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+export function saveProjectChatId(projectId: string, sessionId: string): boolean {
+  try {
+    localStorage.setItem(sessionIdsKey(chatScope(projectId)), JSON.stringify([sessionId]))
+    return true
+  } catch {
+    return false
+  }
+}

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { baseSlot, chatScope, deleteProjectSessionIds, projectOf, sessionIdsKey } from "./sessionScope"
+import {
+  baseSlot,
+  chatScope,
+  deleteProjectSessionIds,
+  loadProjectChatId,
+  projectOf,
+  saveProjectChatId,
+  sessionIdsKey,
+} from "./sessionScope"
 
 // The load-bearing test for 5b's migration safety: the General (no-project) keys MUST equal the
 // exact strings SessionsContext.sessionIdsKey produces today, or a real user's recents rail
@@ -73,5 +81,44 @@ describe("deleteProjectSessionIds — the delete-hygiene helper", () => {
   it("returns FALSE when storage is absent rather than throwing", () => {
     // No localStorage installed — must degrade honestly, not crash the renderer.
     expect(deleteProjectSessionIds("p_1")).toBe(false)
+  })
+})
+
+describe("project chat id — the single persistent chat's persistence (PR-B)", () => {
+  const stub = (): Map<string, string> => {
+    const m = new Map<string, string>()
+    ;(globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    }
+    return m
+  }
+  afterEach(() => {
+    delete (globalThis as { localStorage?: unknown }).localStorage
+  })
+
+  it("round-trips the id under the project's chat key, and deleteProjectSessionIds clears it", () => {
+    const m = stub()
+    expect(saveProjectChatId("p_1", "ses_abc")).toBe(true)
+    expect(m.get("nightjar.sessionIds.chat.p_1")).toBe(JSON.stringify(["ses_abc"]))
+    expect(loadProjectChatId("p_1")).toBe("ses_abc")
+    // Same key family as the delete-hygiene helper → one delete path clears it.
+    deleteProjectSessionIds("p_1")
+    expect(loadProjectChatId("p_1")).toBeNull()
+  })
+
+  it("returns null for a project with no stored chat, and on absent/garbage storage", () => {
+    stub()
+    expect(loadProjectChatId("never_opened")).toBeNull()
+    // Garbage value must not throw.
+    ;(globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage.setItem(
+      "nightjar.sessionIds.chat.p_x",
+      "{not json",
+    )
+    expect(loadProjectChatId("p_x")).toBeNull()
+    delete (globalThis as { localStorage?: unknown }).localStorage
+    expect(loadProjectChatId("p_1")).toBeNull() // no storage at all
+    expect(saveProjectChatId("p_1", "x")).toBe(false)
   })
 })

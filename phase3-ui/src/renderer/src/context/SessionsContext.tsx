@@ -22,6 +22,7 @@ import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
+import { loadProjectChatId, saveProjectChatId } from "../lib/sessionScope"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -141,6 +142,11 @@ interface SessionsValue {
   newSession: (slot: SlotId, agent: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
+  // 5b — per-project chat isolation. openProjectChat resolves (resume-or-create) a project's
+  // single persistent chat session id; deleteProjectChat drops it (best-effort engine delete)
+  // when the project is removed. Project chats live in a parallel map, NOT in `slots`.
+  openProjectChat: (projectId: string) => Promise<string>
+  deleteProjectChat: (projectId: string) => Promise<void>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
@@ -260,6 +266,26 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // Once the user picks a chat via the recents rail (New chat / resume), stop auto-adopting the
   // connection's primary onto the chat slot — otherwise a (re)connect would clobber their choice.
   const chatBoundManually = useRef(false)
+
+  // 5b — per-project chat isolation. A parallel map projectId → its single persistent chat
+  // session id, kept DELIBERATELY OUTSIDE the fixed `slots` record so none of the base
+  // chat/code/cad machinery — the primary-adopt effect, the chatBoundManually pins, rebindSlot —
+  // is touched (that machinery is the hard-won #122/#123 path and must not regress). The two
+  // places a project chat is NOT free from `slots` are handled explicitly: gcSessions preserves
+  // these ids (or a reconnect would garbage-collect a live project conversation), and the
+  // Chat-only honesty guardrail fires for them too (a project chat is also a write-tool-less
+  // assistant chat). See research/5b_PLAN.md.
+  const [projectChats, setProjectChats] = useState<Record<string, string>>({})
+  const projectChatsRef = useRef<Record<string, string>>({})
+  useEffect(() => {
+    projectChatsRef.current = projectChats
+  }, [projectChats])
+  // True if `sid` is any chat-scope session (the General chat slot OR a project chat) — the set
+  // the honesty guardrail must cover. Reads refs so it's stable and current at event time.
+  const isChatScope = useCallback(
+    (sid: string): boolean => slotsRef.current.chat === sid || Object.values(projectChatsRef.current).includes(sid),
+    [],
+  )
   const agentsRef = useRef(agents) // stable read of the live agent list (for validAgent, without a deps cascade)
   useEffect(() => {
     sessionsRef.current = sessions
@@ -317,7 +343,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // closes the orphaned-session leaks in resume/delete/rebind. Reads slotsRef,
   // which callers update synchronously *before* calling this.
   const gcSessions = useCallback(() => {
-    const bound = new Set(Object.values(slotsRef.current).filter(Boolean))
+    // Bound = every slot session PLUS every open project chat. Project chats live outside `slots`
+    // (5b), so they MUST be unioned in here or the first gcSessions after one is created — fired
+    // by any rebindSlot, i.e. every reconnect recreating code/cad or re-adopting chat — would
+    // forget a LIVE project conversation and abort it mid-turn. This union is the single reason
+    // the parallel-map approach is GC-safe (research/5b_PLAN.md).
+    const bound = new Set([...Object.values(slotsRef.current), ...Object.values(projectChatsRef.current)].filter(Boolean))
     const client = clientRef.current
     for (const id of Array.from(perSessionRefs.current.keys())) {
       if (!bound.has(id)) {
@@ -600,7 +631,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         // is Chat-specific (the assistant has no write tool); Code's truncated-write case is
         // covered by the ToolCallCard isTruncatedWrite hint, and firing "can't save from Chat"
         // on Code would mislead (Bugbot). Idempotent (deterministic id) + self-limiting.
-        if (slotsRef.current.chat === sid) {
+        // 5b: fires for a PROJECT chat too (isChatScope), since it is equally a write-tool-less
+        // assistant chat — a project chat's hallucinated-save claim must still be corrected.
+        if (isChatScope(sid)) {
           updateMessages(sid, (prev) => {
             // Skip messages THIS handler may have appended earlier (imgfail / cad-noexport / a
             // prior warn), so a synthetic message never masks the real reply's claim (Bugbot).
@@ -1004,6 +1037,84 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession, setStatus],
   )
 
+  // 5b — resolve a project's single persistent chat: return the binding if already open this
+  // run; else reuse the persisted session IF it still exists on the engine (the engine may have
+  // restarted — sessions don't reliably survive that, which is why the code slot recreates too —
+  // and a dead id would 404 on first send); else create a fresh one. Registers the id in the
+  // parallel map (never in `slots`), so the base chat/code/cad machinery is untouched.
+  const openProjectChat = useCallback(
+    async (projectId: string): Promise<string> => {
+      if (!projectId) return ""
+      const existing = projectChatsRef.current[projectId]
+      if (existing) return existing
+      const client = clientRef.current
+      if (!client) return ""
+      const stored = loadProjectChatId(projectId)
+      let id = ""
+      let messages: UiMessage[] = []
+      if (stored) {
+        const alive = await client
+          .listSessions()
+          .then((ss) => ss.some((s) => s.id === stored))
+          .catch(() => false)
+        if (alive) {
+          id = stored
+          try {
+            messages = messagesFromHistory(await client.getMessages(stored))
+          } catch {
+            /* alive but history read failed → still bind, just with no prior messages */
+          }
+        }
+      }
+      if (!id) {
+        try {
+          id = await client.createSession(DEFAULT_TITLE.chat)
+        } catch (err: any) {
+          setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
+          return ""
+        }
+        saveProjectChatId(projectId, id) // persist the (possibly replacement) id
+      }
+      // Bind the REF first (gcSessions reads it synchronously), then perSessionRefs, then state —
+      // so no interleaved gcSessions can forget this id between registration and the map update.
+      projectChatsRef.current = { ...projectChatsRef.current, [projectId]: id }
+      perSessionRefs.current.set(id, freshRefs())
+      setProjectChats((prev) => ({ ...prev, [projectId]: id }))
+      setSessions((prev) => ({
+        ...prev,
+        [id]: { id, agent: validAgent(DEFAULT_AGENT.chat), title: prev[id]?.title ?? DEFAULT_TITLE.chat, messages, busy: false },
+      }))
+      return id
+    },
+    [clientRef, validAgent, setStatus],
+  )
+
+  // 5b — remove a project's chat when the project is deleted (decision #3: best-effort engine
+  // delete so a deleted project's transcript doesn't linger server-side). Must be called BEFORE
+  // the projects store's purge clears the persisted id key; ids are captured synchronously up
+  // front so the ordering is safe regardless. The client-side id set is dropped by the store's
+  // purgeProjectStorage — this covers the engine session + the in-memory binding.
+  const deleteProjectChat = useCallback(
+    async (projectId: string) => {
+      const openId = projectChatsRef.current[projectId]
+      const persisted = loadProjectChatId(projectId) // sync — captured before any store purge runs
+      if (openId) {
+        projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
+        setProjectChats((prev) => {
+          const next = { ...prev }
+          delete next[projectId]
+          return next
+        })
+      }
+      const client = clientRef.current
+      for (const sid of new Set([openId, persisted].filter(Boolean) as string[])) {
+        if (client) await client.deleteSession(sid).catch(() => {})
+      }
+      gcSessions() // the id is now unbound (removed from the map above) → drop it from the registry
+    },
+    [clientRef, gcSessions],
+  )
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       const client = clientRef.current
@@ -1049,6 +1160,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     newSession,
     deleteSession,
     renameSession,
+    openProjectChat,
+    deleteProjectChat,
     hasSession,
     setBusy,
     sessionIdsBySlot,
