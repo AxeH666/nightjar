@@ -159,14 +159,14 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
             setLiveCode((lc) => (lc ? { ...lc, rel } : lc))
             bumpNonce()
           })
-          .catch(() => {})
+          .catch((e) => console.error("[artifact] tool-call mirror write failed", { sid, filePath: action.filePath }, e))
       } else {
         pv.edit(sid, action.filePath, action.oldString, action.newString, action.replaceAll)
           .then(({ rel }) => {
             setActiveEntry((prev) => preferHtml(prev, rel))
             bumpNonce()
           })
-          .catch(() => {})
+          .catch((e) => console.error("[artifact] tool-call mirror edit failed", { sid, filePath: action.filePath }, e))
       }
     },
     [bumpNonce],
@@ -189,7 +189,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
           setLiveCode((lc) => (lc ? { ...lc, rel } : lc))
           bumpNonce()
         })
-        .catch(() => {})
+        .catch((e) => console.error("[artifact] open: mirror write failed", { sid, name }, e))
     },
     [bumpNonce],
   )
@@ -201,7 +201,7 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     if (!pv || !sid) return
     pv.write(sid, name, content)
       .then(({ rel }) => pv.saveAs(sid, rel))
-      .catch(() => {})
+      .catch((e) => console.error("[artifact] download: mirror write / save-as failed", { sid, name }, e))
   }, [])
 
   const value: ArtifactValue = {
