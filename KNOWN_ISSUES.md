@@ -61,6 +61,37 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-40 — every Projects localStorage write swallowed its exception, so a failed save presented a fully successful UI — FIXED (feat/projects-ux-save-rename) 2026-07-20
+
+- **What:** all four write paths in the Projects feature (`saveStr`, `saveFiles` in
+  `projectContent.ts`; `persistProjects` in `projects.ts`; and `copyProjectContent`) caught their
+  exception and returned `void`. The comments anticipated "localStorage unavailable", but the same
+  bare `catch` also absorbs **`QuotaExceededError`** — realistic here, since localStorage has a ~5MB
+  per-origin cap and pasting a large reference into a project's Files is an ordinary way to reach it.
+- **Consequence:** the state update ran regardless of whether the write landed, so the UI reported
+  success over a total persistence failure — the file appeared in the list, the project card appeared
+  in the grid, and nothing had been written.
+- **Why it was a blocker, not a filing (maintainer, 2026-07-20):** this was originally going to be
+  recorded as a deferred item alongside NJ-36/37/38. It was correctly reclassified as a **prerequisite**
+  of the Save indicator shipped in the same PR: an indicator layered on a write that cannot report
+  failure would render "Saved" for writes that silently failed — **worse than no indicator**, because
+  it makes an untrustworthy thing look trustworthy. Shipping the indicator without this fix would have
+  been a regression, so the two shipped together.
+- **Fix:** `saveStr`/`saveFiles`/`persistProjects` now return a boolean. `useProjectContent` records a
+  per-part `SaveResult` and `ProjectView` renders **"Saved"** or **"Not saved"** from the actual result;
+  `useProjects` exposes `storageOk` and both Projects surfaces show a "Changes not being saved" warning.
+  No write path was moved, debounced, or buffered — the per-keystroke synchronous write is deliberate
+  (it is what makes an edit survive an immediate unmount), and the indicator only *reports* it.
+- **Verified (headless, rule 6 as far as it goes):** `projectContent.test.ts` forces the real failure —
+  a `localStorage` stub whose `setItem` throws `QuotaExceededError`, plus the storage-entirely-absent
+  case — and asserts the helpers return `false`. The tests were **mutation-checked**: flipping the
+  `catch` back to `return true` makes exactly the two failure-path tests fail with `expected true to be
+  false`, so they genuinely catch the regression rather than passing vacuously. Typecheck clean, build
+  OK, vitest 65/65.
+- **Residual (rule 8):** the *rendered* failure chip was not confirmed in a real GUI — that needs a
+  native-Windows run with storage actually filled (or `setItem` stubbed in DevTools). The boolean
+  contract underneath it is proven headlessly; the pixels are not.
+
 ## NJ-39 — live-preview never rendered: the renderer CSP declared no `frame-src` (and no `img-src`, silently breaking every `data:` image) — FIXED (fix/preview-csp-frame-src) 2026-07-20
 
 - **Severity:** **P1** — the whole live-preview/Artifacts panel was dead in **both** dev and packaged

@@ -12,6 +12,21 @@ export interface ProjectFile {
   content: string
 }
 
+// The three parts a project owns. Also the key space for save reporting below.
+export type ContentPart = "instructions" | "memory" | "files"
+
+// The outcome of the MOST RECENT write for one part. `ok: false` means the write genuinely
+// FAILED (quota exceeded, storage blocked) and the value now lives in memory only.
+//
+// This exists because the UI shows a "Saved" indicator. Every save path below therefore
+// reports its real result instead of swallowing the exception: an indicator wired to an
+// assumed success would show "Saved" for writes that silently failed, which is strictly
+// worse than having no indicator — it makes an untrustworthy thing look trustworthy.
+export interface SaveResult {
+  ok: boolean
+  at: number
+}
+
 export interface ProjectContent {
   instructions: string
   setInstructions: (v: string) => void
@@ -20,6 +35,9 @@ export interface ProjectContent {
   files: ProjectFile[]
   addFile: (name: string, content: string) => void
   removeFile: (id: string) => void
+  // Per-part result of the last write. Absent = nothing written yet this session (so the UI
+  // shows no indicator rather than an unearned "Saved").
+  saveState: Partial<Record<ContentPart, SaveResult>>
 }
 
 function key(projectId: string, part: string): string {
@@ -32,11 +50,14 @@ function loadStr(projectId: string, part: string): string {
     return ""
   }
 }
-function saveStr(projectId: string, part: string, v: string): void {
+// Returns whether the write actually landed. Exported for the unit test that forces a
+// failure — the failure path is the one that matters here and it must be provable.
+export function saveStr(projectId: string, part: string, v: string): boolean {
   try {
     localStorage.setItem(key(projectId, part), v)
+    return true
   } catch {
-    /* localStorage unavailable → in-memory only for this run */
+    return false // quota exceeded or storage blocked → in-memory only; the caller MUST surface this
   }
 }
 function loadFiles(projectId: string): ProjectFile[] {
@@ -47,11 +68,12 @@ function loadFiles(projectId: string): ProjectFile[] {
     return []
   }
 }
-function saveFiles(projectId: string, files: ProjectFile[]): void {
+export function saveFiles(projectId: string, files: ProjectFile[]): boolean {
   try {
     localStorage.setItem(key(projectId, "files"), JSON.stringify(files))
+    return true
   } catch {
-    /* localStorage unavailable → in-memory only for this run */
+    return false // see saveStr — a failed write must reach the UI, not be swallowed
   }
 }
 
@@ -89,7 +111,13 @@ export function useProjectContent(projectId: string): ProjectContent {
   const [instructions, setInstr] = useState(() => loadStr(projectId, "instructions"))
   const [memory, setMem] = useState(() => loadStr(projectId, "memory"))
   const [files, setFiles] = useState<ProjectFile[]>(() => loadFiles(projectId))
+  const [saveState, setSaveState] = useState<Partial<Record<ContentPart, SaveResult>>>({})
   const filesRef = useRef(files)
+
+  // Record what a write ACTUALLY did, so the UI reports the real outcome per part.
+  const noteSave = useCallback((part: ContentPart, ok: boolean) => {
+    setSaveState((s) => ({ ...s, [part]: { ok, at: Date.now() } }))
+  }, [])
 
   // Reload when the project changes (this hook is reused across projects).
   useEffect(() => {
@@ -98,42 +126,46 @@ export function useProjectContent(projectId: string): ProjectContent {
     const f = loadFiles(projectId)
     filesRef.current = f
     setFiles(f)
+    setSaveState({}) // a different project has written nothing yet — don't carry over a stale "Saved"
   }, [projectId])
 
   // Each setter persists SYNCHRONOUSLY, so an edit survives even if the view unmounts right
-  // after (same hazard fixed in the projects store).
+  // after (same hazard fixed in the projects store). This is also why there is no Save button
+  // and no debounced write: buffering edits until a click — or behind a timer — would
+  // reintroduce exactly that unmount-loses-the-edit hazard. The indicator reports the write;
+  // it never gates it.
   const setInstructions = useCallback(
     (v: string) => {
       setInstr(v)
-      saveStr(projectId, "instructions", v)
+      noteSave("instructions", saveStr(projectId, "instructions", v))
     },
-    [projectId],
+    [projectId, noteSave],
   )
   const setMemory = useCallback(
     (v: string) => {
       setMem(v)
-      saveStr(projectId, "memory", v)
+      noteSave("memory", saveStr(projectId, "memory", v))
     },
-    [projectId],
+    [projectId, noteSave],
   )
   const addFile = useCallback(
     (name: string, content: string) => {
       const next = [{ id: newFileId(), name: name.trim() || "note", content }, ...filesRef.current]
       filesRef.current = next
-      saveFiles(projectId, next)
+      noteSave("files", saveFiles(projectId, next))
       setFiles(next)
     },
-    [projectId],
+    [projectId, noteSave],
   )
   const removeFile = useCallback(
     (id: string) => {
       const next = filesRef.current.filter((f) => f.id !== id)
       filesRef.current = next
-      saveFiles(projectId, next)
+      noteSave("files", saveFiles(projectId, next))
       setFiles(next)
     },
-    [projectId],
+    [projectId, noteSave],
   )
 
-  return { instructions, setInstructions, memory, setMemory, files, addFile, removeFile }
+  return { instructions, setInstructions, memory, setMemory, files, addFile, removeFile, saveState }
 }

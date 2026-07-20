@@ -32,11 +32,15 @@ function loadProjects(scope: ProjectScope): Project[] {
     return []
   }
 }
-function persistProjects(scope: ProjectScope, projects: Project[]): void {
+// Returns whether the write actually landed, so a failed create/rename/delete can be shown
+// rather than silently presenting a fully successful-looking UI over nothing (see the
+// SaveResult note in projectContent.ts — same reasoning, same hazard).
+export function persistProjects(scope: ProjectScope, projects: Project[]): boolean {
   try {
     localStorage.setItem(projectsKey(scope), JSON.stringify(projects))
+    return true
   } catch {
-    /* localStorage unavailable → this run keeps projects in memory only */
+    return false // quota exceeded or storage blocked → this run keeps projects in memory only
   }
 }
 
@@ -56,10 +60,15 @@ export interface ProjectsStore {
   duplicate: (id: string) => void
   toggleFavorite: (id: string) => void
   get: (id: string) => Project | undefined
+  // False once any mutation has failed to persist. The list still renders (we keep the
+  // in-memory copy so the session stays usable), but the UI must say the changes aren't
+  // being saved rather than let them look durable.
+  storageOk: boolean
 }
 
 export function useProjects(scope: ProjectScope): ProjectsStore {
   const [projects, setProjects] = useState<Project[]>(() => loadProjects(scope))
+  const [storageOk, setStorageOk] = useState(true)
   // The ref is the authoritative current list, updated SYNCHRONOUSLY by every mutation; state
   // mirrors it for rendering.
   const projectsRef = useRef(projects)
@@ -69,6 +78,7 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     const loaded = loadProjects(scope)
     projectsRef.current = loaded
     setProjects(loaded)
+    setStorageOk(true) // a fresh scope hasn't attempted a write yet
   }, [scope])
 
   // Persist SYNCHRONOUSLY from the ref, so a mutation survives even when this component
@@ -78,7 +88,7 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
     (fn: (prev: Project[]) => Project[]) => {
       const next = fn(projectsRef.current)
       projectsRef.current = next
-      persistProjects(scope, next)
+      setStorageOk(persistProjects(scope, next))
       setProjects(next)
     },
     [scope],
@@ -125,5 +135,5 @@ export function useProjects(scope: ProjectScope): ProjectsStore {
   )
   const get = useCallback((id: string) => projectsRef.current.find((p) => p.id === id), [])
 
-  return { projects, create, rename, setDescription, remove, duplicate, toggleFavorite, get }
+  return { projects, create, rename, setDescription, remove, duplicate, toggleFavorite, get, storageOk }
 }

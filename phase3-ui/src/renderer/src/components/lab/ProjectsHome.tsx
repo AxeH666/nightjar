@@ -38,10 +38,11 @@ export function ProjectsHome({
     })
   }, [store.projects, query, sort])
 
+  // A name is NOT required. The store already defaults an empty name to "Untitled project"
+  // (projects.ts create), and the project opens straight into ProjectView, which can rename
+  // in place — so naming is something you do when you know the name, not a gate on starting.
   function submitNew() {
-    const name = newName.trim()
-    if (!name) return
-    const p = store.create(name)
+    const p = store.create(newName)
     setNewName("")
     onOpen(p.id)
   }
@@ -80,16 +81,23 @@ export function ProjectsHome({
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submitNew()}
-            placeholder="New project name…"
+            placeholder="New project name (optional)…"
             className="w-64 rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
           />
           <button
             onClick={submitNew}
-            disabled={!newName.trim()}
-            className="rounded-lg bg-nightjar-accent px-3 py-2 text-sm font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
+            className="rounded-lg bg-nightjar-accent px-3 py-2 text-sm font-medium text-nightjar-base hover:brightness-110"
           >
             New project
           </button>
+          {!store.storageOk && (
+            <span
+              className="text-[11px] font-medium text-nightjar-alert"
+              title="Browser storage is full or unavailable, so project changes are not being written to disk. They will be lost when the app closes."
+            >
+              Changes not being saved
+            </span>
+          )}
         </div>
 
         {visible.length === 0 ? (
