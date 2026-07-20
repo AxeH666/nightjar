@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSessions } from "../../context/SessionsContext"
 import { usePermission } from "../../context/PermissionContext"
 import { useConnection } from "../../context/ConnectionContext"
@@ -20,16 +20,26 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
   const [id, setId] = useState("")
   const [resolving, setResolving] = useState(true)
+  const prevProjectId = useRef<string | null>(null)
 
   // Resolve (resume-or-create) this project's chat session: on open, on project switch, and on
   // reconnect. `sessionID` is the connection's primary — it changes on every (re)connect and goes
   // from empty→set when the client first becomes ready, so depending on it makes this (a) retry
-  // once the engine is up (Bugbot: the open otherwise stuck on "Connecting…") and (b) revalidate
-  // the binding after a reconnect. Clear the id first so a dead/previous session never flashes.
+  // once the engine is up (Bugbot: otherwise stuck on "Connecting…") and (b) revalidate the
+  // binding after a reconnect.
+  //
+  // Blank the id ONLY when the PROJECT actually changes — never on a reconnect of the same
+  // project (Bugbot). On reconnect the session usually survives and openProjectChat returns the
+  // SAME id, so blanking would needlessly wipe the visible transcript and, mid-turn, hide the
+  // Stop button. Instead keep showing the current session while revalidation runs in the
+  // background; if it comes back with a different id (the engine had dropped it), swap then.
   useEffect(() => {
     let alive = true
-    setResolving(true)
-    setId("")
+    if (prevProjectId.current !== projectId) {
+      prevProjectId.current = projectId
+      setResolving(true)
+      setId("")
+    }
     openProjectChat(projectId).then((sid) => {
       if (!alive) return
       setId(sid)
