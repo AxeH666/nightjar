@@ -288,6 +288,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const projectChatsRef = useRef<Record<string, string>>({})
   const [projectChatIds, setProjectChatIds] = useState<Record<string, string[]>>({})
   const projectChatIdsRef = useRef<Record<string, string[]>>({})
+  // Projects deleted this session. deleteProjectChat adds the id SYNCHRONOUSLY (before the store's
+  // purge), and every project-chat write path checks this first — so an openProjectChat still
+  // in-flight when the project is deleted can't resurrect its state or re-persist its storage keys
+  // after the purge (Bugbot). Ids are unique + never reused, so the set never blocks a new project.
+  const deletedProjectsRef = useRef<Set<string>>(new Set())
   // In-flight openProjectChat promises, keyed by projectId (with the connection generation they
   // belong to), so concurrent opens for the same project in the SAME generation share ONE resolve
   // — but a resolve from a superseded generation is not reused (Bugbot).
@@ -305,7 +310,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   }, [projectChatIds])
   // Record a chat id in a project's history (newest first, deduped) + persist. Called on new/resume.
   const markProjectChat = useCallback((projectId: string, id: string) => {
-    if (!projectId || !id) return
+    if (!projectId || !id || deletedProjectsRef.current.has(projectId)) return // never resurrect a deleted project
     const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
     const next = [id, ...cur.filter((x) => x !== id)]
     projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
@@ -316,6 +321,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // is gone (e.g. resuming after an engine restart that dropped the session), so a dead entry
   // doesn't linger in the rail.
   const pruneProjectChat = useCallback((projectId: string, id: string) => {
+    if (deletedProjectsRef.current.has(projectId)) return // don't re-persist a deleted project's key
     const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
     if (!cur.includes(id)) return
     const next = cur.filter((x) => x !== id)
@@ -1103,6 +1109,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // chat via gcSessions (it's no longer referenced) unless another slot/project still holds it.
   const bindProjectChat = useCallback(
     (projectId: string, id: string, messages: UiMessage[]) => {
+      if (deletedProjectsRef.current.has(projectId)) return // project was deleted mid-resolve → don't rebind
       projectChatGen.current[projectId] = connGenRef.current
       markProjectChat(projectId, id)
       const prevActive = projectChatsRef.current[projectId]
@@ -1196,6 +1203,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           if (id && id !== candidate) client.deleteSession(id).catch(() => {})
           return projectChatsRef.current[projectId] || ""
         }
+        // The project was DELETED while this open resolved → don't resurrect it; reap a session we
+        // created (deleteProjectChat couldn't have known about it) so it doesn't orphan (Bugbot).
+        if (deletedProjectsRef.current.has(projectId)) {
+          if (id && id !== candidate) client.deleteSession(id).catch(() => {})
+          return ""
+        }
         // The user may have set a DIFFERENT active chat (＋ New / resume) while this open resolved
         // — same generation, so the gen guard above doesn't catch it. Defer to their choice rather
         // than overwrite it, and reap a session we created that nobody is using (Bugbot).
@@ -1280,6 +1293,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // synchronously up front, before the projects store's purge clears the persisted history key.
   const deleteProjectChat = useCallback(
     async (projectId: string) => {
+      // Mark deleted SYNCHRONOUSLY, before any await and before the store's purge — every
+      // project-chat write path checks this, so an openProjectChat still in flight can't
+      // resurrect this project's state or re-persist its keys after the purge (Bugbot).
+      deletedProjectsRef.current.add(projectId)
       const active = projectChatsRef.current[projectId]
       const history = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId) // sync capture
       delete projectChatGen.current[projectId]

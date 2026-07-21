@@ -34,7 +34,9 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   useEffect(() => {
     let alive = true
     setPending(true)
-    openProjectChat(projectId).then(() => {
+    // .finally, not .then — a rejection must still clear `pending`, or the composer stays blocked
+    // with no recovery (Bugbot). openProjectChat catches its own errors, but this is defensive.
+    openProjectChat(projectId).finally(() => {
       if (alive) setPending(false)
     })
     return () => {
