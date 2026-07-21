@@ -7,6 +7,7 @@ import { ChatSurface } from "../ChatSurface"
 import { ArtifactPanel } from "../ArtifactPanel"
 import { SessionList } from "../SessionList"
 import { pinnedChatsKey } from "../../lib/sessionScope"
+import { useProjects } from "../../lib/projects"
 
 // 5b — a project's chats: a collapsible history rail (multiple named chats) + the active
 // conversation, each bound to its own OpenCode session so it's isolated per project. Mirrors
@@ -17,13 +18,17 @@ import { pinnedChatsKey } from "../../lib/sessionScope"
 const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "assistant" } as const
 
 export function ProjectChat({ projectId }: { projectId: string }) {
-  const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, projectChats, projectChatIds } =
+  const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, moveChatToScope, projectChats, projectChatIds } =
     useSessions()
+  // The general-space Projects are this chat's Move destinations (to another project, or "Remove
+  // from project" = General). This project is excluded from the picker by currentScope below.
+  const { projects } = useProjects("general")
   const { abortSession } = usePermission()
   const { connected, sessionID } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
   const [pending, setPending] = useState(true) // open/reconnect resolve in flight
   const [deleting, setDeleting] = useState(false) // a chat delete + its replacement resolving
+  const [moving, setMoving] = useState(false) // a chat move + its active-chat replacement resolving
 
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
@@ -52,15 +57,17 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   // there in the rail (Bugbot).
   const blockedReason = !connected
     ? "Connecting to the engine…"
-    : deleting
-      ? "Opening this project's chat…"
-      : pending
-        ? id
-          ? "Reconnecting…"
-          : "Opening this project's chat…"
-        : id
-          ? null
-          : "Couldn't open a chat here — try ＋ New chat, or check the engine."
+    : moving
+      ? "Moving this chat…" // block sends while an active-chat move re-homes the session (gcSessions would else abort a send)
+      : deleting
+        ? "Opening this project's chat…"
+        : pending
+          ? id
+            ? "Reconnecting…"
+            : "Opening this project's chat…"
+          : id
+            ? null
+            : "Couldn't open a chat here — try ＋ New chat, or check the engine."
 
   return (
     <div className="flex h-full min-h-0">
@@ -76,6 +83,15 @@ export function ProjectChat({ projectId }: { projectId: string }) {
           return deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
         }}
         pinKey={pinnedChatsKey(projectId)}
+        moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
+        currentScope={{ kind: "project", projectId }}
+        onMove={(sid, to) => {
+          // Block the composer while the move re-homes the active chat (mirrors onDelete's `deleting`),
+          // so a send can't land on the session being moved just before gcSessions reaps/aborts it
+          // (Bugbot). RETURN the promise so SessionList awaits it (and unpins only on a real move).
+          setMoving(true)
+          return moveChatToScope(sid, { kind: "project", projectId }, to).finally(() => setMoving(false))
+        }}
         label="Chats"
         newTitle="New chat"
         collapsible

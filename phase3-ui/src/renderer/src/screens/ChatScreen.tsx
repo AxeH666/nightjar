@@ -2,7 +2,7 @@
 // Research is no longer a whole-workspace mode: it's a per-message toggle in the
 // composer's "+" menu that resolves to the research agent at send time (explicit,
 // not AI-guessed). Bound to the chat session slot.
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { useConnection } from "../context/ConnectionContext"
@@ -15,6 +15,7 @@ import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
 import { imageUnavailableReason, type CapabilityId, type CapabilitySupportMeta } from "../lib/globalMode"
 import { pinnedChatsKey } from "../lib/sessionScope"
+import { useProjects } from "../lib/projects"
 
 // The composer's armed web tool → the agent that serves it. Research and Web search are
 // two DISTINCT tools: `research` runs the heavy multi-round deep_research pipeline, while
@@ -28,11 +29,16 @@ const AGENT_FOR_MODE = {
 } as const
 
 export function ChatScreen() {
-  const { slots, messagesOf, busyOf, send, createImage, sessionIdsBySlot } = useSessions()
+  const { slots, messagesOf, busyOf, send, createImage, sessionIdsBySlot, moveChatToScope } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const { activeModel } = useModel()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession, syncChatSession } = useArtifact()
+  // The general-space Projects are this rail's Move destinations (moving a General chat INTO a
+  // project). The Projects tab is scope="general" (ProjectsScreen); per-lab CAD projects are a
+  // separate space and are deliberately out of scope for chat Move in this PR.
+  const { projects } = useProjects("general")
+  const [moving, setMoving] = useState(false) // a General-chat move + its active-chat replacement resolving
   const id = slots.chat
 
   // Reset the chat preview only when the chat slot's session id truly changes (New chat /
@@ -44,12 +50,30 @@ export function ChatScreen() {
 
   return (
     <div className="flex h-full min-h-0">
-      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" pinKey={pinnedChatsKey()} collapsible />
+      <SessionList
+        slot="chat"
+        agent="assistant"
+        sessionIds={sessionIdsBySlot.chat}
+        activeId={id}
+        label="Chats"
+        newTitle="New chat"
+        pinKey={pinnedChatsKey()}
+        moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
+        currentScope={{ kind: "general" }}
+        onMove={(sid, to) => {
+          // Block the composer while moving the active General chat re-homes the slot (mirrors
+          // ProjectChat), so a send can't land on the session being moved just before gcSessions
+          // reaps/aborts it (Bugbot). Returns the promise so SessionList unpins only on a real move.
+          setMoving(true)
+          return moveChatToScope(sid, { kind: "general" }, to).finally(() => setMoving(false))
+        }}
+        collapsible
+      />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}
       busy={busyOf(id)}
-      blockedReason={connected && id ? null : "Connecting to the engine…"}
+      blockedReason={!connected || !id ? "Connecting to the engine…" : moving ? "Moving this chat…" : null}
       artifactSessionID={id}
       onSend={(text, { attachments, mode }) =>
         send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })

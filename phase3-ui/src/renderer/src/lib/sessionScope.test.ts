@@ -9,9 +9,11 @@ import {
   loadProjectChatIds,
   pinnedChatsKey,
   projectOf,
+  sameChatScope,
   savePinned,
   saveProjectChatIds,
   sessionIdsKey,
+  type ChatMoveScope,
 } from "./sessionScope"
 
 // The load-bearing test for 5b's migration safety: the General (no-project) keys MUST equal the
@@ -199,6 +201,24 @@ describe("pinned-chats persistence (chat-menu Pin — consistency sweep)", () =>
     expect(m.has("nightjar.pinned.chat.p_1")).toBe(false)
     expect(m.get("nightjar.pinned.chat.p_2")).toBe(JSON.stringify(["s2"]))
     expect(m.get("nightjar.pinned.chat")).toBe(JSON.stringify(["general"]))
+  })
+})
+
+describe("sameChatScope — the Move no-op guard (chat-menu PR-2)", () => {
+  const general: ChatMoveScope = { kind: "general" }
+  const p1: ChatMoveScope = { kind: "project", projectId: "p_1" }
+  const p1b: ChatMoveScope = { kind: "project", projectId: "p_1" }
+  const p2: ChatMoveScope = { kind: "project", projectId: "p_2" }
+
+  it("is true only for the SAME scope — so moving a chat onto its own rail is a no-op", () => {
+    expect(sameChatScope(general, general)).toBe(true)
+    expect(sameChatScope(p1, p1b)).toBe(true) // same project id, different object
+  })
+
+  it("is false across scopes — every real Move (General↔project, project↔project) proceeds", () => {
+    expect(sameChatScope(general, p1)).toBe(false)
+    expect(sameChatScope(p1, general)).toBe(false)
+    expect(sameChatScope(p1, p2)).toBe(false) // distinct projects
   })
 })
 
