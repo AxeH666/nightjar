@@ -79,6 +79,22 @@ claim must still be corrected.
    shows "New chat" until the real title lands. Same-provider small model, so no extra cloud egress.
    Client-generated titling is the fallback only if a live check shows the engine's "title" agent is
    absent.
+   **Session-liveness model SIMPLIFIED 2026-07-21 (maintainer, after 6 BugBot rounds / ~12 findings):**
+   the first multi-chat cut PROACTIVELY re-validated a project chat's liveness (`listSessions` +
+   generation counter + revalidate-on-reconnect) on every open/resume. Confirmed OpenCode persists
+   sessions in its SQLite DB (`SessionTable`), so a project chat survives an engine restart and the
+   in-memory binding stays valid — the proactive revalidation was guarding a RARE case (true session
+   loss) at the cost of a large concurrency surface that produced finding after finding. Replaced with
+   a lazy model: bind the persisted session directly, hydrate the rail immediately, and let a
+   genuinely-dead session surface its error on send (user starts a New chat). Net −121 lines; the
+   generation/revalidation machinery (`connGenRef`, `projectChatGen`, `shouldReuseStoredChat`,
+   `pruneProjectChat`, `clearActiveProjectChat`, the reconnect gen-bump) was deleted. Kept: the
+   delete-race guard (`deletedProjectsRef`), the in-flight coalescing, gcSessions preserving active
+   project chats, and the honesty-guardrail widening.
+   **Known limitation (documented, not a bug):** if the engine genuinely loses a session (rare), its
+   rail entry lingers until the project is reopened, and resuming it shows an empty transcript whose
+   send errors. Acceptable given sessions persist; a lazy prune-on-send-failure is a possible later
+   polish.
 3. **On project delete:** best-effort delete the underlying OpenCode sessions on the engine (inject
    the client into the delete path), consistent with the store's "must not linger on disk" stance.
 4. **Cloud-egress consent:** a one-time per-`(project, provider)` opt-in + a persistent "sending

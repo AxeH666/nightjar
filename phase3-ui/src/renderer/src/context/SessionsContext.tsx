@@ -22,7 +22,7 @@ import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
-import { loadProjectChatIds, saveProjectChatIds, shouldReuseStoredChat } from "../lib/sessionScope"
+import { loadProjectChatIds, saveProjectChatIds } from "../lib/sessionScope"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -293,15 +293,17 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // in-flight when the project is deleted can't resurrect its state or re-persist its storage keys
   // after the purge (Bugbot). Ids are unique + never reused, so the set never blocks a new project.
   const deletedProjectsRef = useRef<Set<string>>(new Set())
-  // In-flight openProjectChat promises, keyed by projectId (with the connection generation they
-  // belong to), so concurrent opens for the same project in the SAME generation share ONE resolve
-  // — but a resolve from a superseded generation is not reused (Bugbot).
-  const projectChatOpening = useRef<Map<string, { gen: number; promise: Promise<string> }>>(new Map())
-  // Connection generation: bumped on every reconnect. A project-chat binding is valid only within
-  // the generation it was validated under; a later generation revalidates it against the new
-  // engine WITHOUT clearing the binding (so gcSessions never drops a live conversation).
-  const connGenRef = useRef(0)
-  const projectChatGen = useRef<Record<string, number>>({})
+  // In-flight openProjectChat promises, keyed by projectId, so concurrent opens for the same
+  // project share ONE resolve instead of racing to create two sessions (Bugbot).
+  //
+  // NOTE (simplified model, 2026-07-21): OpenCode persists sessions in its SQLite DB, so a project
+  // chat SURVIVES an engine restart/reconnect — the in-memory binding stays valid and gcSessions
+  // (via the chat-adopt rebind) already preserves it. So this deliberately does NOT proactively
+  // re-validate liveness (listSessions) on open/resume: that guarded a rare case (true session
+  // loss) at the cost of a large concurrency surface. A genuinely-dead session is handled lazily —
+  // its send simply errors, and the user starts a New chat. This replaced a generation/revalidation
+  // machine that produced ~12 review findings over 6 rounds (see research/5b_PLAN.md).
+  const projectChatOpening = useRef<Map<string, Promise<string>>>(new Map())
   useEffect(() => {
     projectChatsRef.current = projectChats
   }, [projectChats])
@@ -313,18 +315,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     if (!projectId || !id || deletedProjectsRef.current.has(projectId)) return // never resurrect a deleted project
     const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
     const next = [id, ...cur.filter((x) => x !== id)]
-    projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
-    saveProjectChatIds(projectId, next)
-    setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
-  }, [])
-  // Drop a chat id from a project's history + persist. Called when the engine confirms a rail id
-  // is gone (e.g. resuming after an engine restart that dropped the session), so a dead entry
-  // doesn't linger in the rail.
-  const pruneProjectChat = useCallback((projectId: string, id: string) => {
-    if (deletedProjectsRef.current.has(projectId)) return // don't re-persist a deleted project's key
-    const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
-    if (!cur.includes(id)) return
-    const next = cur.filter((x) => x !== id)
     projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
     saveProjectChatIds(projectId, next)
     setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
@@ -739,19 +729,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     if (isHistorySlot("chat") && slots.chat) markSlotSession("chat", slots.chat)
   }, [slots.chat, markSlotSession])
 
-  // 5b — a (re)connect is a fresh engine generation: a project-chat binding from the previous
-  // connection may now be dead server-side. Bump the generation counter (do NOT clear the
-  // bindings — clearing opened a window where gcSessions dropped a live project session before it
-  // could re-register, Bugbot). A bumped generation makes openProjectChat REVALIDATE each binding
-  // against the new engine on its next call (driven by ProjectChat's effect, which re-runs on the
-  // primary changing), keeping the old id bound throughout so it is never GC'd mid-turn. Skips the
-  // very first connect (nothing bound yet).
-  const hadPrimary = useRef(false)
-  useEffect(() => {
-    if (!primaryId) return
-    if (hadPrimary.current) connGenRef.current += 1
-    hadPrimary.current = true
-  }, [primaryId])
 
   // code slot ← created here; (re)created whenever the primary reconnects.
   useEffect(() => {
@@ -1110,7 +1087,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const bindProjectChat = useCallback(
     (projectId: string, id: string, messages: UiMessage[]) => {
       if (deletedProjectsRef.current.has(projectId)) return // project was deleted mid-resolve → don't rebind
-      projectChatGen.current[projectId] = connGenRef.current
       markProjectChat(projectId, id)
       const prevActive = projectChatsRef.current[projectId]
       if (prevActive === id) {
@@ -1133,114 +1109,69 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [validAgent, markProjectChat, gcSessions],
   )
 
-  // 5b — fully tear down a project's ACTIVE chat binding: drop it from the active map + gen marker
-  // AND gcSessions, so the now-unbound session is reaped from perSessionRefs/sessions (aborted if
-  // busy) rather than lingering as a hidden session that still demuxes SSE / can surface permission
-  // prompts. One helper so every dead-active path tears down COMPLETELY, not partially (Bugbot).
-  const clearActiveProjectChat = useCallback(
-    (projectId: string) => {
-      if (!(projectId in projectChatsRef.current)) return
-      projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
-      delete projectChatGen.current[projectId]
-      setProjectChats((prev) => {
-        const next = { ...prev }
-        delete next[projectId]
-        return next
-      })
-      gcSessions()
-    },
-    [gcSessions],
-  )
-
-  // 5b — resolve a project's ACTIVE chat when its view opens: return the current-generation active
-  // binding if there is one; else revalidate/resume the newest chat in the project's history
-  // against the engine (Bugbot generation + in-flight guards, so a reconnect never GCs or races);
-  // else create a fresh chat. Only the active chat is a loaded session; the rest are rail ids.
+  // 5b — resolve a project's ACTIVE chat when its view opens. If one is already bound, return it (it
+  // persists across reconnects, so no revalidation is needed). Otherwise hydrate the rail's history
+  // into state IMMEDIATELY (so saved chats show during the async open — Bugbot), then resume the
+  // NEWEST saved chat, or create a fresh one if there are none. No proactive liveness check: sessions
+  // persist in the engine DB, so a resumed chat is almost always alive; getMessages returns empty if
+  // it isn't and a send would surface the error for the user to recover with New chat. Only the
+  // active chat is a loaded session; the rest are rail ids.
   const openProjectChat = useCallback(
     async (projectId: string): Promise<string> => {
       if (!projectId) return ""
-      const gen = connGenRef.current
       const bound = projectChatsRef.current[projectId]
-      if (bound && projectChatGen.current[projectId] === gen) return bound
+      if (bound) return bound
+      // Hydrate the persisted history into state up front so the rail isn't empty during the open.
+      const history = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+      if (!(projectId in projectChatIdsRef.current) && history.length && !deletedProjectsRef.current.has(projectId)) {
+        projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: history }
+        setProjectChatIds((prev) => ({ ...prev, [projectId]: history }))
+      }
       const inflight = projectChatOpening.current.get(projectId)
-      if (inflight && inflight.gen === gen) return inflight.promise
+      if (inflight) return inflight
       const client = clientRef.current
-      if (!client) return bound || ""
+      if (!client) return ""
       const run = (async (): Promise<string> => {
-        // Candidate = the live active binding (reconnect revalidation) else the newest history id.
-        const history = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
-        const candidate = bound || history[0] || null
+        const newest = history[0] || null
         let id = ""
         let messages: UiMessage[] = []
-        if (candidate) {
-          const ids = await client
-            .listSessions()
-            .then((ss) => ss.map((s) => s.id))
-            .catch(() => null)
-          if (shouldReuseStoredChat(candidate, ids)) {
-            id = candidate
-            if (candidate !== bound) {
-              try {
-                messages = messagesFromHistory(await client.getMessages(candidate))
-              } catch {
-                /* history read failed → still bind, just with no prior messages */
-              }
-            }
-          } else if (ids !== null) {
-            // The engine CONFIRMS the candidate is gone (a null result would be transient and
-            // shouldReuseStoredChat would have kept it). Prune it from the rail so a replacement
-            // doesn't leave the dead id behind — resumeProjectChat prunes the same way (Bugbot).
-            pruneProjectChat(projectId, candidate)
+        if (newest) {
+          id = newest
+          try {
+            messages = messagesFromHistory(await client.getMessages(newest))
+          } catch {
+            /* dead/empty → bind with no messages; a send surfaces the error to recover from */
           }
-        }
-        if (!id) {
+        } else {
           try {
             id = await client.createSession() // no forced title → engine auto-titles after the 1st message
           } catch (err: any) {
             setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
-            // We only reach create because the candidate (= the active `bound`, when set) was
-            // confirmed DEAD. So `bound` is not a safe fallback — returning it would leave the UI on
-            // a dead session's transcript. Fully clear a still-dead active binding (incl. gc, so the
-            // dead session doesn't linger demuxing SSE) so the view shows the failure state.
-            if (projectChatsRef.current[projectId] === candidate) clearActiveProjectChat(projectId)
             return ""
           }
         }
-        // A newer reconnect superseded this resolve → discard (reap a freshly-created session so it
-        // doesn't orphan); the newer-generation resolve owns the binding now (Bugbot).
-        if (gen !== connGenRef.current) {
-          if (id && id !== candidate) client.deleteSession(id).catch(() => {})
-          return projectChatsRef.current[projectId] || ""
-        }
-        // The project was DELETED while this open resolved → don't resurrect it; reap a session we
-        // created (deleteProjectChat couldn't have known about it) so it doesn't orphan (Bugbot).
+        // Deleted mid-resolve, or a concurrent ＋New/resume set a different active while we resolved
+        // → defer; reap a session we CREATED (not a resumed one) that nobody will use.
         if (deletedProjectsRef.current.has(projectId)) {
-          if (id && id !== candidate) client.deleteSession(id).catch(() => {})
+          if (id && !newest) client.deleteSession(id).catch(() => {})
           return ""
         }
-        // The user may have set a DIFFERENT active chat (＋ New / resume) while this open resolved
-        // — same generation, so the gen guard above doesn't catch it. Defer to their choice rather
-        // than overwrite it, and reap a session we created that nobody is using (Bugbot).
         const active = projectChatsRef.current[projectId]
-        if (active && active !== bound && active !== id) {
-          if (id && id !== candidate) client.deleteSession(id).catch(() => {})
+        if (active) {
+          if (id && !newest && id !== active) client.deleteSession(id).catch(() => {})
           return active
-        }
-        if (id === bound) {
-          projectChatGen.current[projectId] = gen // same live session survived — just refresh the marker
-          return id
         }
         bindProjectChat(projectId, id, messages)
         return id
       })()
-      projectChatOpening.current.set(projectId, { gen, promise: run })
+      projectChatOpening.current.set(projectId, run)
       try {
         return await run
       } finally {
-        if (projectChatOpening.current.get(projectId)?.promise === run) projectChatOpening.current.delete(projectId)
+        if (projectChatOpening.current.get(projectId) === run) projectChatOpening.current.delete(projectId)
       }
     },
-    [clientRef, setStatus, bindProjectChat, pruneProjectChat, clearActiveProjectChat],
+    [clientRef, setStatus, bindProjectChat],
   )
 
   // 5b — start a NEW chat in a project (the rail's ＋). Fresh session, engine auto-titled, becomes
@@ -1263,41 +1194,25 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [clientRef, setStatus, bindProjectChat],
   )
 
-  // 5b — resume an existing chat from a project's rail: load its transcript and make it active.
-  // Validates the id is still on the engine first (same shouldReuseStoredChat rule openProjectChat
-  // uses): a persisted history id can be dead after an engine restart, and binding it would show an
-  // empty transcript on a dead id (a send would then fail). If the engine CONFIRMS it's gone, prune
-  // it from the rail and surface a note rather than switch to it; a transient list failure (null)
-  // still resumes optimistically. (Bugbot.)
+  // 5b — resume an existing chat from a project's rail: load its transcript and make it active. No
+  // liveness pre-check (sessions persist); getMessages returns empty if the id is gone. Deliberately
+  // NOT early-returning when the id is already active — re-clicking re-fetches, which is the recovery
+  // path after a first load came back empty. bindProjectChat only overwrites the transcript on a
+  // NON-empty fetch, so this never wipes a live conversation. (Bugbot.)
   const resumeProjectChat = useCallback(
     async (projectId: string, sessionId: string): Promise<void> => {
       if (!projectId || !sessionId) return
-      // NOTE: intentionally NOT early-returning when sessionId is already active — re-clicking the
-      // active chat re-fetches its transcript, which is the recovery path after a first load that
-      // came back empty (Bugbot). bindProjectChat only overwrites the transcript on a non-empty fetch.
       const client = clientRef.current
       if (!client) return
-      const ids = await client
-        .listSessions()
-        .then((ss) => ss.map((s) => s.id))
-        .catch(() => null)
-      if (!shouldReuseStoredChat(sessionId, ids)) {
-        pruneProjectChat(projectId, sessionId)
-        // If the dead id was the ACTIVE chat, tear it down too — otherwise the UI keeps highlighting
-        // and sending against a session the engine no longer has (Bugbot).
-        if (projectChatsRef.current[projectId] === sessionId) clearActiveProjectChat(projectId)
-        setStatus("that chat is no longer available on the engine")
-        return
-      }
       let messages: UiMessage[] = []
       try {
         messages = messagesFromHistory(await client.getMessages(sessionId))
       } catch {
-        /* alive but history read failed → empty, still switch to it */
+        /* dead/empty → bind with no messages */
       }
       bindProjectChat(projectId, sessionId, messages)
     },
-    [clientRef, bindProjectChat, pruneProjectChat, clearActiveProjectChat, setStatus],
+    [clientRef, bindProjectChat],
   )
 
   // 5b — remove ALL of a project's chats when the project is deleted (decision #3: best-effort
@@ -1311,7 +1226,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       deletedProjectsRef.current.add(projectId)
       const active = projectChatsRef.current[projectId]
       const history = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId) // sync capture
-      delete projectChatGen.current[projectId]
       projectChatOpening.current.delete(projectId)
       projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
       projectChatIdsRef.current = Object.fromEntries(Object.entries(projectChatIdsRef.current).filter(([k]) => k !== projectId))
