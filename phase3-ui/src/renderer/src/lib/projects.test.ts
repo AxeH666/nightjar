@@ -94,18 +94,20 @@ describe("persistDuplicate leaves storage clean on any failure", () => {
 // purgeProjectStorage would leave this test passing while leaking, so extend it alongside any
 // new part.
 describe("purgeProjectStorage clears every per-project storage family", () => {
-  it("removes content AND the chat session-id set, touching no other project", () => {
+  it("removes content, the chat session-id set, pinned AND unread chats, touching no other project", () => {
     const store = installStorage()
-    // Seed ALL of project p_1's families — content, the chat session-id set, AND pinned chats.
+    // Seed EVERY one of project p_1's families — content, the chat session-id set, pinned + unread.
     saveStr("p_1", "instructions", "x")
     saveStr("p_1", "memory", "y")
     saveFiles("p_1", [{ id: "f1", name: "a.md", content: "z" }])
     store.set("nightjar.sessionIds.chat.p_1", JSON.stringify(["s1"])) // the PR-B key
-    store.set("nightjar.pinned.chat.p_1", JSON.stringify(["s1"])) // the chat-menu pin key (was leaking)
-    // ...and a bystander project + General history/pins that must survive.
+    store.set("nightjar.pinned.chat.p_1", JSON.stringify(["s1"])) // the chat-menu pin key
+    store.set("nightjar.unread.chat.p_1", JSON.stringify(["s1"])) // the chat-menu unread key
+    // ...and a bystander project + General history/pins/unread that must survive.
     saveStr("p_2", "instructions", "keep me")
     store.set("nightjar.sessionIds.chat", JSON.stringify(["general"]))
     store.set("nightjar.pinned.chat", JSON.stringify(["gpin"])) // General pins are NOT per-project
+    store.set("nightjar.unread.chat", JSON.stringify(["gunread"])) // General unread is NOT per-project
 
     purgeProjectStorage("p_1")
 
@@ -113,5 +115,6 @@ describe("purgeProjectStorage clears every per-project storage family", () => {
     expect(store.get("nightjar.project.p_2.instructions")).toBe("keep me")
     expect(store.get("nightjar.sessionIds.chat")).toBe(JSON.stringify(["general"]))
     expect(store.get("nightjar.pinned.chat")).toBe(JSON.stringify(["gpin"])) // General pins untouched
+    expect(store.get("nightjar.unread.chat")).toBe(JSON.stringify(["gunread"])) // General unread untouched
   })
 })
