@@ -6,10 +6,10 @@ import { useArtifact } from "../../context/ArtifactContext"
 import { ChatSurface } from "../ChatSurface"
 import { ArtifactPanel } from "../ArtifactPanel"
 import { SessionList } from "../SessionList"
-import { ProjectInstructionsConsentBanner } from "./ProjectInstructionsConsentBanner"
+import { ProjectContextConsentBanner } from "./ProjectContextConsentBanner"
 import { pinnedChatsKey, unreadChatsKey } from "../../lib/sessionScope"
 import { useProjects } from "../../lib/projects"
-import { hasCloudConsent, allowCloudConsent, shouldInjectInstructions } from "../../lib/projectContent"
+import { hasCloudConsent, allowCloudConsent, buildProjectSystem, hasProjectContext } from "../../lib/projectContent"
 import { useModel } from "../../context/ModelContext"
 import { LOCAL_MODEL } from "../../lib/byok"
 
@@ -17,13 +17,13 @@ import { LOCAL_MODEL } from "../../lib/byok"
 // conversation, each bound to its own OpenCode session so it's isolated per project. Mirrors
 // ChatScreen's wiring but against the project's active session (projectChats[projectId]) and its
 // own history list. The active id comes from context state, so a reconnect that keeps the session
-// never blanks the transcript. PR-C: this view attaches the project's Instructions to each send as
-// system context, GATED by per-project cloud consent (the banner below) and computed from the SAME
-// live `instructions` value the banner uses; image-gen stays OFF here (createImage: false), so the
-// text send path is the only egress the gate must cover.
+// never blanks the transcript. This view attaches the project's knowledge — Instructions (PR-C) +
+// Memory (AM-1) — to each send as system context, GATED by per-project cloud consent (the banner
+// below) and computed from the SAME live values the banner uses; image-gen stays OFF here
+// (createImage: false), so the text send path is the only egress the gate must cover.
 const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "assistant" } as const
 
-export function ProjectChat({ projectId, instructions = "" }: { projectId: string; instructions?: string }) {
+export function ProjectChat({ projectId, instructions = "", memory = "" }: { projectId: string; instructions?: string; memory?: string }) {
   const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, moveChatToScope, projectChats, projectChatIds } =
     useSessions()
   // The general-space Projects are this chat's Move destinations (to another project, or "Remove
@@ -36,7 +36,7 @@ export function ProjectChat({ projectId, instructions = "" }: { projectId: strin
   const [pending, setPending] = useState(true) // open/reconnect resolve in flight
   const [deleting, setDeleting] = useState(false) // a chat delete + its replacement resolving
   const [moving, setMoving] = useState(false) // a chat move + its active-chat replacement resolving
-  // 5b PR-C: per-project cloud-egress consent for injecting this project's Instructions. Held in
+  // Per-project cloud-egress consent for this project's knowledge (Instructions + Memory). Held in
   // state (reloaded when the project changes, updated when Allow persists) and used for BOTH the
   // banner and the send-time gate below — so the banner and what's actually sent can never disagree.
   const [consented, setConsented] = useState(() => hasCloudConsent(projectId))
@@ -46,12 +46,12 @@ export function ProjectChat({ projectId, instructions = "" }: { projectId: strin
 
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
-  // `instructions` comes from ProjectView's LIVE content instance (reactive to Knowledge-tab edits).
-  // The SAME value drives both the consent banner and the send-time injection below, so what the user
-  // sees is exactly what's sent — no live-vs-storage split-brain. Inject only when the gate passes:
-  // there ARE instructions AND (local model OR this project has cloud consent).
-  const injectInstructions = shouldInjectInstructions({ instructions, isLocal: activeChoice.local, consent: consented })
-  const showConsent = connected && !activeChoice.local && instructions.trim().length > 0 && !consented
+  // `instructions` + `memory` come from ProjectView's LIVE content instance (reactive to Knowledge-tab
+  // edits). The SAME values drive both the consent banner and the send-time injection, so what the user
+  // sees is exactly what's sent — no live-vs-storage split-brain. buildProjectSystem bakes in the gate
+  // (returns undefined when empty, or when a cloud model lacks consent → withhold ALL project knowledge).
+  const projectSystem = buildProjectSystem({ instructions, memory, isLocal: activeChoice.local, consent: consented })
+  const showConsent = connected && !activeChoice.local && hasProjectContext({ instructions, memory }) && !consented
 
   // Resolve the project's active chat on open, project switch, and reconnect (sessionID changes /
   // goes empty→set). A still-bound chat is returned as-is — there is NO liveness re-check (the
@@ -119,13 +119,13 @@ export function ProjectChat({ projectId, instructions = "" }: { projectId: strin
       />
       <main className="flex min-h-0 flex-1 flex-col">
         {showConsent && (
-          <ProjectInstructionsConsentBanner
+          <ProjectContextConsentBanner
             provider={activeChoice.providerName ?? "the cloud model"}
             onAllow={() => {
               // Flip consent in state ONLY if the write PERSISTED. The `consented` state directly gates
-              // egress (via injectInstructions), so an optimistic flip on a failed write would send this
-              // project's Instructions to the cloud on a consent that won't survive a reload. If the
-              // write fails the banner stays and nothing egresses — honest and safe (PR-C).
+              // egress (via projectSystem), so an optimistic flip on a failed write would send this
+              // project's knowledge to the cloud on a consent that won't survive a reload. If the write
+              // fails the banner stays and nothing egresses — honest and safe (PR-C/AM-1).
               if (allowCloudConsent(projectId)) setConsented(true)
             }}
             onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)}
@@ -138,7 +138,7 @@ export function ProjectChat({ projectId, instructions = "" }: { projectId: strin
             blockedReason={blockedReason}
             artifactSessionID={id}
             onSend={(text, { attachments, mode }) =>
-            send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments, system: injectInstructions ? instructions : undefined })
+            send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments, system: projectSystem })
           }
             onCreateImage={(prompt) => createImage(id, prompt)}
             onStop={() => abortSession(id)}

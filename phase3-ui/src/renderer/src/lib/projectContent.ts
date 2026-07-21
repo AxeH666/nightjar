@@ -118,16 +118,10 @@ export function copyProjectContent(fromId: string, toId: string): boolean {
   }
 }
 
-// ── 5b PR-C: gated Instructions injection ───────────────────────────────────────
-// Read a project's Instructions FRESH from storage for send-time injection — always the latest edit,
-// with no React state that could go stale between the Knowledge editor and the send path. "" if unset.
-export function loadProjectInstructions(projectId: string): string {
-  return loadStr(projectId, "instructions")
-}
-
-// Per-project consent to send this project's Instructions to a CLOUD model. Default FALSE: curated
-// private knowledge never egresses to a cloud provider until the user opts in per-project. Stored
-// under the project's own namespace, so it MUST be cleared by purgeProjectStorage on delete.
+// ── Gated project-context injection (5b PR-C: Instructions; AM-1: + Memory) ──────
+// Per-project consent to send this project's KNOWLEDGE (Instructions + Memory) to a CLOUD model.
+// Default FALSE: curated private knowledge never egresses to a cloud provider until the user opts in
+// per-project. Stored under the project's own namespace, so it MUST be cleared by purgeProjectStorage.
 const CONSENT_PART = "cloudConsent"
 export function hasCloudConsent(projectId: string): boolean {
   return loadStr(projectId, CONSENT_PART) === "1"
@@ -144,12 +138,26 @@ export function deleteProjectConsent(projectId: string): boolean {
   }
 }
 
-// The gated-injection POLICY (pure — unit-tested with assert-then-mutate): inject a project's
-// Instructions as system context only when there ARE instructions AND either the model is LOCAL (no
-// egress) or the user has granted this project cloud consent. Withholds private knowledge from a
-// cloud model by default; the send still happens, just without the project's Instructions.
-export function shouldInjectInstructions(args: { instructions: string; isLocal: boolean; consent: boolean }): boolean {
-  return args.instructions.trim().length > 0 && (args.isLocal || args.consent)
+// Assemble a project's knowledge (Instructions + Memory, each labelled) into the `system` string sent
+// with every project-chat prompt — GATED so it NEVER egresses to a cloud model without per-project
+// consent. Returns undefined when there's nothing to attach OR when a cloud model lacks consent
+// (withhold ALL project knowledge, the safe default; the send still happens). Pure + fed the LIVE
+// editor values by ProjectChat, so what the user sees is exactly what's sent. Unit-tested
+// (assert-then-mutate): flip any input — empty, cloud-without-consent — and it withholds.
+export function buildProjectSystem(args: { instructions: string; memory: string; isLocal: boolean; consent: boolean }): string | undefined {
+  const sections = [
+    args.instructions.trim() && `Project instructions:\n${args.instructions.trim()}`,
+    args.memory.trim() && `Project memory:\n${args.memory.trim()}`,
+  ].filter(Boolean) as string[]
+  if (sections.length === 0) return undefined // nothing to attach
+  if (!(args.isLocal || args.consent)) return undefined // cloud + no consent → withhold ALL of it
+  return sections.join("\n\n")
+}
+
+// Whether a project has ANY knowledge (Instructions or Memory) worth gating — drives the consent
+// banner, so it doesn't nag when there's nothing to protect.
+export function hasProjectContext(args: { instructions: string; memory: string }): boolean {
+  return args.instructions.trim().length > 0 || args.memory.trim().length > 0
 }
 
 let fseq = 0

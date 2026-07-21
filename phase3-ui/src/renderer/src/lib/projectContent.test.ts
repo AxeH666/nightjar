@@ -4,11 +4,11 @@ import {
   saveFiles,
   copyProjectContent,
   deleteProjectContent,
-  loadProjectInstructions,
   hasCloudConsent,
   allowCloudConsent,
   deleteProjectConsent,
-  shouldInjectInstructions,
+  buildProjectSystem,
+  hasProjectContext,
 } from "./projectContent"
 
 // These tests exist for ONE reason: the Projects UI shows a "Saved" indicator, and an
@@ -132,27 +132,34 @@ describe("duplicate/delete report their real outcome", () => {
   })
 })
 
-// 5b PR-C: the gated-injection policy + its per-project cloud consent. The POLICY is the safety
-// invariant — private Instructions must never reach a cloud model without consent — so it is
-// asserted directly (assert-then-mutate: flip any input and the verdict flips).
-describe("gated Instructions injection (5b PR-C)", () => {
-  it("shouldInjectInstructions: only when there ARE instructions AND (local OR consent)", () => {
-    // Local model → inject whenever there are instructions (no egress).
-    expect(shouldInjectInstructions({ instructions: "be terse", isLocal: true, consent: false })).toBe(true)
-    // Cloud model, WITH consent → inject (the user opted this project in).
-    expect(shouldInjectInstructions({ instructions: "be terse", isLocal: false, consent: true })).toBe(true)
-    // Cloud model, NO consent → WITHHELD (the safety invariant).
-    expect(shouldInjectInstructions({ instructions: "be terse", isLocal: false, consent: false })).toBe(false)
-    // No instructions → never inject, regardless of model/consent (nothing to send).
-    expect(shouldInjectInstructions({ instructions: "", isLocal: true, consent: true })).toBe(false)
-    expect(shouldInjectInstructions({ instructions: "   ", isLocal: true, consent: true })).toBe(false) // whitespace-only counts as empty
+// The gated project-context assembly (5b PR-C: Instructions; AM-1: + Memory) + its per-project cloud
+// consent. buildProjectSystem is the safety invariant — private knowledge must never reach a cloud
+// model without consent — so it is asserted directly (assert-then-mutate: flip any input, it withholds).
+describe("gated project-context injection (Instructions + Memory)", () => {
+  it("buildProjectSystem: attaches labelled knowledge only when LOCAL or CONSENTED", () => {
+    // Local model → attach whatever knowledge exists (no egress), labelled per section.
+    expect(buildProjectSystem({ instructions: "be terse", memory: "prefers TS", isLocal: true, consent: false })).toBe(
+      "Project instructions:\nbe terse\n\nProject memory:\nprefers TS",
+    )
+    // Cloud + consent → attach (the user opted this project in).
+    expect(buildProjectSystem({ instructions: "be terse", memory: "", isLocal: false, consent: true })).toBe("Project instructions:\nbe terse")
+    // Cloud + NO consent → withhold ALL of it (the safety invariant), even though knowledge exists.
+    expect(buildProjectSystem({ instructions: "be terse", memory: "prefers TS", isLocal: false, consent: false })).toBeUndefined()
+    // Only one part present → only that section (no empty/dangling label).
+    expect(buildProjectSystem({ instructions: "", memory: "prefers TS", isLocal: true, consent: false })).toBe("Project memory:\nprefers TS")
+    // No knowledge at all → undefined regardless of model/consent (nothing to send).
+    expect(buildProjectSystem({ instructions: "", memory: "   ", isLocal: true, consent: true })).toBeUndefined() // whitespace-only = empty
   })
 
-  it("consent defaults to false and round-trips; loadProjectInstructions reads the stored value", () => {
+  it("hasProjectContext: true when EITHER Instructions or Memory has content", () => {
+    expect(hasProjectContext({ instructions: "x", memory: "" })).toBe(true)
+    expect(hasProjectContext({ instructions: "", memory: "y" })).toBe(true)
+    expect(hasProjectContext({ instructions: "", memory: "   " })).toBe(false) // both empty/whitespace → nothing to gate
+  })
+
+  it("cloud consent defaults to false and round-trips through storage", () => {
     const store = installStorage()
     expect(hasCloudConsent("p_1")).toBe(false) // default: private knowledge stays put
-    saveStr("p_1", "instructions", "always cite sources")
-    expect(loadProjectInstructions("p_1")).toBe("always cite sources")
     expect(allowCloudConsent("p_1")).toBe(true)
     expect(hasCloudConsent("p_1")).toBe(true)
     expect(store.get("nightjar.project.p_1.cloudConsent")).toBe("1")
@@ -166,8 +173,7 @@ describe("gated Instructions injection (5b PR-C)", () => {
     expect(store.has("nightjar.project.p_1.cloudConsent")).toBe(false)
   })
 
-  it("hasCloudConsent is false and loadProjectInstructions is '' when storage is absent", () => {
+  it("hasCloudConsent is false when storage is absent rather than throwing", () => {
     expect(hasCloudConsent("p_1")).toBe(false)
-    expect(loadProjectInstructions("p_1")).toBe("")
   })
 })
