@@ -15,6 +15,7 @@ import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
 import { imageUnavailableReason, type CapabilityId, type CapabilitySupportMeta } from "../lib/globalMode"
 import { pinnedChatsKey } from "../lib/sessionScope"
+import { useProjects } from "../lib/projects"
 
 // The composer's armed web tool → the agent that serves it. Research and Web search are
 // two DISTINCT tools: `research` runs the heavy multi-round deep_research pipeline, while
@@ -28,11 +29,15 @@ const AGENT_FOR_MODE = {
 } as const
 
 export function ChatScreen() {
-  const { slots, messagesOf, busyOf, send, createImage, sessionIdsBySlot } = useSessions()
+  const { slots, messagesOf, busyOf, send, createImage, sessionIdsBySlot, moveChatToScope } = useSessions()
   const { abortSession } = usePermission()
   const { connected } = useConnection()
   const { activeModel } = useModel()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession, syncChatSession } = useArtifact()
+  // The general-space Projects are this rail's Move destinations (moving a General chat INTO a
+  // project). The Projects tab is scope="general" (ProjectsScreen); per-lab CAD projects are a
+  // separate space and are deliberately out of scope for chat Move in this PR.
+  const { projects } = useProjects("general")
   const id = slots.chat
 
   // Reset the chat preview only when the chat slot's session id truly changes (New chat /
@@ -44,7 +49,19 @@ export function ChatScreen() {
 
   return (
     <div className="flex h-full min-h-0">
-      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" pinKey={pinnedChatsKey()} collapsible />
+      <SessionList
+        slot="chat"
+        agent="assistant"
+        sessionIds={sessionIdsBySlot.chat}
+        activeId={id}
+        label="Chats"
+        newTitle="New chat"
+        pinKey={pinnedChatsKey()}
+        moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
+        currentScope={{ kind: "general" }}
+        onMove={(sid, to) => moveChatToScope(sid, { kind: "general" }, to)}
+        collapsible
+      />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}

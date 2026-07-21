@@ -7,6 +7,7 @@ import { ChatSurface } from "../ChatSurface"
 import { ArtifactPanel } from "../ArtifactPanel"
 import { SessionList } from "../SessionList"
 import { pinnedChatsKey } from "../../lib/sessionScope"
+import { useProjects } from "../../lib/projects"
 
 // 5b — a project's chats: a collapsible history rail (multiple named chats) + the active
 // conversation, each bound to its own OpenCode session so it's isolated per project. Mirrors
@@ -17,8 +18,11 @@ import { pinnedChatsKey } from "../../lib/sessionScope"
 const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "assistant" } as const
 
 export function ProjectChat({ projectId }: { projectId: string }) {
-  const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, projectChats, projectChatIds } =
+  const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, moveChatToScope, projectChats, projectChatIds } =
     useSessions()
+  // The general-space Projects are this chat's Move destinations (to another project, or "Remove
+  // from project" = General). This project is excluded from the picker by currentScope below.
+  const { projects } = useProjects("general")
   const { abortSession } = usePermission()
   const { connected, sessionID } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
@@ -76,6 +80,9 @@ export function ProjectChat({ projectId }: { projectId: string }) {
           return deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
         }}
         pinKey={pinnedChatsKey(projectId)}
+        moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
+        currentScope={{ kind: "project", projectId }}
+        onMove={(sid, to) => moveChatToScope(sid, { kind: "project", projectId }, to)}
         label="Chats"
         newTitle="New chat"
         collapsible

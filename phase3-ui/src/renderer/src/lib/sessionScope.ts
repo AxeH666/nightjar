@@ -19,6 +19,17 @@ export type BaseSlot = "chat" | "code" | "cad"
 // project-scoped in 5b; code/cad have no project form.
 export type SlotScope = BaseSlot | `chat::${string}`
 
+// Where a chat can be re-filed by the ⋯ menu's Move (chat-menu PR-2): the General (no-project)
+// space, or a specific project's chats. "Move" is a pure re-tag between the id-lists these scopes
+// key — the engine session (its transcript) never moves — so this is the whole cross-scope model.
+export type ChatMoveScope = { kind: "general" } | { kind: "project"; projectId: string }
+
+// True when two move scopes are the same rail (so a Move onto the current scope is a no-op).
+export function sameChatScope(a: ChatMoveScope, b: ChatMoveScope): boolean {
+  if (a.kind === "general" && b.kind === "general") return true
+  return a.kind === "project" && b.kind === "project" && a.projectId === b.projectId
+}
+
 // General (no-project) keys, kept BYTE-FOR-BYTE identical to SessionsContext.sessionIdsKey as
 // it exists today (context/SessionsContext.tsx): code keeps its original "nightjar.codeSessionIds".
 // Changing any of these strings silently orphans real users' recents — do not.
