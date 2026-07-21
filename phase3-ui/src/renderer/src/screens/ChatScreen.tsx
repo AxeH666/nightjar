@@ -14,7 +14,7 @@ import { capabilities } from "../lib/capabilities"
 import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
 import { imageUnavailableReason, type CapabilityId, type CapabilitySupportMeta } from "../lib/globalMode"
-import { pinnedChatsKey } from "../lib/sessionScope"
+import { pinnedChatsKey, unreadChatsKey } from "../lib/sessionScope"
 import { useProjects } from "../lib/projects"
 
 // The composer's armed web tool → the agent that serves it. Research and Web search are
@@ -58,6 +58,7 @@ export function ChatScreen() {
         label="Chats"
         newTitle="New chat"
         pinKey={pinnedChatsKey()}
+        unreadKey={unreadChatsKey()}
         moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
         currentScope={{ kind: "general" }}
         onMove={(sid, to) => {

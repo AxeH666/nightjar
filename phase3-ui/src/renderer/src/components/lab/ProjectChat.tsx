@@ -6,7 +6,7 @@ import { useArtifact } from "../../context/ArtifactContext"
 import { ChatSurface } from "../ChatSurface"
 import { ArtifactPanel } from "../ArtifactPanel"
 import { SessionList } from "../SessionList"
-import { pinnedChatsKey } from "../../lib/sessionScope"
+import { pinnedChatsKey, unreadChatsKey } from "../../lib/sessionScope"
 import { useProjects } from "../../lib/projects"
 
 // 5b — a project's chats: a collapsible history rail (multiple named chats) + the active
@@ -83,6 +83,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
           return deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
         }}
         pinKey={pinnedChatsKey(projectId)}
+        unreadKey={unreadChatsKey(projectId)}
         moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
         currentScope={{ kind: "project", projectId }}
         onMove={(sid, to) => {

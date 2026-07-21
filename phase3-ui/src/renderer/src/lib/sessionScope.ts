@@ -78,15 +78,12 @@ export function deleteProjectSessionIds(projectId: string): boolean {
   }
 }
 
-// ── pinned chats (chat-menu Pin) ────────────────────────────────────────────────
-// The per-rail pinned-chats localStorage key. General chat uses the no-project form; a project
-// uses its id. ONE builder so the write (SessionList/ProjectChat) and the delete (purge) can't
-// drift on the format. This is a per-project key family, so it MUST be in purgeProjectStorage.
-export function pinnedChatsKey(projectId?: string): string {
-  return projectId ? `nightjar.pinned.chat.${projectId}` : "nightjar.pinned.chat"
-}
-// load/save take the RAW key (SessionList holds it as its pinKey prop, built via pinnedChatsKey).
-export function loadPinned(key: string): Set<string> {
+// ── per-rail chat id-sets (chat-menu Pin + Unread) ──────────────────────────────
+// Generic raw-key persistence for a per-rail Set<string> of chat ids. Both the Pin set and the
+// Unread set use it — SessionList holds the RAW key as a prop (built via pinnedChatsKey /
+// unreadChatsKey), so the storage mechanics live in one tolerant place (absent/garbage/non-array
+// storage → empty set; a blocked write → false, reportable not swallowed).
+export function loadIdSet(key: string): Set<string> {
   try {
     const raw = localStorage.getItem(key)
     const arr = raw ? (JSON.parse(raw) as unknown) : []
@@ -95,7 +92,7 @@ export function loadPinned(key: string): Set<string> {
     return new Set()
   }
 }
-export function savePinned(key: string, ids: Set<string>): boolean {
+export function saveIdSet(key: string, ids: Set<string>): boolean {
   try {
     localStorage.setItem(key, JSON.stringify([...ids]))
     return true
@@ -103,11 +100,28 @@ export function savePinned(key: string, ids: Set<string>): boolean {
     return false
   }
 }
-// Drop a project's pinned-chats key. Joins purgeProjectStorage's fan-out (a per-project key family
-// added by the chat-menu PR that was NOT being cleaned up — the NJ-40/41 leak class).
+// The per-rail localStorage keys. General chat uses the no-project form; a project uses its id. ONE
+// builder each so the write (SessionList/ProjectChat) and the delete (purge) can't drift on the
+// format. Both are per-project key families, so they MUST be in purgeProjectStorage.
+export function pinnedChatsKey(projectId?: string): string {
+  return projectId ? `nightjar.pinned.chat.${projectId}` : "nightjar.pinned.chat"
+}
+export function unreadChatsKey(projectId?: string): string {
+  return projectId ? `nightjar.unread.chat.${projectId}` : "nightjar.unread.chat"
+}
+// Drop a project's pinned / unread keys. Both join purgeProjectStorage's fan-out — the NJ-40/41 leak
+// class is exactly a per-project key family a delete path forgot (the pin key was one such miss).
 export function deleteProjectPins(projectId: string): boolean {
   try {
     localStorage.removeItem(pinnedChatsKey(projectId))
+    return true
+  } catch {
+    return false
+  }
+}
+export function deleteProjectUnread(projectId: string): boolean {
+  try {
+    localStorage.removeItem(unreadChatsKey(projectId))
     return true
   } catch {
     return false

@@ -1,19 +1,20 @@
 // SessionList — a resumable, collapsible session-history rail with a per-chat ⋯ menu (Rename /
-// Pin / Move / Delete). Generalized from the Code tab's original (redesign Stage 5) to serve any
-// list of session ids: the Code tab and every lab pass a (slot, agent) and it drives newSession/
-// resumeSession/deleteSession on that slot; a PROJECT passes onNew/onResume/onDelete so the same
-// rail drives per-project chats (5b). Lists sessions from GET /session, filtered to the ids our
-// registry marks for THIS list. Titles come from the engine's auto-titling (displayChatTitle
-// shows "New chat" until a real title lands). Pinning (when pinKey is set) persists a per-rail set
-// and sorts pinned chats to the top. Move (chat rails only, via onMove/currentScope/moveTargets)
-// re-files a chat to another scope (General ↔ project) — the ⋯ menu's Move sub-view + Remove-from-
-// project shortcut.
+// Pin / Mark-unread / Move / Delete). Generalized from the Code tab's original (redesign Stage 5) to
+// serve any list of session ids: the Code tab and every lab pass a (slot, agent) and it drives
+// newSession/resumeSession/deleteSession on that slot; a PROJECT passes onNew/onResume/onDelete so
+// the same rail drives per-project chats (5b). Lists sessions from GET /session, filtered to the ids
+// our registry marks for THIS list. Titles come from the engine's auto-titling (displayChatTitle
+// shows "New chat" until a real title lands). Pinning (pinKey) persists a per-rail set and sorts
+// pinned chats to the top; Unread (unreadKey) persists a per-rail set shown as a dot, set from the
+// menu and cleared on open (read-on-view). Move (chat rails only, via onMove/currentScope/
+// moveTargets) re-files a chat to another scope (General ↔ project) — the ⋯ menu's Move sub-view +
+// Remove-from-project shortcut.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSessions } from "../context/SessionsContext"
 import { useConnection } from "../context/ConnectionContext"
 import type { SlotId } from "../context/SessionsContext"
 import type { SessionInfo } from "../lib/opencode"
-import { displayChatTitle, loadPinned, savePinned, NEW_CHAT_LABEL, type ChatMoveScope } from "../lib/sessionScope"
+import { displayChatTitle, loadIdSet, saveIdSet, NEW_CHAT_LABEL, type ChatMoveScope } from "../lib/sessionScope"
 
 export function SessionList({
   slot,
@@ -24,6 +25,7 @@ export function SessionList({
   onResume,
   onDelete,
   pinKey,
+  unreadKey,
   moveTargets,
   currentScope,
   onMove,
@@ -43,6 +45,9 @@ export function SessionList({
   onDelete?: (id: string) => void | Promise<void>
   // Enables the Pin menu item; the per-rail pinned set persists under this localStorage key.
   pinKey?: string
+  // Enables the Mark-as-unread menu item; the per-rail unread set persists under this key. Opening a
+  // chat clears its unread flag (read-on-view). Chat rails pass it; Code/CAD don't.
+  unreadKey?: string
   // Enables the ⋯ menu's Move / Remove-from-project (chat rails only — Code/CAD pass none). The rail
   // is asked to move a chat between SCOPES; `currentScope` is this rail's own scope (excluded from
   // the picker and enabling "Remove from project"), `moveTargets` is the general-space project list.
@@ -61,12 +66,45 @@ export function SessionList({
   const [items, setItems] = useState<SessionInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
-  const [pinned, setPinned] = useState<Set<string>>(() => (pinKey ? loadPinned(pinKey) : new Set()))
+  const [pinned, setPinned] = useState<Set<string>>(() => (pinKey ? loadIdSet(pinKey) : new Set()))
+  const [unread, setUnread] = useState<Set<string>>(() => (unreadKey ? loadIdSet(unreadKey) : new Set()))
   const [bump, setBump] = useState(0) // manual refresh trigger (after rename/delete)
 
   useEffect(() => {
-    setPinned(pinKey ? loadPinned(pinKey) : new Set())
+    setPinned(pinKey ? loadIdSet(pinKey) : new Set())
   }, [pinKey])
+  useEffect(() => {
+    setUnread(unreadKey ? loadIdSet(unreadKey) : new Set())
+  }, [unreadKey])
+
+  // Prune one id from this rail's unread set (state + persist). Shared by clear-on-open (doResume),
+  // the Mark-as-read toggle, and the leave-rail paths (delete/move) so a gone chat doesn't linger.
+  const dropUnread = useCallback(
+    (id: string) => {
+      if (!unreadKey) return
+      setUnread((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        saveIdSet(unreadKey, next)
+        return next
+      })
+    },
+    [unreadKey],
+  )
+  const toggleUnread = useCallback(
+    (id: string) => {
+      if (!unreadKey) return
+      setUnread((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        saveIdSet(unreadKey, next)
+        return next
+      })
+    },
+    [unreadKey],
+  )
 
   const doNew = useCallback(() => {
     if (onNew) onNew()
@@ -76,8 +114,9 @@ export function SessionList({
     (id: string, title?: string) => {
       if (onResume) onResume(id, title)
       else if (slot) resumeSession(slot, id, agent ?? "assistant", title)
+      dropUnread(id) // read-on-view: opening a chat clears its unread flag
     },
-    [onResume, slot, agent, resumeSession],
+    [onResume, slot, agent, resumeSession, dropUnread],
   )
   // Prune one id from this rail's pinned set (state + persist). togglePin is otherwise the only path
   // that removes from it, so a chat that leaves this rail — deleted, or moved to another scope —
@@ -89,7 +128,7 @@ export function SessionList({
         if (!prev.has(id)) return prev
         const next = new Set(prev)
         next.delete(id)
-        savePinned(pinKey, next)
+        saveIdSet(pinKey, next)
         return next
       })
     },
@@ -107,10 +146,11 @@ export function SessionList({
       // would re-list the just-deleted chat until that finished (Bugbot).
       if (onDelete) await onDelete(id)
       else await deleteSession(id)
-      dropPinned(id)
+      dropPinned(id) // a deleted chat lingers in neither the pin nor the unread set
+      dropUnread(id)
       setBump((n) => n + 1)
     },
-    [onDelete, deleteSession, connected, dropPinned],
+    [onDelete, deleteSession, connected, dropPinned, dropUnread],
   )
   const doMove = useCallback(
     async (id: string, to: ChatMoveScope) => {
@@ -119,12 +159,15 @@ export function SessionList({
       // composer is already blocked when disconnected, so the user has the context.
       if (!connected || !onMove || !currentScope) return
       const moved = await onMove(id, to)
-      // Unpin THIS (source) rail ONLY on a real move — a pin is a per-rail position hint; an aborted
-      // move leaves the chat here, so it must stay pinned (Bugbot).
-      if (moved) dropPinned(id)
+      // Unpin/mark-read THIS (source) rail ONLY on a real move — pin and unread are per-rail hints; an
+      // aborted move leaves the chat here, so its flags must stay (Bugbot).
+      if (moved) {
+        dropPinned(id)
+        dropUnread(id)
+      }
       setBump((n) => n + 1)
     },
-    [onMove, currentScope, connected, dropPinned],
+    [onMove, currentScope, connected, dropPinned, dropUnread],
   )
   const canMove = !!onMove && !!currentScope
   const doRename = useCallback(
@@ -147,7 +190,7 @@ export function SessionList({
         const next = new Set(prev)
         if (next.has(id)) next.delete(id)
         else next.add(id)
-        savePinned(pinKey, next)
+        saveIdSet(pinKey, next)
         return next
       })
     },
@@ -235,6 +278,9 @@ export function SessionList({
             active={s.id === activeId}
             pinned={pinned.has(s.id)}
             canPin={!!pinKey}
+            unread={unread.has(s.id)}
+            canMarkUnread={!!unreadKey}
+            onToggleUnread={() => toggleUnread(s.id)}
             moveTargets={canMove ? moveTargets : undefined}
             currentScope={canMove ? currentScope : undefined}
             onMove={canMove ? (to) => void doMove(s.id, to) : undefined}
@@ -254,17 +300,20 @@ export function SessionList({
   )
 }
 
-// One chat row: click to open, a ⋯ menu (Rename / Pin / Move / Delete) revealed on hover, and inline
-// rename (Enter commits, Escape cancels, blur commits — with a cancelRef so Escape's unmount-blur
-// doesn't resurrect the cancelled edit, mirroring ProjectCard). R/P/M/D shortcuts fire while the menu
-// is open. Move (chat rails only) opens a picker sub-view of destination scopes; Escape backs out of
-// the picker to the menu, then out of the menu.
+// One chat row: click to open, a ⋯ menu (Rename / Pin / Mark-unread / Move / Delete) revealed on
+// hover, and inline rename (Enter commits, Escape cancels, blur commits — with a cancelRef so
+// Escape's unmount-blur doesn't resurrect the cancelled edit, mirroring ProjectCard). R/P/U/M/D
+// shortcuts fire while the menu is open. Move (chat rails only) opens a picker sub-view of
+// destination scopes; Escape backs out of the picker to the menu, then out of the menu.
 function SessionRow({
   id,
   title,
   active,
   pinned,
   canPin,
+  unread,
+  canMarkUnread,
+  onToggleUnread,
   moveTargets,
   currentScope,
   onMove,
@@ -278,6 +327,9 @@ function SessionRow({
   active: boolean
   pinned: boolean
   canPin: boolean
+  unread: boolean
+  canMarkUnread: boolean
+  onToggleUnread: () => void
   moveTargets?: Array<{ projectId: string; name: string }>
   currentScope?: ChatMoveScope
   onMove?: (to: ChatMoveScope) => void
@@ -365,8 +417,9 @@ function SessionRow({
         title={title}
         className={`min-w-0 flex-1 truncate px-3 py-2 text-left text-sm ${active ? "text-nightjar-accent" : "text-nightjar-text/70"}`}
       >
-        {pinned && <span className="mr-1 text-nightjar-text/40">📌</span>}
-        {title}
+        {unread && <span className="mr-1.5 text-nightjar-accent" aria-hidden>●</span>}
+        {pinned && <span className="mr-1 text-nightjar-text/40" aria-hidden>📌</span>}
+        <span className={unread ? "font-semibold text-nightjar-text" : ""}>{title}</span>
       </button>
       <button
         onClick={() => setMenu((v) => !v)}
@@ -393,6 +446,9 @@ function SessionRow({
               else if (k === "p" && canPin) {
                 onTogglePin()
                 setMenu(false)
+              } else if (k === "u" && canMarkUnread) {
+                onToggleUnread()
+                setMenu(false)
               } else if (k === "m" && canMove && moveEntries.length > 0) {
                 setMoving(true)
               } else if (k === "d") {
@@ -412,6 +468,16 @@ function SessionRow({
                     hint="P"
                     onClick={() => {
                       onTogglePin()
+                      setMenu(false)
+                    }}
+                  />
+                )}
+                {canMarkUnread && (
+                  <MenuItem
+                    label={unread ? "Mark as read" : "Mark as unread"}
+                    hint="U"
+                    onClick={() => {
+                      onToggleUnread()
                       setMenu(false)
                     }}
                   />

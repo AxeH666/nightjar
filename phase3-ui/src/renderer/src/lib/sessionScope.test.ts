@@ -4,15 +4,17 @@ import {
   chatScope,
   deleteProjectPins,
   deleteProjectSessionIds,
+  deleteProjectUnread,
   displayChatTitle,
-  loadPinned,
+  loadIdSet,
   loadProjectChatIds,
   pinnedChatsKey,
   projectOf,
   sameChatScope,
-  savePinned,
+  saveIdSet,
   saveProjectChatIds,
   sessionIdsKey,
+  unreadChatsKey,
   type ChatMoveScope,
 } from "./sessionScope"
 
@@ -151,7 +153,7 @@ describe("displayChatTitle — a placeholder never shows as a raw timestamp", ()
   })
 })
 
-describe("pinned-chats persistence (chat-menu Pin — consistency sweep)", () => {
+describe("per-rail id-set persistence (chat-menu Pin + Unread)", () => {
   const stub = (): Map<string, string> => {
     const m = new Map<string, string>()
     ;(globalThis as { localStorage?: unknown }).localStorage = {
@@ -165,42 +167,51 @@ describe("pinned-chats persistence (chat-menu Pin — consistency sweep)", () =>
     delete (globalThis as { localStorage?: unknown }).localStorage
   })
 
-  it("keys the General rail without a project and a project rail by id", () => {
+  it("keys the General rail without a project and a project rail by id, for both families", () => {
     expect(pinnedChatsKey()).toBe("nightjar.pinned.chat")
     expect(pinnedChatsKey("p_1")).toBe("nightjar.pinned.chat.p_1")
+    expect(unreadChatsKey()).toBe("nightjar.unread.chat")
+    expect(unreadChatsKey("p_1")).toBe("nightjar.unread.chat.p_1")
   })
 
-  it("round-trips a pinned set under a raw key", () => {
+  it("round-trips an id set under a raw key (used for both the pin and unread keys)", () => {
     const m = stub()
-    expect(savePinned(pinnedChatsKey("p_1"), new Set(["a", "b"]))).toBe(true)
-    expect(JSON.parse(m.get("nightjar.pinned.chat.p_1") ?? "null")).toEqual(["a", "b"])
-    expect([...loadPinned(pinnedChatsKey("p_1"))].sort()).toEqual(["a", "b"])
+    expect(saveIdSet(unreadChatsKey("p_1"), new Set(["a", "b"]))).toBe(true)
+    expect(JSON.parse(m.get("nightjar.unread.chat.p_1") ?? "null")).toEqual(["a", "b"])
+    expect([...loadIdSet(unreadChatsKey("p_1"))].sort()).toEqual(["a", "b"])
   })
 
   it("returns an empty set on absent / garbage / wrong-shape storage", () => {
     stub()
-    expect(loadPinned("nightjar.pinned.chat.missing").size).toBe(0)
+    expect(loadIdSet("nightjar.pinned.chat.missing").size).toBe(0)
     const ls = (globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage
     ls.setItem("nightjar.pinned.chat.g", "{not json")
-    expect(loadPinned("nightjar.pinned.chat.g").size).toBe(0)
+    expect(loadIdSet("nightjar.pinned.chat.g").size).toBe(0)
     ls.setItem("nightjar.pinned.chat.o", JSON.stringify({ not: "array" }))
-    expect(loadPinned("nightjar.pinned.chat.o").size).toBe(0)
+    expect(loadIdSet("nightjar.pinned.chat.o").size).toBe(0)
     ls.setItem("nightjar.pinned.chat.mix", JSON.stringify(["ok", 1, null, "also"]))
-    expect([...loadPinned("nightjar.pinned.chat.mix")].sort()).toEqual(["also", "ok"]) // filters non-strings
+    expect([...loadIdSet("nightjar.pinned.chat.mix")].sort()).toEqual(["also", "ok"]) // filters non-strings
     delete (globalThis as { localStorage?: unknown }).localStorage
-    expect(loadPinned("nightjar.pinned.chat").size).toBe(0) // no storage → empty, no throw
-    expect(savePinned("nightjar.pinned.chat", new Set(["x"]))).toBe(false)
+    expect(loadIdSet("nightjar.pinned.chat").size).toBe(0) // no storage → empty, no throw
+    expect(saveIdSet("nightjar.pinned.chat", new Set(["x"]))).toBe(false)
   })
 
-  it("deleteProjectPins removes ONLY that project's pin key (the purge-fan-out gap this PR fixes)", () => {
+  it("deleteProjectPins / deleteProjectUnread remove ONLY that project's key, leaving siblings + General", () => {
     const m = stub()
     m.set("nightjar.pinned.chat.p_1", JSON.stringify(["s1"]))
     m.set("nightjar.pinned.chat.p_2", JSON.stringify(["s2"]))
     m.set("nightjar.pinned.chat", JSON.stringify(["general"])) // General pins are not per-project
+    m.set("nightjar.unread.chat.p_1", JSON.stringify(["u1"]))
+    m.set("nightjar.unread.chat.p_2", JSON.stringify(["u2"]))
+    m.set("nightjar.unread.chat", JSON.stringify(["general-unread"])) // General unread is not per-project
     expect(deleteProjectPins("p_1")).toBe(true)
+    expect(deleteProjectUnread("p_1")).toBe(true)
     expect(m.has("nightjar.pinned.chat.p_1")).toBe(false)
+    expect(m.has("nightjar.unread.chat.p_1")).toBe(false)
     expect(m.get("nightjar.pinned.chat.p_2")).toBe(JSON.stringify(["s2"]))
+    expect(m.get("nightjar.unread.chat.p_2")).toBe(JSON.stringify(["u2"]))
     expect(m.get("nightjar.pinned.chat")).toBe(JSON.stringify(["general"]))
+    expect(m.get("nightjar.unread.chat")).toBe(JSON.stringify(["general-unread"]))
   })
 })
 
