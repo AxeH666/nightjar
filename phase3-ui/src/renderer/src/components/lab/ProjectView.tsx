@@ -49,9 +49,10 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
       {/* Chat stays MOUNTED across a tab switch (hidden, not unmounted) so switching to Knowledge
           and back doesn't tear down the session or lose scroll/streaming state. */}
       <div className={tab === "chat" ? "min-h-0 flex-1" : "hidden"}>
-        {/* hasInstructions comes from this view's live content, so the chat's cloud-consent banner
-            reacts immediately when Instructions are added/cleared in the Knowledge tab (PR-C). */}
-        <ProjectChat projectId={projectId} hasInstructions={content.instructions.trim().length > 0} />
+        {/* Instructions come from this view's LIVE content, so both the chat's cloud-consent banner
+            AND its send-time injection use the same value the user sees — reacting immediately to
+            Knowledge-tab edits, with no live-vs-storage divergence (PR-C). */}
+        <ProjectChat projectId={projectId} instructions={content.instructions} />
       </div>
 
       <div className={tab === "knowledge" ? "min-h-0 flex-1 overflow-y-auto p-6" : "hidden"}>

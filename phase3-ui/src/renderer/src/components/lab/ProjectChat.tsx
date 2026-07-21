@@ -9,7 +9,7 @@ import { SessionList } from "../SessionList"
 import { ProjectInstructionsConsentBanner } from "./ProjectInstructionsConsentBanner"
 import { pinnedChatsKey, unreadChatsKey } from "../../lib/sessionScope"
 import { useProjects } from "../../lib/projects"
-import { hasCloudConsent, allowCloudConsent } from "../../lib/projectContent"
+import { hasCloudConsent, allowCloudConsent, shouldInjectInstructions } from "../../lib/projectContent"
 import { useModel } from "../../context/ModelContext"
 import { LOCAL_MODEL } from "../../lib/byok"
 
@@ -17,12 +17,13 @@ import { LOCAL_MODEL } from "../../lib/byok"
 // conversation, each bound to its own OpenCode session so it's isolated per project. Mirrors
 // ChatScreen's wiring but against the project's active session (projectChats[projectId]) and its
 // own history list. The active id comes from context state, so a reconnect that keeps the session
-// never blanks the transcript. PR-C: send() injects this project's Instructions as system context,
-// GATED by per-project cloud consent (the banner below); image-gen stays OFF here (createImage:
-// false), so the text send path is the only egress the gate must cover.
+// never blanks the transcript. PR-C: this view attaches the project's Instructions to each send as
+// system context, GATED by per-project cloud consent (the banner below) and computed from the SAME
+// live `instructions` value the banner uses; image-gen stays OFF here (createImage: false), so the
+// text send path is the only egress the gate must cover.
 const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "assistant" } as const
 
-export function ProjectChat({ projectId, hasInstructions = false }: { projectId: string; hasInstructions?: boolean }) {
+export function ProjectChat({ projectId, instructions = "" }: { projectId: string; instructions?: string }) {
   const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, moveChatToScope, projectChats, projectChatIds } =
     useSessions()
   // The general-space Projects are this chat's Move destinations (to another project, or "Remove
@@ -36,8 +37,8 @@ export function ProjectChat({ projectId, hasInstructions = false }: { projectId:
   const [deleting, setDeleting] = useState(false) // a chat delete + its replacement resolving
   const [moving, setMoving] = useState(false) // a chat move + its active-chat replacement resolving
   // 5b PR-C: per-project cloud-egress consent for injecting this project's Instructions. Held in
-  // state (reloaded when the project changes) so clicking Allow reactively hides the banner; send()
-  // reads it fresh from storage independently, so the two never disagree at send time.
+  // state (reloaded when the project changes, updated when Allow persists) and used for BOTH the
+  // banner and the send-time gate below — so the banner and what's actually sent can never disagree.
   const [consented, setConsented] = useState(() => hasCloudConsent(projectId))
   useEffect(() => {
     setConsented(hasCloudConsent(projectId))
@@ -45,11 +46,12 @@ export function ProjectChat({ projectId, hasInstructions = false }: { projectId:
 
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
-  // Show the consent banner when a cloud model is active, there ARE Instructions to protect, and the
-  // user hasn't opted in yet. `hasInstructions` comes from ProjectView's live content instance so it
-  // stays reactive to Knowledge-tab edits (a mount-time read here would go stale). Independently, the
-  // send path re-reads Instructions + consent fresh from storage, so it can never leak them.
-  const showConsent = connected && !activeChoice.local && hasInstructions && !consented
+  // `instructions` comes from ProjectView's LIVE content instance (reactive to Knowledge-tab edits).
+  // The SAME value drives both the consent banner and the send-time injection below, so what the user
+  // sees is exactly what's sent — no live-vs-storage split-brain. Inject only when the gate passes:
+  // there ARE instructions AND (local model OR this project has cloud consent).
+  const injectInstructions = shouldInjectInstructions({ instructions, isLocal: activeChoice.local, consent: consented })
+  const showConsent = connected && !activeChoice.local && instructions.trim().length > 0 && !consented
 
   // Resolve the project's active chat on open, project switch, and reconnect (sessionID changes /
   // goes empty→set). A still-bound chat is returned as-is — there is NO liveness re-check (the
@@ -120,9 +122,10 @@ export function ProjectChat({ projectId, hasInstructions = false }: { projectId:
           <ProjectInstructionsConsentBanner
             provider={activeChoice.providerName ?? "the cloud model"}
             onAllow={() => {
-              // Only reflect consent in the UI if it actually PERSISTED — send() reads consent fresh
-              // from storage, so hiding the banner on a failed write would desync (banner gone, yet
-              // Instructions still withheld). If the write fails the banner stays, honestly (PR-C).
+              // Flip consent in state ONLY if the write PERSISTED. The `consented` state directly gates
+              // egress (via injectInstructions), so an optimistic flip on a failed write would send this
+              // project's Instructions to the cloud on a consent that won't survive a reload. If the
+              // write fails the banner stays and nothing egresses — honest and safe (PR-C).
               if (allowCloudConsent(projectId)) setConsented(true)
             }}
             onSwitchLocal={() => setActiveModel(LOCAL_MODEL.id)}
@@ -134,7 +137,9 @@ export function ProjectChat({ projectId, hasInstructions = false }: { projectId:
             busy={busyOf(id)}
             blockedReason={blockedReason}
             artifactSessionID={id}
-            onSend={(text, { attachments, mode }) => send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })}
+            onSend={(text, { attachments, mode }) =>
+            send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments, system: injectInstructions ? instructions : undefined })
+          }
             onCreateImage={(prompt) => createImage(id, prompt)}
             onStop={() => abortSession(id)}
             menu={{ research: true, webSearch: true, createImage: false }}
