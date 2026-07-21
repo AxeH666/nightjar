@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { baseSlot, chatScope, deleteProjectSessionIds, projectOf, sessionIdsKey } from "./sessionScope"
+import {
+  baseSlot,
+  chatScope,
+  deleteProjectSessionIds,
+  displayChatTitle,
+  loadProjectChatIds,
+  projectOf,
+  saveProjectChatIds,
+  sessionIdsKey,
+} from "./sessionScope"
 
 // The load-bearing test for 5b's migration safety: the General (no-project) keys MUST equal the
 // exact strings SessionsContext.sessionIdsKey produces today, or a real user's recents rail
@@ -75,3 +84,64 @@ describe("deleteProjectSessionIds — the delete-hygiene helper", () => {
     expect(deleteProjectSessionIds("p_1")).toBe(false)
   })
 })
+
+describe("project chat ids — the per-project history list's persistence", () => {
+  const stub = (): Map<string, string> => {
+    const m = new Map<string, string>()
+    ;(globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    }
+    return m
+  }
+  afterEach(() => {
+    delete (globalThis as { localStorage?: unknown }).localStorage
+  })
+
+  it("round-trips an ordered list under the project's chat key, and deleteProjectSessionIds clears it", () => {
+    const m = stub()
+    expect(saveProjectChatIds("p_1", ["ses_new", "ses_old"])).toBe(true)
+    expect(m.get("nightjar.sessionIds.chat.p_1")).toBe(JSON.stringify(["ses_new", "ses_old"]))
+    expect(loadProjectChatIds("p_1")).toEqual(["ses_new", "ses_old"]) // order preserved (newest first)
+    deleteProjectSessionIds("p_1")
+    expect(loadProjectChatIds("p_1")).toEqual([])
+  })
+
+  it("returns [] for a project with no history, and on absent/garbage/non-array storage", () => {
+    stub()
+    expect(loadProjectChatIds("never_opened")).toEqual([])
+    const ls = (globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage
+    ls.setItem("nightjar.sessionIds.chat.p_x", "{not json")
+    expect(loadProjectChatIds("p_x")).toEqual([]) // garbage → []
+    ls.setItem("nightjar.sessionIds.chat.p_y", JSON.stringify({ not: "an array" }))
+    expect(loadProjectChatIds("p_y")).toEqual([]) // wrong shape → []
+    ls.setItem("nightjar.sessionIds.chat.p_z", JSON.stringify(["ok", 42, null, "also"]))
+    expect(loadProjectChatIds("p_z")).toEqual(["ok", "also"]) // filters non-strings defensively
+    delete (globalThis as { localStorage?: unknown }).localStorage
+    expect(loadProjectChatIds("p_1")).toEqual([]) // no storage at all
+    expect(saveProjectChatIds("p_1", ["x"])).toBe(false)
+  })
+})
+
+describe("displayChatTitle — a placeholder never shows as a raw timestamp", () => {
+  it("maps engine placeholder / empty / legacy titles to 'New chat'", () => {
+    // The engine's exact default format (prefix + ISO timestamp).
+    expect(displayChatTitle("New session - 2026-07-21T01:23:44.123Z")).toBe("New chat")
+    expect(displayChatTitle("Child session - 2026-07-21T01:23:44.123Z")).toBe("New chat")
+    expect(displayChatTitle("")).toBe("New chat")
+    expect(displayChatTitle("   ")).toBe("New chat")
+    expect(displayChatTitle(null)).toBe("New chat")
+    expect(displayChatTitle(undefined)).toBe("New chat")
+    expect(displayChatTitle("June chat")).toBe("New chat") // legacy forced default (new chats)
+    expect(displayChatTitle("June session")).toBe("New chat") // legacy forced default (connection primary)
+  })
+
+  it("passes through a real title untouched — even one that merely ENDS with a timestamp (Bugbot)", () => {
+    expect(displayChatTitle("Token efficiency optimization")).toBe("Token efficiency optimization")
+    expect(displayChatTitle("  Fix the CSP frame-src  ")).toBe("Fix the CSP frame-src") // trimmed
+    // A real, user/model title that happens to end in an ISO timestamp must NOT be hidden.
+    expect(displayChatTitle("Release cut 2026-07-21T01:23:44.123Z")).toBe("Release cut 2026-07-21T01:23:44.123Z")
+  })
+})
+

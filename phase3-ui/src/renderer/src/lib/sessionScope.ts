@@ -66,3 +66,44 @@ export function deleteProjectSessionIds(projectId: string): boolean {
     return false // storage blocked → the id set may linger; caller decides how to surface it
   }
 }
+
+// A project has MANY chats (its history rail), stored NEWEST-FIRST as a JSON string[] under the
+// same key loadSessionIds/persistSessionIds use — so deleteProjectSessionIds still clears the
+// whole family in one delete path.
+export function loadProjectChatIds(projectId: string): string[] {
+  try {
+    const raw = localStorage.getItem(sessionIdsKey(chatScope(projectId)))
+    const arr = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []
+  } catch {
+    return []
+  }
+}
+
+export function saveProjectChatIds(projectId: string, ids: string[]): boolean {
+  try {
+    localStorage.setItem(sessionIdsKey(chatScope(projectId)), JSON.stringify(ids))
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The engine (OpenCode) gives a brand-new session a placeholder title — a prefix + ISO timestamp
+// — and replaces it with a real, conversation-derived title after the first message
+// (session/prompt.ts ensureTitle, gated on isDefaultTitle). Map anything still on a placeholder
+// (or empty, or the legacy forced "June chat") to a friendly "New chat" so the rail never shows a
+// raw timestamp while a chat is waiting to be auto-titled.
+// The engine's placeholder is a FULL match on `<prefix><ISO timestamp>` (from OpenCode
+// session/session.ts isDefaultTitle: prefixes "New session - " / "Child session - "). Anchor to
+// the whole string — a suffix match would mis-hide a real title that merely ENDS with a timestamp
+// (Bugbot). Keep these in sync if the engine's prefixes change.
+const PLACEHOLDER_TITLE = /^(New session - |Child session - )\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+// Legacy forced titles Nightjar used before auto-titling ("June chat" for new chats, "June
+// session" for the connection primary) — both are placeholders, not user-chosen names.
+const LEGACY_DEFAULTS = new Set(["June chat", "June session"])
+export function displayChatTitle(title: string | undefined | null): string {
+  const t = (title ?? "").trim()
+  return !t || PLACEHOLDER_TITLE.test(t) || LEGACY_DEFAULTS.has(t) ? "New chat" : t
+}
+

@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState } from "react"
 import { useProjects, type Project, type ProjectsStore, type ProjectScope } from "../../lib/projects"
+import { useSessions } from "../../context/SessionsContext"
 
 // Projects home (Lab.md §4.6): a grid of the lab's project cards with New project, search,
 // and sort (favorites first, then Last-updated or Name). Managing projects
-// (rename/duplicate/delete/favorite) lives here; opening a project into its scoped workspace
-// (chats + Memory/Instructions/Files) is the next PR.
+// (rename/duplicate/delete/favorite) lives here; opening a project opens its scoped workspace
+// (an isolated Chat + Memory/Instructions/Files).
 function fmtWhen(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
@@ -23,9 +24,19 @@ export function ProjectsHome({
   backLabel?: string
 }) {
   const store = useProjects(scope)
+  const { deleteProjectChat } = useSessions()
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<"updated" | "name">("updated")
   const [newName, setNewName] = useState("")
+
+  // Deleting a project also removes its isolated chat's engine session (5b decision #3). Fire
+  // deleteProjectChat FIRST: it captures the session ids synchronously up front, before
+  // store.remove's purge clears the persisted id key — so the right engine session is deleted
+  // even though the two run back-to-back.
+  const removeProject = (id: string) => {
+    void deleteProjectChat(id)
+    store.remove(id)
+  }
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -107,7 +118,7 @@ export function ProjectsHome({
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
             {visible.map((p) => (
-              <ProjectCard key={p.id} project={p} store={store} onOpen={() => onOpen(p.id)} />
+              <ProjectCard key={p.id} project={p} store={store} onOpen={() => onOpen(p.id)} onDelete={() => removeProject(p.id)} />
             ))}
           </div>
         )}
@@ -116,7 +127,7 @@ export function ProjectsHome({
   )
 }
 
-function ProjectCard({ project, store, onOpen }: { project: Project; store: ProjectsStore; onOpen: () => void }) {
+function ProjectCard({ project, store, onOpen, onDelete }: { project: Project; store: ProjectsStore; onOpen: () => void; onDelete: () => void }) {
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(project.name)
@@ -199,7 +210,7 @@ function ProjectCard({ project, store, onOpen }: { project: Project; store: Proj
           </button>
           <button
             onClick={() => {
-              store.remove(project.id)
+              onDelete()
               setMenu(false)
             }}
             className="px-3 py-1 text-left text-nightjar-alert hover:bg-nightjar-surface"

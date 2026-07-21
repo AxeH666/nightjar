@@ -1,12 +1,12 @@
 import { useRef, useState, type ReactNode } from "react"
 import { useProjects, type ProjectScope } from "../../lib/projects"
 import { useProjectContent, type ProjectContent, type SaveResult } from "../../lib/projectContent"
+import { ProjectChat } from "./ProjectChat"
 
-// A project's home (Lab.md §4.6): the breadcrumb + the three per-project areas — Memory,
-// Instructions, and Files — now REAL and editable (persisted per project). Wiring
-// Instructions into the lab agent's prompt and isolating this project's chats (sessions
-// keyed by (slot, projectId)) is the next PR; it needs live session work + on-device
-// verification (rules 6/8), so it's called out here rather than faked.
+// A project's home (Lab.md §4.6): the breadcrumb, a per-project Chat (5b — isolated to this
+// project's own OpenCode session), and the three Knowledge areas — Instructions, Memory, and
+// Files (persisted per project). Chat is the primary surface; Knowledge holds the project's
+// durable context. Instructions do NOT yet reach the agent — that gated injection is PR-C.
 export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope; projectId: string; onBack: () => void }) {
   const store = useProjects(scope)
   // Read from `projects` state, NOT store.get(): `get` is memoized against the ref with an
@@ -15,6 +15,10 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
   // now that this view can rename in place.
   const project = store.projects.find((p) => p.id === projectId)
   const content = useProjectContent(projectId)
+  const [tab, setTab] = useState<"chat" | "knowledge">("chat")
+
+  const tabBtn = (active: boolean): string =>
+    `rounded px-3 py-1 text-xs ${active ? "bg-nightjar-accent text-nightjar-base" : "text-nightjar-text/60 hover:text-nightjar-text"}`
 
   return (
     <div className="flex h-full flex-col">
@@ -31,9 +35,23 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
         ) : (
           <span className="font-medium text-nightjar-text">Project</span>
         )}
+        <div className="ml-auto flex items-center gap-1">
+          <button className={tabBtn(tab === "chat")} onClick={() => setTab("chat")}>
+            Chat
+          </button>
+          <button className={tabBtn(tab === "knowledge")} onClick={() => setTab("knowledge")}>
+            Knowledge
+          </button>
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      {/* Chat stays MOUNTED across a tab switch (hidden, not unmounted) so switching to Knowledge
+          and back doesn't tear down the session or lose scroll/streaming state. */}
+      <div className={tab === "chat" ? "min-h-0 flex-1" : "hidden"}>
+        <ProjectChat projectId={projectId} />
+      </div>
+
+      <div className={tab === "knowledge" ? "min-h-0 flex-1 overflow-y-auto p-6" : "hidden"}>
         <div className="mx-auto flex max-w-2xl flex-col gap-4">
           <Panel
             emoji="📋"
@@ -72,7 +90,7 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
           </Panel>
 
           <p className="text-center text-xs text-nightjar-text/30">
-            This project's chats become isolated, and Instructions start reaching the agent, in the next update.
+            The Chat tab is isolated to this project. Instructions and Memory don't reach the agent yet — that's the next update.
           </p>
         </div>
       </div>

@@ -25,20 +25,30 @@ before any project exists, so there is no "current project" at adoption time.
   history *is* their General history.
 - A project chat is a separate scope the primary-adopt effect never touches, so the adopted
   primary still lands in General exactly as today. The hard question is answered by construction.
-- **Composite key inside `slots`** (not a parallel map). Rejected the parallel-map alternative
-  because `gcSessions` keeps only sessions in `slots` and aborts the rest — a parallel-map project
-  chat would be **garbage-collected mid-conversation on the next reconnect** (a CLAUDE.md rule-2
-  hazard). Composite is GC-safe by construction.
+- **Quarantined parallel map, not composite** (REVISED 2026-07-21, during PR-B implementation).
+  The original call here was composite (`chat::<projectId>` inside `slots`). After reading the
+  actual 1064-line `SessionsContext`, that was revised — with the maintainer's confirmation — to a
+  separate `projectChats: Record<projectId, sessionId>` map kept OUTSIDE `slots`. Rationale: the
+  user chose a *single* persistent chat per project (not a recents rail), so composite's uniform
+  slot machinery buys nothing, while its widening of `Record<SlotId,…>` would touch every fragile
+  `#122/#123` `=== "chat"` check — risking a regression to the shipped, working General chat.
+  Parallel-map leaves that machinery byte-for-byte untouched. The critic's sole objection to
+  parallel-map — `gcSessions` would garbage-collect a project chat on reconnect (a rule-2 hazard) —
+  is answered by teaching `gcSessions` to union the project-chat ids into its `bound` set (one
+  line). The guardrail is widened to `isChatScope`; the `chatBoundManually` pins stay literal
+  `slots.chat`. Net: the new complexity is quarantined in three enumerated spots (gc, guardrail,
+  delete) rather than spread across the fragile path.
 - Only the **chat** slot becomes project-scoped in 5b; code/cad stay General.
 
-### The single most error-prone edit (flagged for PR-B)
+### The single most error-prone edit — RESOLVED by parallel-map (PR-B)
 
-The same `=== "chat"` check must widen in **opposite directions**:
-- The Chat-only honesty guardrail (SessionsContext ~L603) must become `baseSlot`-aware so a
-  **project** chat's hallucinated-save claim is still corrected (project chats also have no write tool).
-- The `chatBoundManually` pins (resumeSession/newSession) and the adopt gate must stay **literal
-  General-`chat`** — if a project chat resume pins `chatBoundManually`, General adoption is blocked
-  forever and #123 reopens.
+The composite approach would have needed the same `=== "chat"` check widened in **opposite
+directions** (guardrail widens to all chat scopes; pins stay literal General-`chat`) — the highest-
+risk edit. Parallel-map sidesteps most of it: project chats never flow through `resumeSession`/
+`newSession`/the adopt effect (they go through `openProjectChat`), so the `chatBoundManually` pins
+are literally never reached by a project chat and stay untouched. Only the guardrail is widened
+(via `isChatScope`), because a project chat IS a write-tool-less assistant chat whose false-save
+claim must still be corrected.
 
 ### Other risks the critic surfaced (handled in the relevant PR)
 
@@ -55,7 +65,36 @@ The same `=== "chat"` check must widen in **opposite directions**:
 ## Maintainer decisions (2026-07-21) — SETTLED, design around these
 
 1. **Staging:** three sequential PRs (A foundation / B session scoping / C gated injection), not one.
-2. **Per-project chat surface:** a **single persistent chat** per project (not a full recents rail).
+2. **Per-project chat surface:** ~~a single persistent chat per project~~ **REVISED 2026-07-21
+   (maintainer, after seeing the single-chat build):** **multiple named chats per project with a
+   collapsible history rail** — the same experience as the General chat. The collapsible rail is
+   added to BOTH the project view and the General chat. `SessionList` was generalized (back-compat:
+   still slot-driven for Code/CAD/labs; onNew/onResume for projects) so one rail component serves
+   all. In `SessionsContext`, `projectChats` became the per-project ACTIVE chat and a new
+   `projectChatIds` holds each project's history list; the PR-B reconnect/generation infra now
+   guards the active chat. `newProjectChat`/`resumeProjectChat` drive the rail.
+   **Chat naming (also 2026-07-21):** new chats are created WITHOUT a forced title so OpenCode's
+   built-in `ensureTitle` (session/prompt.ts, gated on `isDefaultTitle`) names them from the
+   conversation — the forced "June chat"/"June session" titles were suppressing it. `displayChatTitle`
+   shows "New chat" until the real title lands. Same-provider small model, so no extra cloud egress.
+   Client-generated titling is the fallback only if a live check shows the engine's "title" agent is
+   absent.
+   **Session-liveness model SIMPLIFIED 2026-07-21 (maintainer, after 6 BugBot rounds / ~12 findings):**
+   the first multi-chat cut PROACTIVELY re-validated a project chat's liveness (`listSessions` +
+   generation counter + revalidate-on-reconnect) on every open/resume. Confirmed OpenCode persists
+   sessions in its SQLite DB (`SessionTable`), so a project chat survives an engine restart and the
+   in-memory binding stays valid — the proactive revalidation was guarding a RARE case (true session
+   loss) at the cost of a large concurrency surface that produced finding after finding. Replaced with
+   a lazy model: bind the persisted session directly, hydrate the rail immediately, and let a
+   genuinely-dead session surface its error on send (user starts a New chat). Net −121 lines; the
+   generation/revalidation machinery (`connGenRef`, `projectChatGen`, `shouldReuseStoredChat`,
+   `pruneProjectChat`, `clearActiveProjectChat`, the reconnect gen-bump) was deleted. Kept: the
+   delete-race guard (`deletedProjectsRef`), the in-flight coalescing, gcSessions preserving active
+   project chats, and the honesty-guardrail widening.
+   **Known limitation (documented, not a bug):** if the engine genuinely loses a session (rare), its
+   rail entry lingers until the project is reopened, and resuming it shows an empty transcript whose
+   send errors. Acceptable given sessions persist; a lazy prune-on-send-failure is a possible later
+   polish.
 3. **On project delete:** best-effort delete the underlying OpenCode sessions on the engine (inject
    the client into the delete path), consistent with the store's "must not linger on disk" stance.
 4. **Cloud-egress consent:** a one-time per-`(project, provider)` opt-in + a persistent "sending
