@@ -1298,26 +1298,19 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       saveProjectChatIds(projectId, next)
       setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
       const wasActive = projectChatsRef.current[projectId] === sessionId
-      if (wasActive) {
-        // Drop the active binding first so gcSessions reaps the deleted session, then resolve a
-        // replacement from what remains.
-        projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
-        setProjectChats((prev) => {
-          const n = { ...prev }
-          delete n[projectId]
-          return n
-        })
+      // Switch to a replacement BEFORE deleting the engine session and WITHOUT clearing the active
+      // binding first — resume/new's bindProjectChat reaps the old active in-memory as it switches.
+      // Awaiting here (not `void`) means the view goes straight from the old chat to the new one,
+      // never flashing the "couldn't open" state through an empty-active gap (Bugbot). The
+      // `!active` case covers deleting the very chat an in-flight openProjectChat was about to bind
+      // (that bind now no-ops), which would otherwise leave the project chatless.
+      if (wasActive || !projectChatsRef.current[projectId]) {
+        if (next[0]) await resumeProjectChat(projectId, next[0])
+        else await newProjectChat(projectId)
       }
       const client = clientRef.current
       if (client) await client.deleteSession(sessionId).catch(() => {})
       gcSessions()
-      // Resolve a replacement when the deleted chat was active OR when the project has no active
-      // binding yet — the latter covers deleting the very chat an in-flight openProjectChat was
-      // about to bind (that bind now no-ops, so without this the view would be left with no chat).
-      if (wasActive || !projectChatsRef.current[projectId]) {
-        if (next[0]) void resumeProjectChat(projectId, next[0])
-        else void newProjectChat(projectId)
-      }
     },
     [clientRef, gcSessions, resumeProjectChat, newProjectChat],
   )
