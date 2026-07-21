@@ -23,6 +23,7 @@ import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
 import { loadProjectChatIds, saveProjectChatIds, sessionIdsKey, sameChatScope, type ChatMoveScope } from "../lib/sessionScope"
+import { loadProjectInstructions, hasCloudConsent, shouldInjectInstructions } from "../lib/projectContent"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -361,6 +362,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     (sid: string): boolean => slotsRef.current.chat === sid || Object.values(projectChatsRef.current).includes(sid),
     [],
   )
+  // Which project (if any) owns this session as its ACTIVE chat — the reverse of projectChats. Lets
+  // send() attach that project's Instructions (5b PR-C). Only the active project chat can be sent to,
+  // so a reverse scan of the small projectChats map resolves it; General/Code/CAD ids return null.
+  const projectIdOfSession = useCallback((sid: string): string | null => {
+    for (const [pid, s] of Object.entries(projectChatsRef.current)) if (s === sid) return pid
+    return null
+  }, [])
   const agentsRef = useRef(agents) // stable read of the live agent list (for validAgent, without a deps cascade)
   useEffect(() => {
     sessionsRef.current = sessions
@@ -966,13 +974,23 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const promptText = imgPaths.length
         ? `${text ? text + "\n\n" : ""}[The user attached ${imgPaths.length} image${imgPaths.length > 1 ? "s" : ""} at: ${imgPaths.join(", ")}. If you can see the image(s) directly, use them; otherwise call the analyze_image tool with the path to describe each.]`
         : text
-      client.promptAsync(sessionId, promptText, agent, model, files).catch((err) => {
+      // 5b PR-C: a PROJECT chat injects that project's Instructions as system context, GATED so private
+      // knowledge never egresses to a CLOUD model without per-project consent. Computed HERE (not by the
+      // caller) so every send path — including the fallback-to-local retry — is covered consistently and
+      // reads the latest Instructions + consent fresh from storage. General/Code/CAD sends inject nothing.
+      let system: string | undefined
+      const pid = projectIdOfSession(sessionId)
+      if (pid) {
+        const instructions = loadProjectInstructions(pid)
+        if (shouldInjectInstructions({ instructions, isLocal: isLocalModel(model), consent: hasCloudConsent(pid) })) system = instructions
+      }
+      client.promptAsync(sessionId, promptText, agent, model, files, system).catch((err) => {
         setBusy(sessionId, false)
         setStatus(`send failed: ${err?.message ?? err}`)
         if (!isLocalModel(model)) setFallbackOffer({ text, kind: "chat", sessionId, slot: slotOf(sessionId) })
       })
     },
-    [activeModel, clientRef, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy],
+    [activeModel, clientRef, setStatus, setFallbackOffer, setRateLimitOffer, updateMessages, setBusy, projectIdOfSession],
   )
 
   const createImage = useCallback(

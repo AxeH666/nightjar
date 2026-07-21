@@ -118,6 +118,40 @@ export function copyProjectContent(fromId: string, toId: string): boolean {
   }
 }
 
+// ── 5b PR-C: gated Instructions injection ───────────────────────────────────────
+// Read a project's Instructions FRESH from storage for send-time injection — always the latest edit,
+// with no React state that could go stale between the Knowledge editor and the send path. "" if unset.
+export function loadProjectInstructions(projectId: string): string {
+  return loadStr(projectId, "instructions")
+}
+
+// Per-project consent to send this project's Instructions to a CLOUD model. Default FALSE: curated
+// private knowledge never egresses to a cloud provider until the user opts in per-project. Stored
+// under the project's own namespace, so it MUST be cleared by purgeProjectStorage on delete.
+const CONSENT_PART = "cloudConsent"
+export function hasCloudConsent(projectId: string): boolean {
+  return loadStr(projectId, CONSENT_PART) === "1"
+}
+export function allowCloudConsent(projectId: string): boolean {
+  return saveStr(projectId, CONSENT_PART, "1")
+}
+export function deleteProjectConsent(projectId: string): boolean {
+  try {
+    localStorage.removeItem(key(projectId, CONSENT_PART))
+    return true
+  } catch {
+    return false // consent flag may linger — the caller must surface that, not hide it
+  }
+}
+
+// The gated-injection POLICY (pure — unit-tested with assert-then-mutate): inject a project's
+// Instructions as system context only when there ARE instructions AND either the model is LOCAL (no
+// egress) or the user has granted this project cloud consent. Withholds private knowledge from a
+// cloud model by default; the send still happens, just without the project's Instructions.
+export function shouldInjectInstructions(args: { instructions: string; isLocal: boolean; consent: boolean }): boolean {
+  return args.instructions.trim().length > 0 && (args.isLocal || args.consent)
+}
+
 let fseq = 0
 function newFileId(): string {
   fseq += 1

@@ -6,7 +6,8 @@ import { ProjectChat } from "./ProjectChat"
 // A project's home (Lab.md §4.6): the breadcrumb, a per-project Chat (5b — isolated to this
 // project's own OpenCode session), and the three Knowledge areas — Instructions, Memory, and
 // Files (persisted per project). Chat is the primary surface; Knowledge holds the project's
-// durable context. Instructions do NOT yet reach the agent — that gated injection is PR-C.
+// durable context. Instructions now reach the agent as system context (PR-C), gated by per-project
+// cloud consent so they never egress to a cloud model without opt-in; Memory/Files do not yet.
 export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope; projectId: string; onBack: () => void }) {
   const store = useProjects(scope)
   // Read from `projects` state, NOT store.get(): `get` is memoized against the ref with an
@@ -48,7 +49,9 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
       {/* Chat stays MOUNTED across a tab switch (hidden, not unmounted) so switching to Knowledge
           and back doesn't tear down the session or lose scroll/streaming state. */}
       <div className={tab === "chat" ? "min-h-0 flex-1" : "hidden"}>
-        <ProjectChat projectId={projectId} />
+        {/* hasInstructions comes from this view's live content, so the chat's cloud-consent banner
+            reacts immediately when Instructions are added/cleared in the Knowledge tab (PR-C). */}
+        <ProjectChat projectId={projectId} hasInstructions={content.instructions.trim().length > 0} />
       </div>
 
       <div className={tab === "knowledge" ? "min-h-0 flex-1 overflow-y-auto p-6" : "hidden"}>
@@ -58,7 +61,7 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
             title="Instructions"
             optional
             save={content.saveState.instructions}
-            note="If set, prepended to this project's chats (wired in the next step). Leave empty and the project works exactly the same."
+            note="If set, sent as system context on this project's chats. Local models always; a cloud model only after you allow it for this project. Leave empty and the project works exactly the same."
           >
             <textarea
               value={content.instructions}
@@ -90,7 +93,7 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
           </Panel>
 
           <p className="text-center text-xs text-nightjar-text/30">
-            The Chat tab is isolated to this project. Instructions and Memory don't reach the agent yet — that's the next update.
+            The Chat tab is isolated to this project. Instructions now guide its chats (cloud models need your per-project OK); Memory and Files don't reach the agent yet.
           </p>
         </div>
       </div>

@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { saveStr, saveFiles, copyProjectContent, deleteProjectContent } from "./projectContent"
+import {
+  saveStr,
+  saveFiles,
+  copyProjectContent,
+  deleteProjectContent,
+  loadProjectInstructions,
+  hasCloudConsent,
+  allowCloudConsent,
+  deleteProjectConsent,
+  shouldInjectInstructions,
+} from "./projectContent"
 
 // These tests exist for ONE reason: the Projects UI shows a "Saved" indicator, and an
 // indicator wired to an assumed success is worse than no indicator — it would report "Saved"
@@ -119,5 +129,45 @@ describe("duplicate/delete report their real outcome", () => {
 
   it("deleteProjectContent reports FALSE when storage is absent — content may linger", () => {
     expect(deleteProjectContent("p_1")).toBe(false)
+  })
+})
+
+// 5b PR-C: the gated-injection policy + its per-project cloud consent. The POLICY is the safety
+// invariant — private Instructions must never reach a cloud model without consent — so it is
+// asserted directly (assert-then-mutate: flip any input and the verdict flips).
+describe("gated Instructions injection (5b PR-C)", () => {
+  it("shouldInjectInstructions: only when there ARE instructions AND (local OR consent)", () => {
+    // Local model → inject whenever there are instructions (no egress).
+    expect(shouldInjectInstructions({ instructions: "be terse", isLocal: true, consent: false })).toBe(true)
+    // Cloud model, WITH consent → inject (the user opted this project in).
+    expect(shouldInjectInstructions({ instructions: "be terse", isLocal: false, consent: true })).toBe(true)
+    // Cloud model, NO consent → WITHHELD (the safety invariant).
+    expect(shouldInjectInstructions({ instructions: "be terse", isLocal: false, consent: false })).toBe(false)
+    // No instructions → never inject, regardless of model/consent (nothing to send).
+    expect(shouldInjectInstructions({ instructions: "", isLocal: true, consent: true })).toBe(false)
+    expect(shouldInjectInstructions({ instructions: "   ", isLocal: true, consent: true })).toBe(false) // whitespace-only counts as empty
+  })
+
+  it("consent defaults to false and round-trips; loadProjectInstructions reads the stored value", () => {
+    const store = installStorage()
+    expect(hasCloudConsent("p_1")).toBe(false) // default: private knowledge stays put
+    saveStr("p_1", "instructions", "always cite sources")
+    expect(loadProjectInstructions("p_1")).toBe("always cite sources")
+    expect(allowCloudConsent("p_1")).toBe(true)
+    expect(hasCloudConsent("p_1")).toBe(true)
+    expect(store.get("nightjar.project.p_1.cloudConsent")).toBe("1")
+  })
+
+  it("deleteProjectConsent clears the flag (so a re-created id doesn't inherit stale consent)", () => {
+    const store = installStorage()
+    allowCloudConsent("p_1")
+    expect(deleteProjectConsent("p_1")).toBe(true)
+    expect(hasCloudConsent("p_1")).toBe(false)
+    expect(store.has("nightjar.project.p_1.cloudConsent")).toBe(false)
+  })
+
+  it("hasCloudConsent is false and loadProjectInstructions is '' when storage is absent", () => {
+    expect(hasCloudConsent("p_1")).toBe(false)
+    expect(loadProjectInstructions("p_1")).toBe("")
   })
 })

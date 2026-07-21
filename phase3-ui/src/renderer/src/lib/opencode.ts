@@ -137,6 +137,7 @@ export class OpenCodeClient {
     agent: string,
     model?: string,
     files?: FilePart[],
+    system?: string,
   ): Promise<void> {
     let modelRef: { providerID: string; modelID: string } | undefined
     if (model) {
@@ -147,10 +148,14 @@ export class OpenCodeClient {
     for (const f of files ?? []) {
       parts.push({ type: "file", mime: f.mime, url: f.url, ...(f.filename ? { filename: f.filename } : {}) })
     }
+    // `system` is OpenCode's per-prompt system-injection field (PromptInput.system) — appended AFTER
+    // the agent-mode prompt + any AGENTS.md/context, so it augments rather than replaces. It's stored
+    // on THIS user message only (not carried forward), so 5b PR-C passes it on every project-chat
+    // prompt. Omitted when empty so General/Code/CAD sends are byte-identical to before.
     const res = await fetch(this.url(`/session/${sessionID}/prompt_async`), {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ agent, ...(modelRef ? { model: modelRef } : {}), parts }),
+      body: JSON.stringify({ agent, ...(modelRef ? { model: modelRef } : {}), ...(system ? { system } : {}), parts }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), // rule 3: a half-open POST must not wedge the send (busy stuck)
     })
     if (!res.ok && res.status !== 204) {
