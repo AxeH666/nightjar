@@ -132,7 +132,7 @@ interface SessionsValue {
   messagesOf: (id: string) => UiMessage[]
   busyOf: (id: string) => boolean
   // actions (general — a screen passes the target session id)
-  send: (sessionId: string, text: string, opts?: { agent?: string; attachments?: Attachment[]; model?: string }) => void
+  send: (sessionId: string, text: string, opts?: { agent?: string; attachments?: Attachment[]; model?: string; system?: string }) => void
   createImage: (sessionId: string, prompt: string, opts?: { model?: string }) => void
   setSessionAgent: (sessionId: string, agent: string) => void
   // session-history list (Code tab)
@@ -933,7 +933,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
 
   // ---- actions ----
   const send = useCallback(
-    (sessionId: string, text: string, opts?: { agent?: string; attachments?: Attachment[]; model?: string }) => {
+    (sessionId: string, text: string, opts?: { agent?: string; attachments?: Attachment[]; model?: string; system?: string }) => {
       const client = clientRef.current
       const session = sessionsRef.current[sessionId]
       const refs = perSessionRefs.current.get(sessionId)
@@ -966,7 +966,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const promptText = imgPaths.length
         ? `${text ? text + "\n\n" : ""}[The user attached ${imgPaths.length} image${imgPaths.length > 1 ? "s" : ""} at: ${imgPaths.join(", ")}. If you can see the image(s) directly, use them; otherwise call the analyze_image tool with the path to describe each.]`
         : text
-      client.promptAsync(sessionId, promptText, agent, model, files).catch((err) => {
+      // 5b PR-C: `opts.system` carries a PROJECT chat's Instructions as system context. The CALLER
+      // (ProjectChat) computes it from the SAME live state that drives the consent banner + gate, so
+      // what the user SEES is exactly what's sent — clearing the Instructions withholds them even if
+      // the storage write hasn't landed (no live-vs-storage split-brain — Bugbot). General/Code/CAD
+      // pass nothing. Recovery retries also pass nothing, which is the safe direction (never egress).
+      client.promptAsync(sessionId, promptText, agent, model, files, opts?.system).catch((err) => {
         setBusy(sessionId, false)
         setStatus(`send failed: ${err?.message ?? err}`)
         if (!isLocalModel(model)) setFallbackOffer({ text, kind: "chat", sessionId, slot: slotOf(sessionId) })

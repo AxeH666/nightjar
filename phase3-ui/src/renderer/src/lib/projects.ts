@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
-import { deleteProjectContent, copyProjectContent } from "./projectContent"
+import { deleteProjectContent, copyProjectContent, deleteProjectConsent } from "./projectContent"
 import { deleteProjectSessionIds, deleteProjectPins, deleteProjectUnread } from "./sessionScope"
 
 // A project space. The science labs (mechanical/bio/chem) each keep their own list; "general" is
@@ -74,6 +74,7 @@ export function purgeProjectStorage(projectId: string): void {
   deleteProjectSessionIds(projectId) // the project chat's session-id set (PR-B)
   deleteProjectPins(projectId) // the project's pinned-chats set (chat-menu PR — was leaking)
   deleteProjectUnread(projectId) // the project's unread-chats set (chat-menu Mark-as-unread PR)
+  deleteProjectConsent(projectId) // the project's cloud-egress consent flag (5b PR-C)
 }
 
 // A collision-resistant id (renderer Date.now() is fine — only workflow scripts forbid it).
