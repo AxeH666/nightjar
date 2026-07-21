@@ -1202,6 +1202,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const resumeProjectChat = useCallback(
     async (projectId: string, sessionId: string): Promise<void> => {
       if (!projectId || !sessionId) return
+      // Re-clicking the ALREADY-ACTIVE chat: no-op WHILE it is streaming, so a re-fetched history
+      // snapshot can't replace the transcript and drop the in-flight assistant reply arriving over
+      // SSE (Bugbot). When idle, fall through and re-fetch — the recovery path for a chat that first
+      // loaded empty. (busy lags a send by a flush, so also treat a synchronously-set lastSent as
+      // busy, mirroring gcSessions.)
+      const active = projectChatsRef.current[projectId] === sessionId
+      const streaming = sessionsRef.current[sessionId]?.busy || !!perSessionRefs.current.get(sessionId)?.lastSent
+      if (active && streaming) return
       const client = clientRef.current
       if (!client) return
       let messages: UiMessage[] = []
