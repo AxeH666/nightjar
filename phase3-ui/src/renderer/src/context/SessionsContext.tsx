@@ -312,6 +312,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     projectSelectSeq.current[projectId] = n
     return n
   }, [])
+  // The General chat slot's analogue of projectSelectSeq: a monotonic token every chat-slot
+  // resumeSession captures and re-checks after its getMessages await. A newer chat selection — or a
+  // Move OUT of General — bumps it, so an in-flight resume that resolves afterward DEFERS instead of
+  // re-marking (markSlotSession) a chat the user has since moved away or clicked past (Bugbot). The
+  // project rails already have this via projectSelectSeq; this closes the same in-flight-revive race
+  // for General. Only the chat slot uses it — code/cad resumes are unaffected.
+  const chatResumeSeq = useRef(0)
   // In-flight openProjectChat promises, keyed by projectId, so concurrent opens for the same
   // project share ONE resolve instead of racing to create two sessions (Bugbot).
   //
@@ -1052,12 +1059,17 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const client = clientRef.current
       if (!client) return
       if (slotsRef.current[slot] === sessionId) return // already on it
+      // Capture the chat-slot selection token (0 for code/cad — they don't use it). If a newer chat
+      // selection or a Move-out-of-General bumps it while getMessages runs, this resume is stale and
+      // must not commit — otherwise it would re-bind + re-mark a chat the user has moved/clicked past.
+      const seq = slot === "chat" ? ++chatResumeSeq.current : 0
       let messages: UiMessage[] = []
       try {
         messages = messagesFromHistory(await client.getMessages(sessionId))
       } catch {
         /* engine has no history → empty (still switch to the live session) */
       }
+      if (slot === "chat" && chatResumeSeq.current !== seq) return // superseded mid-fetch (Bugbot)
       perSessionRefs.current.set(sessionId, freshRefs())
       // Prefer the title the caller already has from the session list (so the
       // Code toolbar shows the real name, not the generic DEFAULT_TITLE); fall
@@ -1353,6 +1365,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       // ── 1. Detach from the SOURCE rail (drop from its id-list), replacing it if it was active ──
       if (from.kind === "project") {
         const pid = from.projectId
+        // Invalidate any in-flight open/resume/new for the source project BEFORE we drop the chat: a
+        // resolve that lands after this would call bindProjectChat/markProjectChat and REVIVE the
+        // moved chat on the source rail. They all re-check projectSelectSeq at commit, so bumping it
+        // makes them defer (the move is the newer selection). The active-case replacement below bumps
+        // it again for its own resume, so it isn't self-invalidated (Bugbot).
+        nextSelectSeq(pid)
         const cur = projectChatIdsRef.current[pid] ?? loadProjectChatIds(pid)
         const next = cur.filter((x) => x !== sessionId)
         projectChatIdsRef.current = { ...projectChatIdsRef.current, [pid]: next }
@@ -1375,6 +1393,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           }
         }
       } else {
+        // Invalidate any in-flight chat-slot resume BEFORE detaching, so a resumeSession that resolves
+        // after this can't re-mark the moved chat back into General (the General analogue of the
+        // projectSelectSeq bump above — Bugbot).
+        chatResumeSeq.current += 1
         // The General chat slot is the adopted primary, so a MOVED-active chat must end up on a
         // DIFFERENT session or the slots.chat effect just re-marks it back into the General rail.
         // Secure a fresh replacement chat (matches ＋ New chat) BEFORE detaching: if createSession
@@ -1394,7 +1416,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       else markSlotSession("chat", sessionId)
       gcSessions() // a moved-away active chat is no longer bound → forget its in-memory session (it persists in the engine)
     },
-    [resumeProjectChat, newProjectChat, newSession, markProjectChat, markSlotSession, unmarkSlotSession, gcSessions],
+    [resumeProjectChat, newProjectChat, newSession, markProjectChat, markSlotSession, unmarkSlotSession, gcSessions, nextSelectSeq],
   )
 
   const deleteSession = useCallback(
