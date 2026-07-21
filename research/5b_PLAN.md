@@ -71,8 +71,9 @@ claim must still be corrected.
    added to BOTH the project view and the General chat. `SessionList` was generalized (back-compat:
    still slot-driven for Code/CAD/labs; onNew/onResume for projects) so one rail component serves
    all. In `SessionsContext`, `projectChats` became the per-project ACTIVE chat and a new
-   `projectChatIds` holds each project's history list; the PR-B reconnect/generation infra now
-   guards the active chat. `newProjectChat`/`resumeProjectChat` drive the rail.
+   `projectChatIds` holds each project's history list. (The initial cut added a reconnect/generation
+   guard around the active chat; that was REMOVED by the 2026-07-21 simplification described below —
+   see "Session-liveness model SIMPLIFIED".) `newProjectChat`/`resumeProjectChat` drive the rail.
    **Chat naming (also 2026-07-21):** new chats are created WITHOUT a forced title so OpenCode's
    built-in `ensureTitle` (session/prompt.ts, gated on `isDefaultTitle`) names them from the
    conversation — the forced "June chat"/"June session" titles were suppressing it. `displayChatTitle`

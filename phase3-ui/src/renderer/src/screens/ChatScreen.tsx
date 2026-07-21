@@ -14,6 +14,7 @@ import { capabilities } from "../lib/capabilities"
 import { isLocalModel } from "../lib/byok"
 import { useModel } from "../context/ModelContext"
 import { imageUnavailableReason, type CapabilityId, type CapabilitySupportMeta } from "../lib/globalMode"
+import { pinnedChatsKey } from "../lib/sessionScope"
 
 // The composer's armed web tool → the agent that serves it. Research and Web search are
 // two DISTINCT tools: `research` runs the heavy multi-round deep_research pipeline, while
@@ -43,7 +44,7 @@ export function ChatScreen() {
 
   return (
     <div className="flex h-full min-h-0">
-      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" pinKey="nightjar.pinned.chat" collapsible />
+      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" pinKey={pinnedChatsKey()} collapsible />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}

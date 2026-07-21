@@ -6,6 +6,7 @@ import { useArtifact } from "../../context/ArtifactContext"
 import { ChatSurface } from "../ChatSurface"
 import { ArtifactPanel } from "../ArtifactPanel"
 import { SessionList } from "../SessionList"
+import { pinnedChatsKey } from "../../lib/sessionScope"
 
 // 5b — a project's chats: a collapsible history rail (multiple named chats) + the active
 // conversation, each bound to its own OpenCode session so it's isolated per project. Mirrors
@@ -27,11 +28,12 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
 
-  // Resolve/revalidate the project's active chat on open, project switch, and reconnect (sessionID
-  // changes / goes empty→set). `pending` is true for the whole resolve; the transcript is never
-  // blanked (id comes from context state, which survives a reconnect), but while pending/deleting
-  // the composer is blocked so a message can't be SENT to a not-yet-resolved session. blockedReason
-  // disables send but not Stop, so a mid-turn reconnect stays interruptible.
+  // Resolve the project's active chat on open, project switch, and reconnect (sessionID changes /
+  // goes empty→set). A still-bound chat is returned as-is — there is NO liveness re-check (the
+  // lazy model; sessions persist in the engine DB). `pending` is true for the whole resolve; the
+  // transcript is never blanked (id comes from context state, which survives a reconnect), but
+  // while pending/deleting the composer is blocked so a message can't be SENT to a not-yet-resolved
+  // session. blockedReason disables send but not Stop, so a mid-turn reconnect stays interruptible.
   useEffect(() => {
     let alive = true
     setPending(true)
@@ -73,7 +75,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
           setDeleting(true)
           return deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
         }}
-        pinKey={`nightjar.pinned.chat.${projectId}`}
+        pinKey={pinnedChatsKey(projectId)}
         label="Chats"
         newTitle="New chat"
         collapsible

@@ -22,7 +22,7 @@ import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
-import { loadProjectChatIds, saveProjectChatIds } from "../lib/sessionScope"
+import { loadProjectChatIds, saveProjectChatIds, sessionIdsKey } from "../lib/sessionScope"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -79,10 +79,9 @@ const DEFAULT_TITLE: Record<SlotId, string> = { chat: "June chat", code: "June c
 // blocked, so every access is guarded and degrades to in-memory-only for the current run.
 const HISTORY_SLOTS: SlotId[] = ["code", "cad", "chat"]
 const isHistorySlot = (slot: SlotId): boolean => HISTORY_SLOTS.includes(slot)
-// The code slot keeps its ORIGINAL key so existing users' history survives the generalization.
-function sessionIdsKey(slot: SlotId): string {
-  return slot === "code" ? "nightjar.codeSessionIds" : `nightjar.sessionIds.${slot}`
-}
+// sessionIdsKey is imported from lib/sessionScope (single source of truth for the General keys — a
+// SlotId is a BaseSlot, so it resolves to the same "nightjar.codeSessionIds"/"nightjar.sessionIds.*"
+// strings this file used to build locally; the zero-migration contract is pinned by its test).
 function loadSessionIds(slot: SlotId): Set<string> {
   try {
     const raw = localStorage.getItem(sessionIdsKey(slot))
@@ -1077,11 +1076,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (!client) return
       let id: string
       try {
-        // Chat sessions are created WITHOUT a forced title so the engine auto-titles them from the
-        // conversation (OpenCode's ensureTitle only fires while the title is still its own default;
-        // passing "June chat" suppressed it — that's why chats were all named "June chat"). code/cad
-        // keep their stable slot title.
-        id = await client.createSession(slot === "chat" ? undefined : DEFAULT_TITLE[slot])
+        // Created WITHOUT a forced title so the engine auto-titles from the conversation (OpenCode's
+        // ensureTitle only fires while the title is still its own default; a forced title suppresses
+        // it). Applies to code/cad too now, so their rails show distinct names instead of every
+        // session reading the same "June coding"/"June CAD" (consistency sweep).
+        id = await client.createSession()
       } catch (err: any) {
         // Guard the create like resume/delete already do (P3-7): a network/timeout failure here
         // must surface, not silently no-op the "new session" button (leaving the slot on its old id).
@@ -1147,6 +1146,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const client = clientRef.current
       if (!client) return ""
       const run = (async (): Promise<string> => {
+        // Capture the selection counter (openProjectChat only OBSERVES it — new/resume bump it): if a
+        // concurrent ＋New/resume runs while we resolve, this changes and we defer, so the auto-open
+        // doesn't leave an extra chat alongside the user's explicit one (consistency sweep — mirrors
+        // the new/resume guard).
+        const seq = projectSelectSeq.current[projectId] ?? 0
         const newest = history[0] || null
         let id = ""
         let messages: UiMessage[] = []
@@ -1165,11 +1169,13 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             return ""
           }
         }
-        // Deleted mid-resolve, or a concurrent ＋New/resume set a different active while we resolved
-        // → defer; reap a session we CREATED (not a resumed one) that nobody will use.
-        if (deletedProjectsRef.current.has(projectId)) {
+        // Deleted mid-resolve, a concurrent selection bumped the counter, or a different active was
+        // set while we resolved → defer; reap a session we CREATED (not a resumed one) that nobody
+        // will use.
+        const supersededBySelection = (projectSelectSeq.current[projectId] ?? 0) !== seq
+        if (deletedProjectsRef.current.has(projectId) || supersededBySelection) {
           if (id && !newest) client.deleteSession(id).catch(() => {})
-          return ""
+          return projectChatsRef.current[projectId] || ""
         }
         const active = projectChatsRef.current[projectId]
         if (active) {
@@ -1337,8 +1343,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const boundSlots = (Object.keys(slotsRef.current) as SlotId[]).filter((s) => slotsRef.current[s] === sessionId)
       for (const slot of boundSlots) {
         try {
-          // Chat auto-titles (no forced title, matching newSession); code/cad keep their slot title.
-          const fresh = await client.createSession(slot === "chat" ? undefined : DEFAULT_TITLE[slot])
+          // No forced title → the engine auto-titles the replacement, matching newSession.
+          const fresh = await client.createSession()
           rebindSlot(slot, fresh, false) // fresh → don't carry the deleted transcript
           // Register the replacement in the slot's history, or it vanishes from the rail after the
           // user switches away even though the engine session exists (Bugbot).

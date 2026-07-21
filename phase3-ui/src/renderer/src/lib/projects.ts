@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { LabId } from "../components/lab/labs"
 import { deleteProjectContent, copyProjectContent } from "./projectContent"
-import { deleteProjectSessionIds } from "./sessionScope"
+import { deleteProjectSessionIds, deleteProjectPins } from "./sessionScope"
 
 // A project space. The science labs (mechanical/bio/chem) each keep their own list; "general" is
 // the top-level, non-lab Projects space surfaced in the main nav — a global work container, like
@@ -71,7 +71,8 @@ export function persistDuplicate(srcId: string, copyId: string, writeList: () =>
 // per-project key (e.g. the cloud-consent part in PR-C) MUST be added here.
 export function purgeProjectStorage(projectId: string): void {
   deleteProjectContent(projectId) // Memory / Instructions / Files
-  deleteProjectSessionIds(projectId) // the project chat's session-id set (populated from PR-B)
+  deleteProjectSessionIds(projectId) // the project chat's session-id set (PR-B)
+  deleteProjectPins(projectId) // the project's pinned-chats set (chat-menu PR — was leaking)
 }
 
 // A collision-resistant id (renderer Date.now() is fine — only workflow scripts forbid it).

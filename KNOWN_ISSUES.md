@@ -64,9 +64,10 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 ## NJ-41 — `useProjects` is per-component state, not a shared store — the root cause behind the PR-#125 whack-a-mole — OPEN (refactor deferred to its own PR) 2026-07-20
 
 - **What:** `useProjects(scope)` holds the projects list in `useState`, loaded from localStorage on
-  mount. Every call site (`ProjectsHome`, `ProjectView`, `ProjectsScreen`) gets its OWN copy. They
-  agree only because localStorage is the shared source of truth — so the instant a write fails, the
-  instances diverge, and a project that exists in one hook's memory is invisible to another.
+  mount. Every call site (`ProjectsHome`, `ProjectView` — plus the lab hosts like `MechanicalLab`;
+  `ProjectsScreen` itself only delegates) gets its OWN copy. They agree only because localStorage is
+  the shared source of truth — so the instant a write fails, the instances diverge, and a project
+  that exists in one hook's memory is invisible to another.
 - **Why it matters:** this is the common root of the SIX storage bugs found reviewing PR #125 across
   six BugBot rounds. Finding #1 (health reset on remount) and finding #6 (a failed `create` that still
   navigated into a project `ProjectView` can't see) are direct consequences; the rest are the same

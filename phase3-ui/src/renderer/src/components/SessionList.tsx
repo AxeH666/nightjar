@@ -11,23 +11,7 @@ import { useSessions } from "../context/SessionsContext"
 import { useConnection } from "../context/ConnectionContext"
 import type { SlotId } from "../context/SessionsContext"
 import type { SessionInfo } from "../lib/opencode"
-import { displayChatTitle } from "../lib/sessionScope"
-
-function loadPinned(key: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(key)
-    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
-  } catch {
-    return new Set()
-  }
-}
-function savePinned(key: string, ids: Set<string>): void {
-  try {
-    localStorage.setItem(key, JSON.stringify([...ids]))
-  } catch {
-    /* storage unavailable → pins are in-memory only this run */
-  }
-}
+import { displayChatTitle, loadPinned, savePinned, NEW_CHAT_LABEL } from "../lib/sessionScope"
 
 export function SessionList({
   slot,
@@ -94,9 +78,20 @@ export function SessionList({
       // would re-list the just-deleted chat until that finished (Bugbot).
       if (onDelete) await onDelete(id)
       else await deleteSession(id)
+      // Prune the deleted id from the pinned set — togglePin is otherwise the ONLY path that removes
+      // from it, so a deleted pinned chat's id would linger under pinKey forever (consistency sweep).
+      if (pinKey) {
+        setPinned((prev) => {
+          if (!prev.has(id)) return prev
+          const next = new Set(prev)
+          next.delete(id)
+          savePinned(pinKey, next)
+          return next
+        })
+      }
       setBump((n) => n + 1)
     },
-    [onDelete, deleteSession, connected],
+    [onDelete, deleteSession, connected, pinKey],
   )
   const doRename = useCallback(
     async (id: string, title: string) => {
@@ -213,7 +208,9 @@ export function SessionList({
           />
         ))}
         {visible.length === 0 && (
-          <div className="px-3 py-2 text-xs text-nightjar-text/30">{loading ? "loading…" : "no chats yet"}</div>
+          <div className="px-3 py-2 text-xs text-nightjar-text/30">
+            {loading ? "loading…" : `no ${label.toLowerCase()} yet`}
+          </div>
         )}
       </div>
     </div>
@@ -249,6 +246,7 @@ function SessionRow({
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(title)
   const cancelRef = useRef(false)
+  const committedRef = useRef(false)
   const menuRef = useRef<HTMLDivElement>(null)
   // Focus the menu ONCE when it opens, so the R/P/D shortcuts land — not on every render (which a
   // recreated inline ref callback would do, stealing focus repeatedly).
@@ -262,11 +260,16 @@ function SessionRow({
       setRenaming(false)
       return
     }
+    // Enter fires commit AND then the input's unmount-blur fires it again; the committedRef makes
+    // the trailing call a no-op so onRename isn't invoked twice (consistency sweep).
+    if (committedRef.current) return
+    committedRef.current = true
     onRename(draft)
     setRenaming(false)
   }
   const startRename = () => {
-    setDraft(title === "New chat" ? "" : title)
+    committedRef.current = false
+    setDraft(title === NEW_CHAT_LABEL ? "" : title)
     setRenaming(true)
     setMenu(false)
   }
