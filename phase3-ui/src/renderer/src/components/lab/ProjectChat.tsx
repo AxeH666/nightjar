@@ -16,7 +16,7 @@ import { SessionList } from "../SessionList"
 const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "assistant" } as const
 
 export function ProjectChat({ projectId }: { projectId: string }) {
-  const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, projectChats, projectChatIds } =
+  const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, projectChats, projectChatIds } =
     useSessions()
   const { abortSession } = usePermission()
   const { connected, sessionID } = useConnection()
@@ -61,6 +61,8 @@ export function ProjectChat({ projectId }: { projectId: string }) {
         activeId={id}
         onNew={() => void newProjectChat(projectId)}
         onResume={(sid) => void resumeProjectChat(projectId, sid)}
+        onDelete={(sid) => void deleteProjectChatOne(projectId, sid)}
+        pinKey={`nightjar.pinned.chat.${projectId}`}
         label="Chats"
         newTitle="New chat"
         collapsible

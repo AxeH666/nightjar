@@ -43,7 +43,7 @@ export function ChatScreen() {
 
   return (
     <div className="flex h-full min-h-0">
-      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" collapsible />
+      <SessionList slot="chat" agent="assistant" sessionIds={sessionIdsBySlot.chat} activeId={id} label="Chats" newTitle="New chat" pinKey="nightjar.pinned.chat" collapsible />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}

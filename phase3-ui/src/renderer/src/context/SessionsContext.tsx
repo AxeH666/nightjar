@@ -153,6 +153,7 @@ interface SessionsValue {
   newProjectChat: (projectId: string) => Promise<string>
   resumeProjectChat: (projectId: string, sessionId: string) => Promise<void>
   deleteProjectChat: (projectId: string) => Promise<void>
+  deleteProjectChatOne: (projectId: string, sessionId: string) => Promise<void>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
@@ -1277,6 +1278,40 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [clientRef, gcSessions],
   )
 
+  // Chat menu — delete a SINGLE chat from a project's rail (vs deleteProjectChat, which drops the
+  // whole project). Removes it from the history list + engine, and if it was the active chat,
+  // switches to the newest remaining one (or starts a fresh chat if none are left) so the view is
+  // never left on a dead id.
+  const deleteProjectChatOne = useCallback(
+    async (projectId: string, sessionId: string) => {
+      if (!projectId || !sessionId) return
+      const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+      const next = cur.filter((x) => x !== sessionId)
+      projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
+      saveProjectChatIds(projectId, next)
+      setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
+      const wasActive = projectChatsRef.current[projectId] === sessionId
+      if (wasActive) {
+        // Drop the active binding first so gcSessions reaps the deleted session, then resolve a
+        // replacement from what remains.
+        projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
+        setProjectChats((prev) => {
+          const n = { ...prev }
+          delete n[projectId]
+          return n
+        })
+      }
+      const client = clientRef.current
+      if (client) await client.deleteSession(sessionId).catch(() => {})
+      gcSessions()
+      if (wasActive) {
+        if (next[0]) void resumeProjectChat(projectId, next[0])
+        else void newProjectChat(projectId)
+      }
+    },
+    [clientRef, gcSessions, resumeProjectChat, newProjectChat],
+  )
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       const client = clientRef.current
@@ -1328,6 +1363,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     newProjectChat,
     resumeProjectChat,
     deleteProjectChat,
+    deleteProjectChatOne,
     hasSession,
     setBusy,
     sessionIdsBySlot,
