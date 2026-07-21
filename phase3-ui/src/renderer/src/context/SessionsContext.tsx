@@ -153,6 +153,7 @@ interface SessionsValue {
   newProjectChat: (projectId: string) => Promise<string>
   resumeProjectChat: (projectId: string, sessionId: string) => Promise<void>
   deleteProjectChat: (projectId: string) => Promise<void>
+  deleteProjectChatOne: (projectId: string, sessionId: string) => Promise<void>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
@@ -293,6 +294,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // in-flight when the project is deleted can't resurrect its state or re-persist its storage keys
   // after the purge (Bugbot). Ids are unique + never reused, so the set never blocks a new project.
   const deletedProjectsRef = useRef<Set<string>>(new Set())
+  // Individual chat session ids deleted this session (deleteProjectChatOne). Added SYNCHRONOUSLY at
+  // delete time; bind/mark check it, so an openProjectChat still resolving a chat the user just
+  // deleted can't bind or re-add the now-dead id (Bugbot). Ids are unique + never reused.
+  const deletedChatsRef = useRef<Set<string>>(new Set())
   // Per-project "latest selection" counter. new/resume capture it at click time and re-check before
   // committing their async result, so when the user clicks several rail chats (or ＋New) faster than
   // getMessages/createSession resolves, the LAST click wins instead of the last-completing request
@@ -322,7 +327,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   }, [projectChatIds])
   // Record a chat id in a project's history (newest first, deduped) + persist. Called on new/resume.
   const markProjectChat = useCallback((projectId: string, id: string) => {
-    if (!projectId || !id || deletedProjectsRef.current.has(projectId)) return // never resurrect a deleted project
+    if (!projectId || !id || deletedProjectsRef.current.has(projectId) || deletedChatsRef.current.has(id)) return // never resurrect a deleted project/chat
     const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
     const next = [id, ...cur.filter((x) => x !== id)]
     projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
@@ -1096,7 +1101,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // chat via gcSessions (it's no longer referenced) unless another slot/project still holds it.
   const bindProjectChat = useCallback(
     (projectId: string, id: string, messages: UiMessage[]) => {
-      if (deletedProjectsRef.current.has(projectId)) return // project was deleted mid-resolve → don't rebind
+      if (deletedProjectsRef.current.has(projectId) || deletedChatsRef.current.has(id)) return // deleted mid-resolve → don't bind
       markProjectChat(projectId, id)
       const prevActive = projectChatsRef.current[projectId]
       if (prevActive === id) {
@@ -1277,6 +1282,51 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [clientRef, gcSessions],
   )
 
+  // Chat menu — delete a SINGLE chat from a project's rail (vs deleteProjectChat, which drops the
+  // whole project). Removes it from the history list + engine, and if it was the active chat,
+  // switches to the newest remaining one (or starts a fresh chat if none are left) so the view is
+  // never left on a dead id.
+  const deleteProjectChatOne = useCallback(
+    async (projectId: string, sessionId: string) => {
+      if (!projectId || !sessionId) return
+      // Mark deleted SYNCHRONOUSLY so an openProjectChat still resolving this id can't bind/re-add
+      // it (its bind/mark now no-op — Bugbot).
+      deletedChatsRef.current.add(sessionId)
+      const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+      const next = cur.filter((x) => x !== sessionId)
+      projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
+      saveProjectChatIds(projectId, next)
+      setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
+      const wasActive = projectChatsRef.current[projectId] === sessionId
+      // Switch to a replacement BEFORE deleting the engine session and WITHOUT clearing the active
+      // binding first — resume/new's bindProjectChat reaps the old active in-memory as it switches.
+      // Awaiting here (not `void`) means the view goes straight from the old chat to the new one,
+      // never flashing the "couldn't open" state through an empty-active gap (Bugbot). The
+      // `!active` case covers deleting the very chat an in-flight openProjectChat was about to bind
+      // (that bind now no-ops), which would otherwise leave the project chatless.
+      if (wasActive || !projectChatsRef.current[projectId]) {
+        if (next[0]) await resumeProjectChat(projectId, next[0])
+        else await newProjectChat(projectId)
+      }
+      // The replacement can NO-OP (superseded by a concurrent selection, no client, or a failed
+      // create). If it didn't take and we're still on the deleted id, clear the binding so the view
+      // isn't left on a removed session — a concurrent selection that DID win leaves a different
+      // active, which we must not clobber, hence the exact-id check (Bugbot).
+      if (projectChatsRef.current[projectId] === sessionId) {
+        projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
+        setProjectChats((prev) => {
+          const n = { ...prev }
+          delete n[projectId]
+          return n
+        })
+      }
+      const client = clientRef.current
+      if (client) await client.deleteSession(sessionId).catch(() => {})
+      gcSessions()
+    },
+    [clientRef, gcSessions, resumeProjectChat, newProjectChat],
+  )
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       const client = clientRef.current
@@ -1287,8 +1337,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const boundSlots = (Object.keys(slotsRef.current) as SlotId[]).filter((s) => slotsRef.current[s] === sessionId)
       for (const slot of boundSlots) {
         try {
-          const fresh = await client.createSession(DEFAULT_TITLE[slot])
+          // Chat auto-titles (no forced title, matching newSession); code/cad keep their slot title.
+          const fresh = await client.createSession(slot === "chat" ? undefined : DEFAULT_TITLE[slot])
           rebindSlot(slot, fresh, false) // fresh → don't carry the deleted transcript
+          // Register the replacement in the slot's history, or it vanishes from the rail after the
+          // user switches away even though the engine session exists (Bugbot).
+          if (isHistorySlot(slot)) markSlotSession(slot, fresh)
         } catch {
           /* leave the slot; gcSessions below still forgets the dead id */
         }
@@ -1296,7 +1350,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       for (const s of HISTORY_SLOTS) unmarkSlotSession(s, sessionId) // drop from every slot's history registry
       gcSessions() // drop the deleted id from the client-side registry
     },
-    [clientRef, rebindSlot, gcSessions, unmarkSlotSession],
+    [clientRef, rebindSlot, gcSessions, unmarkSlotSession, markSlotSession],
   )
 
   const renameSession = useCallback(
@@ -1328,6 +1382,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     newProjectChat,
     resumeProjectChat,
     deleteProjectChat,
+    deleteProjectChatOne,
     hasSession,
     setBusy,
     sessionIdsBySlot,
