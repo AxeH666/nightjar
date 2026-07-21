@@ -22,6 +22,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const { connected, sessionID } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
   const [pending, setPending] = useState(true)
+  const [resolveFailed, setResolveFailed] = useState(false)
 
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
@@ -31,14 +32,22 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   // blanked (id comes from context state, which survives a reconnect), but while pending the
   // composer is blocked so a message can't be SENT to a not-yet-revalidated (possibly dead) session
   // (Bugbot). blockedReason disables send but not Stop, so a mid-turn reconnect stays interruptible.
+  // resolveFailed is set ONLY when openProjectChat genuinely returned "" (a createSession error) —
+  // NOT when it resolved a non-active id (e.g. its chat was deleted mid-open and a replacement is
+  // already resolving), so the hard error doesn't flash while recovery is in progress (Bugbot).
   useEffect(() => {
     let alive = true
     setPending(true)
-    // .finally, not .then — a rejection must still clear `pending`, or the composer stays blocked
-    // with no recovery (Bugbot). openProjectChat catches its own errors, but this is defensive.
-    openProjectChat(projectId).finally(() => {
-      if (alive) setPending(false)
-    })
+    openProjectChat(projectId)
+      .then((rid) => {
+        if (alive) setResolveFailed(rid === "")
+      })
+      .catch(() => {
+        if (alive) setResolveFailed(true)
+      })
+      .finally(() => {
+        if (alive) setPending(false)
+      })
     return () => {
       alive = false
     }
@@ -50,9 +59,11 @@ export function ProjectChat({ projectId }: { projectId: string }) {
       ? id
         ? "Reconnecting…"
         : "Opening this project's chat…"
-      : !id
-        ? "Couldn't open this project's chat — check the engine, then reopen the project."
-        : null
+      : id
+        ? null
+        : resolveFailed
+          ? "Couldn't open this project's chat — check the engine, then reopen the project."
+          : "Opening this project's chat…" // resolved a non-active id → a replacement is on the way
 
   return (
     <div className="flex h-full min-h-0">

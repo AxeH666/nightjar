@@ -8,6 +8,7 @@
 // and sorts pinned chats to the top.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSessions } from "../context/SessionsContext"
+import { useConnection } from "../context/ConnectionContext"
 import type { SlotId } from "../context/SessionsContext"
 import type { SessionInfo } from "../lib/opencode"
 import { displayChatTitle } from "../lib/sessionScope"
@@ -59,6 +60,7 @@ export function SessionList({
   collapsible?: boolean
 }) {
   const { listSessions, resumeSession, newSession, deleteSession, renameSession } = useSessions()
+  const { connected } = useConnection()
   const [items, setItems] = useState<SessionInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -82,6 +84,11 @@ export function SessionList({
   )
   const doDelete = useCallback(
     async (id: string) => {
+      // Deleting a chat needs the engine (to remove the session); without it, deleteSession no-ops
+      // and a project delete would drop the rail entry client-side while orphaning the engine
+      // session. So require a live connection — the composer is already blocked when disconnected,
+      // so the user has the context (Bugbot).
+      if (!connected) return
       // AWAIT the delete before refreshing: deleteSession removes the id from the persisted slot
       // history only AFTER its async engine-delete + active-slot rebind, so a non-awaited refresh
       // would re-list the just-deleted chat until that finished (Bugbot).
@@ -89,7 +96,7 @@ export function SessionList({
       else await deleteSession(id)
       setBump((n) => n + 1)
     },
-    [onDelete, deleteSession],
+    [onDelete, deleteSession, connected],
   )
   const doRename = useCallback(
     async (id: string, title: string) => {
