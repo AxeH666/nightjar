@@ -68,8 +68,10 @@ export function ProjectChat({ projectId }: { projectId: string }) {
         onNew={() => void newProjectChat(projectId)}
         onResume={(sid) => void resumeProjectChat(projectId, sid)}
         onDelete={(sid) => {
+          // RETURN the promise so SessionList awaits the full delete + replacement before refreshing
+          // the rail (Bugbot); `deleting` blocks the composer for that window.
           setDeleting(true)
-          void deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
+          return deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
         }}
         pinKey={`nightjar.pinned.chat.${projectId}`}
         label="Chats"
