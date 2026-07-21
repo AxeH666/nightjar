@@ -1375,12 +1375,18 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           }
         }
       } else {
-        const wasActive = slotsRef.current.chat === sessionId
+        // The General chat slot is the adopted primary, so a MOVED-active chat must end up on a
+        // DIFFERENT session or the slots.chat effect just re-marks it back into the General rail.
+        // Secure a fresh replacement chat (matches ＋ New chat) BEFORE detaching: if createSession
+        // fails (no client / engine error mid-move), newSession leaves slots.chat unchanged and
+        // surfaces its own error, so we ABORT here — nothing has been unmarked or attached yet — so
+        // the move can't leave General on a chat that's ALSO been filed into the target (Bugbot). A
+        // non-active General chat has no such coupling and re-tags directly below.
+        if (slotsRef.current.chat === sessionId) {
+          await newSession("chat", "assistant")
+          if (slotsRef.current.chat === sessionId) return // replacement didn't take → abort, leave as-is
+        }
         unmarkSlotSession("chat", sessionId) // drop from the General rail's id set
-        // The General chat slot is the adopted primary; if the moved chat was IT, replace it with a
-        // fresh chat (matches ＋ New chat). Required, not cosmetic: the slots.chat effect would else
-        // re-mark the moved id back into the General rail on the next render.
-        if (wasActive) await newSession("chat", "assistant")
       }
 
       // ── 2. Attach to the TARGET rail (history/list only — does NOT auto-open the moved chat) ──
