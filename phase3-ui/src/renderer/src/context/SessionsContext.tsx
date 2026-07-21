@@ -312,6 +312,17 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     saveProjectChatIds(projectId, next)
     setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
   }, [])
+  // Drop a chat id from a project's history + persist. Called when the engine confirms a rail id
+  // is gone (e.g. resuming after an engine restart that dropped the session), so a dead entry
+  // doesn't linger in the rail.
+  const pruneProjectChat = useCallback((projectId: string, id: string) => {
+    const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+    if (!cur.includes(id)) return
+    const next = cur.filter((x) => x !== id)
+    projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
+    saveProjectChatIds(projectId, next)
+    setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
+  }, [])
   // True if `sid` is any chat-scope session (the General chat slot OR an active project chat) — the
   // set the honesty guardrail must cover. Reads refs so it's stable and current at event time.
   const isChatScope = useCallback(
@@ -1158,6 +1169,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           if (id && id !== candidate) client.deleteSession(id).catch(() => {})
           return projectChatsRef.current[projectId] || ""
         }
+        // The user may have set a DIFFERENT active chat (＋ New / resume) while this open resolved
+        // — same generation, so the gen guard above doesn't catch it. Defer to their choice rather
+        // than overwrite it, and reap a session we created that nobody is using (Bugbot).
+        const active = projectChatsRef.current[projectId]
+        if (active && active !== bound && active !== id) {
+          if (id && id !== candidate) client.deleteSession(id).catch(() => {})
+          return active
+        }
         if (id === bound) {
           projectChatGen.current[projectId] = gen // same live session survived — just refresh the marker
           return id
@@ -1196,21 +1215,35 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   )
 
   // 5b — resume an existing chat from a project's rail: load its transcript and make it active.
+  // Validates the id is still on the engine first (same shouldReuseStoredChat rule openProjectChat
+  // uses): a persisted history id can be dead after an engine restart, and binding it would show an
+  // empty transcript on a dead id (a send would then fail). If the engine CONFIRMS it's gone, prune
+  // it from the rail and surface a note rather than switch to it; a transient list failure (null)
+  // still resumes optimistically. (Bugbot.)
   const resumeProjectChat = useCallback(
     async (projectId: string, sessionId: string): Promise<void> => {
       if (!projectId || !sessionId) return
       if (projectChatsRef.current[projectId] === sessionId) return // already active
       const client = clientRef.current
       if (!client) return
+      const ids = await client
+        .listSessions()
+        .then((ss) => ss.map((s) => s.id))
+        .catch(() => null)
+      if (!shouldReuseStoredChat(sessionId, ids)) {
+        pruneProjectChat(projectId, sessionId)
+        setStatus("that chat is no longer available on the engine")
+        return
+      }
       let messages: UiMessage[] = []
       try {
         messages = messagesFromHistory(await client.getMessages(sessionId))
       } catch {
-        /* engine has no history for it → empty, still switch to it */
+        /* alive but history read failed → empty, still switch to it */
       }
       bindProjectChat(projectId, sessionId, messages)
     },
-    [clientRef, bindProjectChat],
+    [clientRef, bindProjectChat, pruneProjectChat, setStatus],
   )
 
   // 5b — remove ALL of a project's chats when the project is deleted (decision #3: best-effort
