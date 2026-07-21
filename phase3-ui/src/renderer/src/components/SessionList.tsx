@@ -48,7 +48,9 @@ export function SessionList({
   // the picker and enabling "Remove from project"), `moveTargets` is the general-space project list.
   moveTargets?: Array<{ projectId: string; name: string }>
   currentScope?: ChatMoveScope
-  onMove?: (sessionId: string, to: ChatMoveScope) => void | Promise<void>
+  // Resolves whether the move actually happened, so we unpin the source only on a real move (an
+  // aborted move — same scope / deleted target / failed replacement — must not silently unpin).
+  onMove?: (sessionId: string, to: ChatMoveScope) => Promise<boolean>
   label?: string
   newTitle?: string
   chrome?: boolean
@@ -116,8 +118,10 @@ export function SessionList({
       // the source's replacement chat), so require a live connection like doDelete/doRename — the
       // composer is already blocked when disconnected, so the user has the context.
       if (!connected || !onMove || !currentScope) return
-      await onMove(id, to)
-      dropPinned(id) // moving unpins in THIS (source) rail — a pin is a per-rail position hint
+      const moved = await onMove(id, to)
+      // Unpin THIS (source) rail ONLY on a real move — a pin is a per-rail position hint; an aborted
+      // move leaves the chat here, so it must stay pinned (Bugbot).
+      if (moved) dropPinned(id)
       setBump((n) => n + 1)
     },
     [onMove, currentScope, connected, dropPinned],
