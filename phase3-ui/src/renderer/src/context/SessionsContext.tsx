@@ -1133,6 +1133,25 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [validAgent, markProjectChat, gcSessions],
   )
 
+  // 5b — fully tear down a project's ACTIVE chat binding: drop it from the active map + gen marker
+  // AND gcSessions, so the now-unbound session is reaped from perSessionRefs/sessions (aborted if
+  // busy) rather than lingering as a hidden session that still demuxes SSE / can surface permission
+  // prompts. One helper so every dead-active path tears down COMPLETELY, not partially (Bugbot).
+  const clearActiveProjectChat = useCallback(
+    (projectId: string) => {
+      if (!(projectId in projectChatsRef.current)) return
+      projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
+      delete projectChatGen.current[projectId]
+      setProjectChats((prev) => {
+        const next = { ...prev }
+        delete next[projectId]
+        return next
+      })
+      gcSessions()
+    },
+    [gcSessions],
+  )
+
   // 5b — resolve a project's ACTIVE chat when its view opens: return the current-generation active
   // binding if there is one; else revalidate/resume the newest chat in the project's history
   // against the engine (Bugbot generation + in-flight guards, so a reconnect never GCs or races);
@@ -1181,19 +1200,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
             // We only reach create because the candidate (= the active `bound`, when set) was
             // confirmed DEAD. So `bound` is not a safe fallback — returning it would leave the UI on
-            // a dead session's transcript. Clear a still-dead active binding so the view shows the
-            // failure state instead, and return "". (Bugbot.)
-            if (projectChatsRef.current[projectId] === candidate) {
-              projectChatsRef.current = Object.fromEntries(
-                Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId),
-              )
-              delete projectChatGen.current[projectId]
-              setProjectChats((prev) => {
-                const next = { ...prev }
-                delete next[projectId]
-                return next
-              })
-            }
+            // a dead session's transcript. Fully clear a still-dead active binding (incl. gc, so the
+            // dead session doesn't linger demuxing SSE) so the view shows the failure state.
+            if (projectChatsRef.current[projectId] === candidate) clearActiveProjectChat(projectId)
             return ""
           }
         }
@@ -1231,7 +1240,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (projectChatOpening.current.get(projectId)?.promise === run) projectChatOpening.current.delete(projectId)
       }
     },
-    [clientRef, setStatus, bindProjectChat, pruneProjectChat],
+    [clientRef, setStatus, bindProjectChat, pruneProjectChat, clearActiveProjectChat],
   )
 
   // 5b — start a NEW chat in a project (the rail's ＋). Fresh session, engine auto-titled, becomes
@@ -1274,6 +1283,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         .catch(() => null)
       if (!shouldReuseStoredChat(sessionId, ids)) {
         pruneProjectChat(projectId, sessionId)
+        // If the dead id was the ACTIVE chat, tear it down too — otherwise the UI keeps highlighting
+        // and sending against a session the engine no longer has (Bugbot).
+        if (projectChatsRef.current[projectId] === sessionId) clearActiveProjectChat(projectId)
         setStatus("that chat is no longer available on the engine")
         return
       }
@@ -1285,7 +1297,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       }
       bindProjectChat(projectId, sessionId, messages)
     },
-    [clientRef, bindProjectChat, pruneProjectChat, setStatus],
+    [clientRef, bindProjectChat, pruneProjectChat, clearActiveProjectChat, setStatus],
   )
 
   // 5b — remove ALL of a project's chats when the project is deleted (decision #3: best-effort
