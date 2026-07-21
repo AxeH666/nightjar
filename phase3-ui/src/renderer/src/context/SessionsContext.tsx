@@ -1337,8 +1337,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const boundSlots = (Object.keys(slotsRef.current) as SlotId[]).filter((s) => slotsRef.current[s] === sessionId)
       for (const slot of boundSlots) {
         try {
-          const fresh = await client.createSession(DEFAULT_TITLE[slot])
+          // Chat auto-titles (no forced title, matching newSession); code/cad keep their slot title.
+          const fresh = await client.createSession(slot === "chat" ? undefined : DEFAULT_TITLE[slot])
           rebindSlot(slot, fresh, false) // fresh → don't carry the deleted transcript
+          // Register the replacement in the slot's history, or it vanishes from the rail after the
+          // user switches away even though the engine session exists (Bugbot).
+          if (isHistorySlot(slot)) markSlotSession(slot, fresh)
         } catch {
           /* leave the slot; gcSessions below still forgets the dead id */
         }
@@ -1346,7 +1350,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       for (const s of HISTORY_SLOTS) unmarkSlotSession(s, sessionId) // drop from every slot's history registry
       gcSessions() // drop the deleted id from the client-side registry
     },
-    [clientRef, rebindSlot, gcSessions, unmarkSlotSession],
+    [clientRef, rebindSlot, gcSessions, unmarkSlotSession, markSlotSession],
   )
 
   const renameSession = useCallback(

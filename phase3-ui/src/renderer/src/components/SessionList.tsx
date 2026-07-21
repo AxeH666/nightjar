@@ -101,13 +101,15 @@ export function SessionList({
   const doRename = useCallback(
     async (id: string, title: string) => {
       const t = title.trim()
-      if (!t) return
+      // renameSession no-ops without an engine client, so a rename would look applied (the inline
+      // edit closes) while never persisting — require a live connection, matching doDelete (Bugbot).
+      if (!t || !connected) return
       // AWAIT before refreshing — else listSessions can still return the OLD title and the rename
       // appears to vanish until the 4s timer refresh (Bugbot).
       await renameSession(id, t)
       setBump((n) => n + 1)
     },
-    [renameSession],
+    [renameSession, connected],
   )
   const togglePin = useCallback(
     (id: string) => {

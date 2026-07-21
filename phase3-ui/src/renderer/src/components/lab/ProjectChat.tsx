@@ -21,49 +21,44 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const { abortSession } = usePermission()
   const { connected, sessionID } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
-  const [pending, setPending] = useState(true)
-  const [resolveFailed, setResolveFailed] = useState(false)
+  const [pending, setPending] = useState(true) // open/reconnect resolve in flight
+  const [deleting, setDeleting] = useState(false) // a chat delete + its replacement resolving
 
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
 
   // Resolve/revalidate the project's active chat on open, project switch, and reconnect (sessionID
   // changes / goes empty→set). `pending` is true for the whole resolve; the transcript is never
-  // blanked (id comes from context state, which survives a reconnect), but while pending the
-  // composer is blocked so a message can't be SENT to a not-yet-revalidated (possibly dead) session
-  // (Bugbot). blockedReason disables send but not Stop, so a mid-turn reconnect stays interruptible.
-  // resolveFailed is set ONLY when openProjectChat genuinely returned "" (a createSession error) —
-  // NOT when it resolved a non-active id (e.g. its chat was deleted mid-open and a replacement is
-  // already resolving), so the hard error doesn't flash while recovery is in progress (Bugbot).
+  // blanked (id comes from context state, which survives a reconnect), but while pending/deleting
+  // the composer is blocked so a message can't be SENT to a not-yet-resolved session. blockedReason
+  // disables send but not Stop, so a mid-turn reconnect stays interruptible.
   useEffect(() => {
     let alive = true
     setPending(true)
-    openProjectChat(projectId)
-      .then((rid) => {
-        if (alive) setResolveFailed(rid === "")
-      })
-      .catch(() => {
-        if (alive) setResolveFailed(true)
-      })
-      .finally(() => {
-        if (alive) setPending(false)
-      })
+    openProjectChat(projectId).finally(() => {
+      if (alive) setPending(false)
+    })
     return () => {
       alive = false
     }
   }, [projectId, sessionID, openProjectChat])
 
+  // `deleting` covers the delete + replacement-resolution window, so no hard error flashes while a
+  // deleted active chat is being replaced. When BOTH resolution paths are idle and there is still no
+  // active chat (a genuine open/create failure, or a failed delete-replacement), show a single
+  // ACTIONABLE message rather than trying to distinguish the two — the ＋ New chat button is right
+  // there in the rail (Bugbot).
   const blockedReason = !connected
     ? "Connecting to the engine…"
-    : pending
-      ? id
-        ? "Reconnecting…"
-        : "Opening this project's chat…"
-      : id
-        ? null
-        : resolveFailed
-          ? "Couldn't open this project's chat — check the engine, then reopen the project."
-          : "Opening this project's chat…" // resolved a non-active id → a replacement is on the way
+    : deleting
+      ? "Opening this project's chat…"
+      : pending
+        ? id
+          ? "Reconnecting…"
+          : "Opening this project's chat…"
+        : id
+          ? null
+          : "Couldn't open a chat here — try ＋ New chat, or check the engine."
 
   return (
     <div className="flex h-full min-h-0">
@@ -72,7 +67,10 @@ export function ProjectChat({ projectId }: { projectId: string }) {
         activeId={id}
         onNew={() => void newProjectChat(projectId)}
         onResume={(sid) => void resumeProjectChat(projectId, sid)}
-        onDelete={(sid) => void deleteProjectChatOne(projectId, sid)}
+        onDelete={(sid) => {
+          setDeleting(true)
+          void deleteProjectChatOne(projectId, sid).finally(() => setDeleting(false))
+        }}
         pinKey={`nightjar.pinned.chat.${projectId}`}
         label="Chats"
         newTitle="New chat"
