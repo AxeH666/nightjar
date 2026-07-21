@@ -92,9 +92,12 @@ export function SessionList({
     [onDelete, deleteSession],
   )
   const doRename = useCallback(
-    (id: string, title: string) => {
+    async (id: string, title: string) => {
       const t = title.trim()
-      if (t) renameSession(id, t)
+      if (!t) return
+      // AWAIT before refreshing — else listSessions can still return the OLD title and the rename
+      // appears to vanish until the 4s timer refresh (Bugbot).
+      await renameSession(id, t)
       setBump((n) => n + 1)
     },
     [renameSession],
@@ -195,7 +198,7 @@ export function SessionList({
             pinned={pinned.has(s.id)}
             canPin={!!pinKey}
             onOpen={() => doResume(s.id, s.title)}
-            onRename={(t) => doRename(s.id, t)}
+            onRename={(t) => void doRename(s.id, t)}
             onTogglePin={() => togglePin(s.id)}
             onDelete={() => void doDelete(s.id)}
           />
