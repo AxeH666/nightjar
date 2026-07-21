@@ -67,22 +67,22 @@ export function deleteProjectSessionIds(projectId: string): boolean {
   }
 }
 
-// A project has a SINGLE persistent chat (5b decision), so its "session-id set" holds exactly
-// one id. Stored the same shape as loadSessionIds/persistSessionIds (a JSON string[]) under the
-// same key, so deleteProjectSessionIds clears it — one key family, one delete path.
-export function loadProjectChatId(projectId: string): string | null {
+// A project has MANY chats (its history rail), stored NEWEST-FIRST as a JSON string[] under the
+// same key loadSessionIds/persistSessionIds use — so deleteProjectSessionIds still clears the
+// whole family in one delete path.
+export function loadProjectChatIds(projectId: string): string[] {
   try {
     const raw = localStorage.getItem(sessionIdsKey(chatScope(projectId)))
-    const arr = raw ? (JSON.parse(raw) as string[]) : []
-    return arr[0] ?? null
+    const arr = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []
   } catch {
-    return null
+    return []
   }
 }
 
-export function saveProjectChatId(projectId: string, sessionId: string): boolean {
+export function saveProjectChatIds(projectId: string, ids: string[]): boolean {
   try {
-    localStorage.setItem(sessionIdsKey(chatScope(projectId)), JSON.stringify([sessionId]))
+    localStorage.setItem(sessionIdsKey(chatScope(projectId)), JSON.stringify(ids))
     return true
   } catch {
     return false
@@ -97,6 +97,20 @@ export function saveProjectChatId(projectId: string, sessionId: string): boolean
 // is gone. A failed check (`null`) must NOT be treated as death — otherwise a transient blip
 // would create a new session and permanently repoint the project away from a still-live
 // conversation. So: reuse when there's no listing to contradict us; create only on proof of death.
+// The engine (OpenCode) gives a brand-new session a placeholder title — a prefix + ISO timestamp
+// — and replaces it with a real, conversation-derived title after the first message
+// (session/prompt.ts ensureTitle, gated on isDefaultTitle). Map anything still on a placeholder
+// (or empty, or the legacy forced "June chat") to a friendly "New chat" so the rail never shows a
+// raw timestamp while a chat is waiting to be auto-titled.
+const PLACEHOLDER_TITLE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+// Legacy forced titles Nightjar used before auto-titling ("June chat" for new chats, "June
+// session" for the connection primary) — both are placeholders, not user-chosen names.
+const LEGACY_DEFAULTS = new Set(["June chat", "June session"])
+export function displayChatTitle(title: string | undefined | null): string {
+  const t = (title ?? "").trim()
+  return !t || PLACEHOLDER_TITLE.test(t) || LEGACY_DEFAULTS.has(t) ? "New chat" : t
+}
+
 export function shouldReuseStoredChat(stored: string | null, listedIds: string[] | null): boolean {
   if (!stored) return false
   if (listedIds === null) return true // couldn't verify → reuse optimistically, never repoint on a blip

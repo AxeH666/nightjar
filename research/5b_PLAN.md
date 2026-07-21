@@ -65,7 +65,20 @@ claim must still be corrected.
 ## Maintainer decisions (2026-07-21) — SETTLED, design around these
 
 1. **Staging:** three sequential PRs (A foundation / B session scoping / C gated injection), not one.
-2. **Per-project chat surface:** a **single persistent chat** per project (not a full recents rail).
+2. **Per-project chat surface:** ~~a single persistent chat per project~~ **REVISED 2026-07-21
+   (maintainer, after seeing the single-chat build):** **multiple named chats per project with a
+   collapsible history rail** — the same experience as the General chat. The collapsible rail is
+   added to BOTH the project view and the General chat. `SessionList` was generalized (back-compat:
+   still slot-driven for Code/CAD/labs; onNew/onResume for projects) so one rail component serves
+   all. In `SessionsContext`, `projectChats` became the per-project ACTIVE chat and a new
+   `projectChatIds` holds each project's history list; the PR-B reconnect/generation infra now
+   guards the active chat. `newProjectChat`/`resumeProjectChat` drive the rail.
+   **Chat naming (also 2026-07-21):** new chats are created WITHOUT a forced title so OpenCode's
+   built-in `ensureTitle` (session/prompt.ts, gated on `isDefaultTitle`) names them from the
+   conversation — the forced "June chat"/"June session" titles were suppressing it. `displayChatTitle`
+   shows "New chat" until the real title lands. Same-provider small model, so no extra cloud egress.
+   Client-generated titling is the fallback only if a live check shows the engine's "title" agent is
+   absent.
 3. **On project delete:** best-effort delete the underlying OpenCode sessions on the engine (inject
    the client into the delete path), consistent with the store's "must not linger on disk" stance.
 4. **Cloud-egress consent:** a one-time per-`(project, provider)` opt-in + a persistent "sending

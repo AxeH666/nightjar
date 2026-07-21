@@ -22,7 +22,7 @@ import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
-import { loadProjectChatId, saveProjectChatId, shouldReuseStoredChat } from "../lib/sessionScope"
+import { loadProjectChatIds, saveProjectChatIds, shouldReuseStoredChat } from "../lib/sessionScope"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -142,10 +142,16 @@ interface SessionsValue {
   newSession: (slot: SlotId, agent: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
-  // 5b — per-project chat isolation. openProjectChat resolves (resume-or-create) a project's
-  // single persistent chat session id; deleteProjectChat drops it (best-effort engine delete)
-  // when the project is removed. Project chats live in a parallel map, NOT in `slots`.
+  // 5b — per-project chat isolation (multi-chat). projectChats = each project's ACTIVE chat id;
+  // projectChatIds = each project's history list (newest first) for its rail. openProjectChat
+  // resolves the active chat when a project opens; newProjectChat/resumeProjectChat drive the
+  // rail's ＋ and resume; deleteProjectChat drops ALL of a project's chats on project removal.
+  // These live in parallel maps, NOT in `slots`.
+  projectChats: Record<string, string>
+  projectChatIds: Record<string, string[]>
   openProjectChat: (projectId: string) => Promise<string>
+  newProjectChat: (projectId: string) => Promise<string>
+  resumeProjectChat: (projectId: string, sessionId: string) => Promise<void>
   deleteProjectChat: (projectId: string) => Promise<void>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
@@ -267,16 +273,21 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // connection's primary onto the chat slot — otherwise a (re)connect would clobber their choice.
   const chatBoundManually = useRef(false)
 
-  // 5b — per-project chat isolation. A parallel map projectId → its single persistent chat
-  // session id, kept DELIBERATELY OUTSIDE the fixed `slots` record so none of the base
-  // chat/code/cad machinery — the primary-adopt effect, the chatBoundManually pins, rebindSlot —
-  // is touched (that machinery is the hard-won #122/#123 path and must not regress). The two
-  // places a project chat is NOT free from `slots` are handled explicitly: gcSessions preserves
-  // these ids (or a reconnect would garbage-collect a live project conversation), and the
-  // Chat-only honesty guardrail fires for them too (a project chat is also a write-tool-less
-  // assistant chat). See research/5b_PLAN.md.
+  // 5b — per-project chat isolation. Two parallel maps kept DELIBERATELY OUTSIDE the fixed `slots`
+  // record so none of the base chat/code/cad machinery — the primary-adopt effect, the
+  // chatBoundManually pins, rebindSlot — is touched (that machinery is the hard-won #122/#123 path
+  // and must not regress):
+  //   • projectChats:   projectId → the ACTIVE (currently-open) chat session id for that project.
+  //   • projectChatIds: projectId → that project's history list (newest first) for its rail.
+  // Only the ACTIVE chat is a loaded session (in perSessionRefs/sessions); the rest are ids the
+  // rail lists and resumes on click. The two places a project chat is NOT free from `slots` are
+  // handled explicitly: gcSessions preserves the ACTIVE ids (or a reconnect would GC a live
+  // conversation), and the Chat-only honesty guardrail fires for them too (a project chat is
+  // equally a write-tool-less assistant chat). See research/5b_PLAN.md.
   const [projectChats, setProjectChats] = useState<Record<string, string>>({})
   const projectChatsRef = useRef<Record<string, string>>({})
+  const [projectChatIds, setProjectChatIds] = useState<Record<string, string[]>>({})
+  const projectChatIdsRef = useRef<Record<string, string[]>>({})
   // In-flight openProjectChat promises, keyed by projectId (with the connection generation they
   // belong to), so concurrent opens for the same project in the SAME generation share ONE resolve
   // — but a resolve from a superseded generation is not reused (Bugbot).
@@ -289,8 +300,20 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     projectChatsRef.current = projectChats
   }, [projectChats])
-  // True if `sid` is any chat-scope session (the General chat slot OR a project chat) — the set
-  // the honesty guardrail must cover. Reads refs so it's stable and current at event time.
+  useEffect(() => {
+    projectChatIdsRef.current = projectChatIds
+  }, [projectChatIds])
+  // Record a chat id in a project's history (newest first, deduped) + persist. Called on new/resume.
+  const markProjectChat = useCallback((projectId: string, id: string) => {
+    if (!projectId || !id) return
+    const cur = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+    const next = [id, ...cur.filter((x) => x !== id)]
+    projectChatIdsRef.current = { ...projectChatIdsRef.current, [projectId]: next }
+    saveProjectChatIds(projectId, next)
+    setProjectChatIds((prev) => ({ ...prev, [projectId]: next }))
+  }, [])
+  // True if `sid` is any chat-scope session (the General chat slot OR an active project chat) — the
+  // set the honesty guardrail must cover. Reads refs so it's stable and current at event time.
   const isChatScope = useCallback(
     (sid: string): boolean => slotsRef.current.chat === sid || Object.values(projectChatsRef.current).includes(sid),
     [],
@@ -1045,7 +1068,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (!client) return
       let id: string
       try {
-        id = await client.createSession(DEFAULT_TITLE[slot])
+        // Chat sessions are created WITHOUT a forced title so the engine auto-titles them from the
+        // conversation (OpenCode's ensureTitle only fires while the title is still its own default;
+        // passing "June chat" suppressed it — that's why chats were all named "June chat"). code/cad
+        // keep their stable slot title.
+        id = await client.createSession(slot === "chat" ? undefined : DEFAULT_TITLE[slot])
       } catch (err: any) {
         // Guard the create like resume/delete already do (P3-7): a network/timeout failure here
         // must surface, not silently no-op the "new session" button (leaving the slot on its old id).
@@ -1060,40 +1087,54 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [clientRef, rebindSlot, setSessionAgent, validAgent, markSlotSession, setStatus],
   )
 
-  // 5b — resolve a project's single persistent chat. Returns the current-generation binding if
-  // already resolved (the map is cleared on every reconnect, below, so a cached id is never
-  // stale across engine generations — Bugbot); coalesces concurrent opens via projectChatOpening
-  // so two callers can't create two sessions (Bugbot); else reuses the persisted session IF the
-  // engine still lists it, else creates fresh. The id lives in the parallel map, never in `slots`.
+  // 5b — bind a resolved session id as a project's ACTIVE chat: register it, set active state, and
+  // record it in the project's history. Shared by open/new/resume. Reaps the previously-active
+  // chat via gcSessions (it's no longer referenced) unless another slot/project still holds it.
+  const bindProjectChat = useCallback(
+    (projectId: string, id: string, messages: UiMessage[]) => {
+      projectChatGen.current[projectId] = connGenRef.current
+      markProjectChat(projectId, id)
+      const prevActive = projectChatsRef.current[projectId]
+      if (prevActive === id) return
+      projectChatsRef.current = { ...projectChatsRef.current, [projectId]: id }
+      perSessionRefs.current.set(id, freshRefs())
+      setProjectChats((prev) => ({ ...prev, [projectId]: id }))
+      setSessions((prev) => ({
+        ...prev,
+        [id]: { id, agent: validAgent(DEFAULT_AGENT.chat), title: prev[id]?.title ?? "", messages, busy: false },
+      }))
+      if (prevActive && prevActive !== id) gcSessions() // switched away → reap the old active chat
+    },
+    [validAgent, markProjectChat, gcSessions],
+  )
+
+  // 5b — resolve a project's ACTIVE chat when its view opens: return the current-generation active
+  // binding if there is one; else revalidate/resume the newest chat in the project's history
+  // against the engine (Bugbot generation + in-flight guards, so a reconnect never GCs or races);
+  // else create a fresh chat. Only the active chat is a loaded session; the rest are rail ids.
   const openProjectChat = useCallback(
     async (projectId: string): Promise<string> => {
       if (!projectId) return ""
       const gen = connGenRef.current
       const bound = projectChatsRef.current[projectId]
-      // A binding validated in the CURRENT generation is good — return it. One from an older
-      // generation (a reconnect since) is revalidated below, but stays bound throughout.
       if (bound && projectChatGen.current[projectId] === gen) return bound
       const inflight = projectChatOpening.current.get(projectId)
       if (inflight && inflight.gen === gen) return inflight.promise
       const client = clientRef.current
-      if (!client) return bound || "" // not ready — keep any existing binding; the effect re-runs when the primary arrives
+      if (!client) return bound || ""
       const run = (async (): Promise<string> => {
-        // Prefer the LIVE binding as the reuse candidate (so a reconnect revalidates the session
-        // we were actually using), else the persisted id.
-        const candidate = bound || loadProjectChatId(projectId)
+        // Candidate = the live active binding (reconnect revalidation) else the newest history id.
+        const history = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+        const candidate = bound || history[0] || null
         let id = ""
         let messages: UiMessage[] = []
         if (candidate) {
-          // Reuse unless the engine CONFIRMS it's gone (shouldReuseStoredChat — a transient
-          // listSessions failure returns null and must NOT repoint the project).
           const ids = await client
             .listSessions()
             .then((ss) => ss.map((s) => s.id))
             .catch(() => null)
           if (shouldReuseStoredChat(candidate, ids)) {
             id = candidate
-            // Only fetch history when ADOPTING a not-already-in-memory session; the live binding
-            // already has its transcript in state.
             if (candidate !== bound) {
               try {
                 messages = messagesFromHistory(await client.getMessages(candidate))
@@ -1105,69 +1146,99 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }
         if (!id) {
           try {
-            id = await client.createSession(DEFAULT_TITLE.chat)
+            id = await client.createSession() // no forced title → engine auto-titles after the 1st message
           } catch (err: any) {
             setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
-            return bound || "" // keep any existing binding rather than blanking on a transient create failure
+            return bound || ""
           }
-          saveProjectChatId(projectId, id) // persist only a CONFIRMED-new id
         }
-        // A newer reconnect superseded this resolve while it ran → discard, the newer-generation
-        // resolve owns the binding now (Bugbot: stale async must not overwrite current state). If
-        // this stale run CREATED a fresh session (id differs from the candidate it started with),
-        // reap it so it doesn't orphan on the engine.
+        // A newer reconnect superseded this resolve → discard (reap a freshly-created session so it
+        // doesn't orphan); the newer-generation resolve owns the binding now (Bugbot).
         if (gen !== connGenRef.current) {
           if (id && id !== candidate) client.deleteSession(id).catch(() => {})
           return projectChatsRef.current[projectId] || ""
         }
-        projectChatGen.current[projectId] = gen
-        if (id === bound) return id // the same live session survived — binding + state already intact
-        // Bind the REF first (gcSessions reads it synchronously), then perSessionRefs, then state.
-        projectChatsRef.current = { ...projectChatsRef.current, [projectId]: id }
-        perSessionRefs.current.set(id, freshRefs())
-        setProjectChats((prev) => ({ ...prev, [projectId]: id }))
-        setSessions((prev) => ({
-          ...prev,
-          [id]: { id, agent: validAgent(DEFAULT_AGENT.chat), title: prev[id]?.title ?? DEFAULT_TITLE.chat, messages, busy: false },
-        }))
-        if (bound && bound !== id) gcSessions() // replaced a dead session → reap the old, now-unbound id
+        if (id === bound) {
+          projectChatGen.current[projectId] = gen // same live session survived — just refresh the marker
+          return id
+        }
+        bindProjectChat(projectId, id, messages)
         return id
       })()
       projectChatOpening.current.set(projectId, { gen, promise: run })
       try {
         return await run
       } finally {
-        // Only clear the slot if it still holds THIS run (a newer-generation run may have replaced it).
         if (projectChatOpening.current.get(projectId)?.promise === run) projectChatOpening.current.delete(projectId)
       }
     },
-    [clientRef, validAgent, setStatus, gcSessions],
+    [clientRef, setStatus, bindProjectChat],
   )
 
-  // 5b — remove a project's chat when the project is deleted (decision #3: best-effort engine
-  // delete so a deleted project's transcript doesn't linger server-side). Must be called BEFORE
-  // the projects store's purge clears the persisted id key; ids are captured synchronously up
-  // front so the ordering is safe regardless. The client-side id set is dropped by the store's
-  // purgeProjectStorage — this covers the engine session + the in-memory binding.
+  // 5b — start a NEW chat in a project (the rail's ＋). Fresh session, engine auto-titled, becomes
+  // the active chat and the newest history entry.
+  const newProjectChat = useCallback(
+    async (projectId: string): Promise<string> => {
+      if (!projectId) return ""
+      const client = clientRef.current
+      if (!client) return ""
+      let id: string
+      try {
+        id = await client.createSession() // no forced title → engine auto-titles
+      } catch (err: any) {
+        setStatus(`couldn't start a new chat: ${err?.message ?? err}`)
+        return ""
+      }
+      bindProjectChat(projectId, id, [])
+      return id
+    },
+    [clientRef, setStatus, bindProjectChat],
+  )
+
+  // 5b — resume an existing chat from a project's rail: load its transcript and make it active.
+  const resumeProjectChat = useCallback(
+    async (projectId: string, sessionId: string): Promise<void> => {
+      if (!projectId || !sessionId) return
+      if (projectChatsRef.current[projectId] === sessionId) return // already active
+      const client = clientRef.current
+      if (!client) return
+      let messages: UiMessage[] = []
+      try {
+        messages = messagesFromHistory(await client.getMessages(sessionId))
+      } catch {
+        /* engine has no history for it → empty, still switch to it */
+      }
+      bindProjectChat(projectId, sessionId, messages)
+    },
+    [clientRef, bindProjectChat],
+  )
+
+  // 5b — remove ALL of a project's chats when the project is deleted (decision #3: best-effort
+  // engine delete so a deleted project's transcripts don't linger server-side). Ids are captured
+  // synchronously up front, before the projects store's purge clears the persisted history key.
   const deleteProjectChat = useCallback(
     async (projectId: string) => {
-      const openId = projectChatsRef.current[projectId]
-      const persisted = loadProjectChatId(projectId) // sync — captured before any store purge runs
+      const active = projectChatsRef.current[projectId]
+      const history = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId) // sync capture
       delete projectChatGen.current[projectId]
       projectChatOpening.current.delete(projectId)
-      if (openId) {
-        projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
-        setProjectChats((prev) => {
-          const next = { ...prev }
-          delete next[projectId]
-          return next
-        })
-      }
+      projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
+      projectChatIdsRef.current = Object.fromEntries(Object.entries(projectChatIdsRef.current).filter(([k]) => k !== projectId))
+      setProjectChats((prev) => {
+        const next = { ...prev }
+        delete next[projectId]
+        return next
+      })
+      setProjectChatIds((prev) => {
+        const next = { ...prev }
+        delete next[projectId]
+        return next
+      })
       const client = clientRef.current
-      for (const sid of new Set([openId, persisted].filter(Boolean) as string[])) {
+      for (const sid of new Set([active, ...history].filter(Boolean) as string[])) {
         if (client) await client.deleteSession(sid).catch(() => {})
       }
-      gcSessions() // the id is now unbound (removed from the map above) → drop it from the registry
+      gcSessions()
     },
     [clientRef, gcSessions],
   )
@@ -1217,7 +1288,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     newSession,
     deleteSession,
     renameSession,
+    projectChats,
+    projectChatIds,
     openProjectChat,
+    newProjectChat,
+    resumeProjectChat,
     deleteProjectChat,
     hasSession,
     setBusy,

@@ -3,9 +3,10 @@ import {
   baseSlot,
   chatScope,
   deleteProjectSessionIds,
-  loadProjectChatId,
+  displayChatTitle,
+  loadProjectChatIds,
   projectOf,
-  saveProjectChatId,
+  saveProjectChatIds,
   sessionIdsKey,
   shouldReuseStoredChat,
 } from "./sessionScope"
@@ -85,7 +86,7 @@ describe("deleteProjectSessionIds — the delete-hygiene helper", () => {
   })
 })
 
-describe("project chat id — the single persistent chat's persistence (PR-B)", () => {
+describe("project chat ids — the per-project history list's persistence", () => {
   const stub = (): Map<string, string> => {
     const m = new Map<string, string>()
     ;(globalThis as { localStorage?: unknown }).localStorage = {
@@ -99,28 +100,46 @@ describe("project chat id — the single persistent chat's persistence (PR-B)", 
     delete (globalThis as { localStorage?: unknown }).localStorage
   })
 
-  it("round-trips the id under the project's chat key, and deleteProjectSessionIds clears it", () => {
+  it("round-trips an ordered list under the project's chat key, and deleteProjectSessionIds clears it", () => {
     const m = stub()
-    expect(saveProjectChatId("p_1", "ses_abc")).toBe(true)
-    expect(m.get("nightjar.sessionIds.chat.p_1")).toBe(JSON.stringify(["ses_abc"]))
-    expect(loadProjectChatId("p_1")).toBe("ses_abc")
-    // Same key family as the delete-hygiene helper → one delete path clears it.
+    expect(saveProjectChatIds("p_1", ["ses_new", "ses_old"])).toBe(true)
+    expect(m.get("nightjar.sessionIds.chat.p_1")).toBe(JSON.stringify(["ses_new", "ses_old"]))
+    expect(loadProjectChatIds("p_1")).toEqual(["ses_new", "ses_old"]) // order preserved (newest first)
     deleteProjectSessionIds("p_1")
-    expect(loadProjectChatId("p_1")).toBeNull()
+    expect(loadProjectChatIds("p_1")).toEqual([])
   })
 
-  it("returns null for a project with no stored chat, and on absent/garbage storage", () => {
+  it("returns [] for a project with no history, and on absent/garbage/non-array storage", () => {
     stub()
-    expect(loadProjectChatId("never_opened")).toBeNull()
-    // Garbage value must not throw.
-    ;(globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage.setItem(
-      "nightjar.sessionIds.chat.p_x",
-      "{not json",
-    )
-    expect(loadProjectChatId("p_x")).toBeNull()
+    expect(loadProjectChatIds("never_opened")).toEqual([])
+    const ls = (globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage
+    ls.setItem("nightjar.sessionIds.chat.p_x", "{not json")
+    expect(loadProjectChatIds("p_x")).toEqual([]) // garbage → []
+    ls.setItem("nightjar.sessionIds.chat.p_y", JSON.stringify({ not: "an array" }))
+    expect(loadProjectChatIds("p_y")).toEqual([]) // wrong shape → []
+    ls.setItem("nightjar.sessionIds.chat.p_z", JSON.stringify(["ok", 42, null, "also"]))
+    expect(loadProjectChatIds("p_z")).toEqual(["ok", "also"]) // filters non-strings defensively
     delete (globalThis as { localStorage?: unknown }).localStorage
-    expect(loadProjectChatId("p_1")).toBeNull() // no storage at all
-    expect(saveProjectChatId("p_1", "x")).toBe(false)
+    expect(loadProjectChatIds("p_1")).toEqual([]) // no storage at all
+    expect(saveProjectChatIds("p_1", ["x"])).toBe(false)
+  })
+})
+
+describe("displayChatTitle — a placeholder never shows as a raw timestamp", () => {
+  it("maps engine placeholder / empty / legacy titles to 'New chat'", () => {
+    expect(displayChatTitle("New Session 2026-07-21T01:23:44.123Z")).toBe("New chat")
+    expect(displayChatTitle("2026-07-21T01:23:44.123Z")).toBe("New chat")
+    expect(displayChatTitle("")).toBe("New chat")
+    expect(displayChatTitle("   ")).toBe("New chat")
+    expect(displayChatTitle(null)).toBe("New chat")
+    expect(displayChatTitle(undefined)).toBe("New chat")
+    expect(displayChatTitle("June chat")).toBe("New chat") // legacy forced default (new chats)
+    expect(displayChatTitle("June session")).toBe("New chat") // legacy forced default (connection primary)
+  })
+
+  it("passes through a real, engine-generated title untouched", () => {
+    expect(displayChatTitle("Token efficiency optimization")).toBe("Token efficiency optimization")
+    expect(displayChatTitle("  Fix the CSP frame-src  ")).toBe("Fix the CSP frame-src") // trimmed
   })
 })
 

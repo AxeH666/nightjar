@@ -130,7 +130,9 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         try {
           const list = await client.listAgents()
           setAgents(list)
-          const sid = await client.createSession("June session")
+          // No forced title → the engine auto-titles this chat from the conversation (a forced
+          // title suppresses OpenCode's ensureTitle). The rail shows "New chat" until it lands.
+          const sid = await client.createSession()
           // NJ-4 hardening (A): a reconnect fired mid-init (e.g. a BYOK key set during
           // a slow cold model load) aborts this run's signal. Bail before publishing
           // the session id, so a superseded run can't transiently flip primaryId to a
