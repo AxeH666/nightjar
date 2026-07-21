@@ -126,8 +126,9 @@ describe("project chat ids — the per-project history list's persistence", () =
 
 describe("displayChatTitle — a placeholder never shows as a raw timestamp", () => {
   it("maps engine placeholder / empty / legacy titles to 'New chat'", () => {
-    expect(displayChatTitle("New Session 2026-07-21T01:23:44.123Z")).toBe("New chat")
-    expect(displayChatTitle("2026-07-21T01:23:44.123Z")).toBe("New chat")
+    // The engine's exact default format (prefix + ISO timestamp).
+    expect(displayChatTitle("New session - 2026-07-21T01:23:44.123Z")).toBe("New chat")
+    expect(displayChatTitle("Child session - 2026-07-21T01:23:44.123Z")).toBe("New chat")
     expect(displayChatTitle("")).toBe("New chat")
     expect(displayChatTitle("   ")).toBe("New chat")
     expect(displayChatTitle(null)).toBe("New chat")
@@ -136,9 +137,11 @@ describe("displayChatTitle — a placeholder never shows as a raw timestamp", ()
     expect(displayChatTitle("June session")).toBe("New chat") // legacy forced default (connection primary)
   })
 
-  it("passes through a real, engine-generated title untouched", () => {
+  it("passes through a real title untouched — even one that merely ENDS with a timestamp (Bugbot)", () => {
     expect(displayChatTitle("Token efficiency optimization")).toBe("Token efficiency optimization")
     expect(displayChatTitle("  Fix the CSP frame-src  ")).toBe("Fix the CSP frame-src") // trimmed
+    // A real, user/model title that happens to end in an ISO timestamp must NOT be hidden.
+    expect(displayChatTitle("Release cut 2026-07-21T01:23:44.123Z")).toBe("Release cut 2026-07-21T01:23:44.123Z")
   })
 })
 

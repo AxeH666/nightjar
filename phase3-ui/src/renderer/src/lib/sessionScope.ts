@@ -94,7 +94,11 @@ export function saveProjectChatIds(projectId: string, ids: string[]): boolean {
 // (session/prompt.ts ensureTitle, gated on isDefaultTitle). Map anything still on a placeholder
 // (or empty, or the legacy forced "June chat") to a friendly "New chat" so the rail never shows a
 // raw timestamp while a chat is waiting to be auto-titled.
-const PLACEHOLDER_TITLE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+// The engine's placeholder is a FULL match on `<prefix><ISO timestamp>` (from OpenCode
+// session/session.ts isDefaultTitle: prefixes "New session - " / "Child session - "). Anchor to
+// the whole string — a suffix match would mis-hide a real title that merely ENDS with a timestamp
+// (Bugbot). Keep these in sync if the engine's prefixes change.
+const PLACEHOLDER_TITLE = /^(New session - |Child session - )\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 // Legacy forced titles Nightjar used before auto-titling ("June chat" for new chats, "June
 // session" for the connection primary) — both are placeholders, not user-chosen names.
 const LEGACY_DEFAULTS = new Set(["June chat", "June session"])

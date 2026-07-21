@@ -293,6 +293,16 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // in-flight when the project is deleted can't resurrect its state or re-persist its storage keys
   // after the purge (Bugbot). Ids are unique + never reused, so the set never blocks a new project.
   const deletedProjectsRef = useRef<Set<string>>(new Set())
+  // Per-project "latest selection" counter. new/resume capture it at click time and re-check before
+  // committing their async result, so when the user clicks several rail chats (or ＋New) faster than
+  // getMessages/createSession resolves, the LAST click wins instead of the last-completing request
+  // (Bugbot).
+  const projectSelectSeq = useRef<Record<string, number>>({})
+  const nextSelectSeq = useCallback((projectId: string): number => {
+    const n = (projectSelectSeq.current[projectId] ?? 0) + 1
+    projectSelectSeq.current[projectId] = n
+    return n
+  }, [])
   // In-flight openProjectChat promises, keyed by projectId, so concurrent opens for the same
   // project share ONE resolve instead of racing to create two sessions (Bugbot).
   //
@@ -1181,6 +1191,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (!projectId) return ""
       const client = clientRef.current
       if (!client) return ""
+      const seq = nextSelectSeq(projectId)
       let id: string
       try {
         id = await client.createSession() // no forced title → engine auto-titles
@@ -1188,10 +1199,16 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         setStatus(`couldn't start a new chat: ${err?.message ?? err}`)
         return ""
       }
+      // Superseded by a newer selection, or the project was deleted, while createSession ran → reap
+      // the fresh engine session so it doesn't orphan (Bugbot), and don't bind.
+      if (projectSelectSeq.current[projectId] !== seq || deletedProjectsRef.current.has(projectId)) {
+        client.deleteSession(id).catch(() => {})
+        return ""
+      }
       bindProjectChat(projectId, id, [])
       return id
     },
-    [clientRef, setStatus, bindProjectChat],
+    [clientRef, setStatus, bindProjectChat, nextSelectSeq],
   )
 
   // 5b — resume an existing chat from a project's rail: load its transcript and make it active. No
@@ -1212,15 +1229,19 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (active && streaming) return
       const client = clientRef.current
       if (!client) return
+      const seq = nextSelectSeq(projectId)
       let messages: UiMessage[] = []
       try {
         messages = messagesFromHistory(await client.getMessages(sessionId))
       } catch {
         /* dead/empty → bind with no messages */
       }
+      // A newer rail click / ＋New superseded this resume while getMessages ran → drop it, so the
+      // last click wins rather than the last fetch to finish (Bugbot).
+      if (projectSelectSeq.current[projectId] !== seq) return
       bindProjectChat(projectId, sessionId, messages)
     },
-    [clientRef, bindProjectChat],
+    [clientRef, bindProjectChat, nextSelectSeq],
   )
 
   // 5b — remove ALL of a project's chats when the project is deleted (decision #3: best-effort
