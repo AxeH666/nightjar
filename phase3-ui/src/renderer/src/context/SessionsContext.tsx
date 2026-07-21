@@ -1160,6 +1160,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
                 /* history read failed → still bind, just with no prior messages */
               }
             }
+          } else if (ids !== null) {
+            // The engine CONFIRMS the candidate is gone (a null result would be transient and
+            // shouldReuseStoredChat would have kept it). Prune it from the rail so a replacement
+            // doesn't leave the dead id behind — resumeProjectChat prunes the same way (Bugbot).
+            pruneProjectChat(projectId, candidate)
           }
         }
         if (!id) {
@@ -1213,7 +1218,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (projectChatOpening.current.get(projectId)?.promise === run) projectChatOpening.current.delete(projectId)
       }
     },
-    [clientRef, setStatus, bindProjectChat],
+    [clientRef, setStatus, bindProjectChat, pruneProjectChat],
   )
 
   // 5b — start a NEW chat in a project (the rail's ＋). Fresh session, engine auto-titled, becomes

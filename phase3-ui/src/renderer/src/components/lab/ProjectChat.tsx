@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSessions } from "../../context/SessionsContext"
 import { usePermission } from "../../context/PermissionContext"
 import { useConnection } from "../../context/ConnectionContext"
@@ -21,23 +21,21 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const { abortSession } = usePermission()
   const { connected, sessionID } = useConnection()
   const { panelOpen, setPanelOpen, activeEntry, setActiveEntry, previewNonce, liveCode, artifactSession } = useArtifact()
-  const [resolving, setResolving] = useState(true)
-  const prevProjectId = useRef<string | null>(null)
+  const [pending, setPending] = useState(true)
 
   const id = projectChats[projectId] ?? "" // the active chat, driven by context state
   const history = useMemo(() => new Set(projectChatIds[projectId] ?? []), [projectChatIds, projectId])
 
-  // Resolve the project's active chat on open, on project switch, and on reconnect (sessionID
-  // changes / goes empty→set). `resolving` is set only on a project SWITCH, so a reconnect that
-  // keeps the session shows no "Opening" flash (the active id stays put in context state).
+  // Resolve/revalidate the project's active chat on open, project switch, and reconnect (sessionID
+  // changes / goes empty→set). `pending` is true for the whole resolve; the transcript is never
+  // blanked (id comes from context state, which survives a reconnect), but while pending the
+  // composer is blocked so a message can't be SENT to a not-yet-revalidated (possibly dead) session
+  // (Bugbot). blockedReason disables send but not Stop, so a mid-turn reconnect stays interruptible.
   useEffect(() => {
     let alive = true
-    if (prevProjectId.current !== projectId) {
-      prevProjectId.current = projectId
-      setResolving(true)
-    }
+    setPending(true)
     openProjectChat(projectId).then(() => {
-      if (alive) setResolving(false)
+      if (alive) setPending(false)
     })
     return () => {
       alive = false
@@ -46,8 +44,10 @@ export function ProjectChat({ projectId }: { projectId: string }) {
 
   const blockedReason = !connected
     ? "Connecting to the engine…"
-    : resolving && !id
-      ? "Opening this project's chat…"
+    : pending
+      ? id
+        ? "Reconnecting…"
+        : "Opening this project's chat…"
       : !id
         ? "Couldn't open this project's chat — check the engine, then reopen the project."
         : null
