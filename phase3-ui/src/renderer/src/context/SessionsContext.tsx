@@ -1106,7 +1106,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       projectChatGen.current[projectId] = connGenRef.current
       markProjectChat(projectId, id)
       const prevActive = projectChatsRef.current[projectId]
-      if (prevActive === id) return
+      if (prevActive === id) {
+        // Already the active chat — but a re-fetch (recovery after a failed history load, or a
+        // resume of the current chat) still needs to refresh the transcript. Only apply a NON-empty
+        // fetch, so the reconnect path (which binds with messages=[] to preserve the live state)
+        // never wipes it. (Bugbot.)
+        if (messages.length) setSessions((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], messages } } : prev))
+        return
+      }
       projectChatsRef.current = { ...projectChatsRef.current, [projectId]: id }
       perSessionRefs.current.set(id, freshRefs())
       setProjectChats((prev) => ({ ...prev, [projectId]: id }))
@@ -1160,7 +1167,22 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             id = await client.createSession() // no forced title → engine auto-titles after the 1st message
           } catch (err: any) {
             setStatus(`couldn't start the project chat: ${err?.message ?? err}`)
-            return bound || ""
+            // We only reach create because the candidate (= the active `bound`, when set) was
+            // confirmed DEAD. So `bound` is not a safe fallback — returning it would leave the UI on
+            // a dead session's transcript. Clear a still-dead active binding so the view shows the
+            // failure state instead, and return "". (Bugbot.)
+            if (projectChatsRef.current[projectId] === candidate) {
+              projectChatsRef.current = Object.fromEntries(
+                Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId),
+              )
+              delete projectChatGen.current[projectId]
+              setProjectChats((prev) => {
+                const next = { ...prev }
+                delete next[projectId]
+                return next
+              })
+            }
+            return ""
           }
         }
         // A newer reconnect superseded this resolve → discard (reap a freshly-created session so it
@@ -1223,7 +1245,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const resumeProjectChat = useCallback(
     async (projectId: string, sessionId: string): Promise<void> => {
       if (!projectId || !sessionId) return
-      if (projectChatsRef.current[projectId] === sessionId) return // already active
+      // NOTE: intentionally NOT early-returning when sessionId is already active — re-clicking the
+      // active chat re-fetches its transcript, which is the recovery path after a first load that
+      // came back empty (Bugbot). bindProjectChat only overwrites the transcript on a non-empty fetch.
       const client = clientRef.current
       if (!client) return
       const ids = await client
