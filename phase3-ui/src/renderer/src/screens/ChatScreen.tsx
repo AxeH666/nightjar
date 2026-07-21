@@ -2,7 +2,7 @@
 // Research is no longer a whole-workspace mode: it's a per-message toggle in the
 // composer's "+" menu that resolves to the research agent at send time (explicit,
 // not AI-guessed). Bound to the chat session slot.
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useSessions } from "../context/SessionsContext"
 import { usePermission } from "../context/PermissionContext"
 import { useConnection } from "../context/ConnectionContext"
@@ -38,6 +38,7 @@ export function ChatScreen() {
   // project). The Projects tab is scope="general" (ProjectsScreen); per-lab CAD projects are a
   // separate space and are deliberately out of scope for chat Move in this PR.
   const { projects } = useProjects("general")
+  const [moving, setMoving] = useState(false) // a General-chat move + its active-chat replacement resolving
   const id = slots.chat
 
   // Reset the chat preview only when the chat slot's session id truly changes (New chat /
@@ -59,14 +60,20 @@ export function ChatScreen() {
         pinKey={pinnedChatsKey()}
         moveTargets={projects.map((p) => ({ projectId: p.id, name: p.name }))}
         currentScope={{ kind: "general" }}
-        onMove={(sid, to) => moveChatToScope(sid, { kind: "general" }, to)}
+        onMove={(sid, to) => {
+          // Block the composer while moving the active General chat re-homes the slot (mirrors
+          // ProjectChat), so a send can't land on the session being moved just before gcSessions
+          // reaps/aborts it (Bugbot). Returns the promise so SessionList unpins only on a real move.
+          setMoving(true)
+          return moveChatToScope(sid, { kind: "general" }, to).finally(() => setMoving(false))
+        }}
         collapsible
       />
       <main className="min-h-0 flex-1">
         <ChatSurface
       messages={messagesOf(id)}
       busy={busyOf(id)}
-      blockedReason={connected && id ? null : "Connecting to the engine…"}
+      blockedReason={!connected || !id ? "Connecting to the engine…" : moving ? "Moving this chat…" : null}
       artifactSessionID={id}
       onSend={(text, { attachments, mode }) =>
         send(id, text, { agent: AGENT_FOR_MODE[mode ?? "none"], attachments })
