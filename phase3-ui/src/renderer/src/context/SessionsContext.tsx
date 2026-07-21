@@ -1308,6 +1308,18 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (next[0]) await resumeProjectChat(projectId, next[0])
         else await newProjectChat(projectId)
       }
+      // The replacement can NO-OP (superseded by a concurrent selection, no client, or a failed
+      // create). If it didn't take and we're still on the deleted id, clear the binding so the view
+      // isn't left on a removed session — a concurrent selection that DID win leaves a different
+      // active, which we must not clobber, hence the exact-id check (Bugbot).
+      if (projectChatsRef.current[projectId] === sessionId) {
+        projectChatsRef.current = Object.fromEntries(Object.entries(projectChatsRef.current).filter(([k]) => k !== projectId))
+        setProjectChats((prev) => {
+          const n = { ...prev }
+          delete n[projectId]
+          return n
+        })
+      }
       const client = clientRef.current
       if (client) await client.deleteSession(sessionId).catch(() => {})
       gcSessions()

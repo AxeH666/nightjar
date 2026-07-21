@@ -50,7 +50,7 @@ export function SessionList({
   activeId: string
   onNew?: () => void
   onResume?: (id: string, title?: string) => void
-  onDelete?: (id: string) => void
+  onDelete?: (id: string) => void | Promise<void>
   // Enables the Pin menu item; the per-rail pinned set persists under this localStorage key.
   pinKey?: string
   label?: string
@@ -81,9 +81,12 @@ export function SessionList({
     [onResume, slot, agent, resumeSession],
   )
   const doDelete = useCallback(
-    (id: string) => {
-      if (onDelete) onDelete(id)
-      else deleteSession(id)
+    async (id: string) => {
+      // AWAIT the delete before refreshing: deleteSession removes the id from the persisted slot
+      // history only AFTER its async engine-delete + active-slot rebind, so a non-awaited refresh
+      // would re-list the just-deleted chat until that finished (Bugbot).
+      if (onDelete) await onDelete(id)
+      else await deleteSession(id)
       setBump((n) => n + 1)
     },
     [onDelete, deleteSession],
@@ -194,7 +197,7 @@ export function SessionList({
             onOpen={() => doResume(s.id, s.title)}
             onRename={(t) => doRename(s.id, t)}
             onTogglePin={() => togglePin(s.id)}
-            onDelete={() => doDelete(s.id)}
+            onDelete={() => void doDelete(s.id)}
           />
         ))}
         {visible.length === 0 && (
