@@ -9,9 +9,9 @@
 // dissolves the "no current project at adopt time" problem. In 5b only the chat slot becomes
 // project-scoped; code/cad stay General.
 //
-// PR-B will make SessionsContext consume `sessionIdsKey` from HERE (single source of truth) so
-// the General keys below cannot drift from the ones it writes today. Until then, the test in
-// sessionScope.test.ts pins the exact current strings as the zero-migration contract.
+// SessionsContext consumes `sessionIdsKey` from HERE (single source of truth), so the General
+// keys below cannot drift from the ones it reads/writes. The test in sessionScope.test.ts pins the
+// exact strings as the zero-migration contract.
 
 export type BaseSlot = "chat" | "code" | "cad"
 
@@ -67,6 +67,42 @@ export function deleteProjectSessionIds(projectId: string): boolean {
   }
 }
 
+// ── pinned chats (chat-menu Pin) ────────────────────────────────────────────────
+// The per-rail pinned-chats localStorage key. General chat uses the no-project form; a project
+// uses its id. ONE builder so the write (SessionList/ProjectChat) and the delete (purge) can't
+// drift on the format. This is a per-project key family, so it MUST be in purgeProjectStorage.
+export function pinnedChatsKey(projectId?: string): string {
+  return projectId ? `nightjar.pinned.chat.${projectId}` : "nightjar.pinned.chat"
+}
+// load/save take the RAW key (SessionList holds it as its pinKey prop, built via pinnedChatsKey).
+export function loadPinned(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key)
+    const arr = raw ? (JSON.parse(raw) as unknown) : []
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [])
+  } catch {
+    return new Set()
+  }
+}
+export function savePinned(key: string, ids: Set<string>): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify([...ids]))
+    return true
+  } catch {
+    return false
+  }
+}
+// Drop a project's pinned-chats key. Joins purgeProjectStorage's fan-out (a per-project key family
+// added by the chat-menu PR that was NOT being cleaned up — the NJ-40/41 leak class).
+export function deleteProjectPins(projectId: string): boolean {
+  try {
+    localStorage.removeItem(pinnedChatsKey(projectId))
+    return true
+  } catch {
+    return false
+  }
+}
+
 // A project has MANY chats (its history rail), stored NEWEST-FIRST as a JSON string[] under the
 // same key loadSessionIds/persistSessionIds use — so deleteProjectSessionIds still clears the
 // whole family in one delete path.
@@ -102,8 +138,11 @@ const PLACEHOLDER_TITLE = /^(New session - |Child session - )\d{4}-\d{2}-\d{2}T\
 // Legacy forced titles Nightjar used before auto-titling ("June chat" for new chats, "June
 // session" for the connection primary) — both are placeholders, not user-chosen names.
 const LEGACY_DEFAULTS = new Set(["June chat", "June session"])
+// The label shown for an as-yet-unnamed chat. Exported so the rename UI can detect it (and start
+// blank on it) without hard-coding the string in a second place (consistency sweep).
+export const NEW_CHAT_LABEL = "New chat"
 export function displayChatTitle(title: string | undefined | null): string {
   const t = (title ?? "").trim()
-  return !t || PLACEHOLDER_TITLE.test(t) || LEGACY_DEFAULTS.has(t) ? "New chat" : t
+  return !t || PLACEHOLDER_TITLE.test(t) || LEGACY_DEFAULTS.has(t) ? NEW_CHAT_LABEL : t
 }
 

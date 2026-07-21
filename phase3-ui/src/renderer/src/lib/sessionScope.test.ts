@@ -2,10 +2,14 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   baseSlot,
   chatScope,
+  deleteProjectPins,
   deleteProjectSessionIds,
   displayChatTitle,
+  loadPinned,
   loadProjectChatIds,
+  pinnedChatsKey,
   projectOf,
+  savePinned,
   saveProjectChatIds,
   sessionIdsKey,
 } from "./sessionScope"
@@ -142,6 +146,59 @@ describe("displayChatTitle — a placeholder never shows as a raw timestamp", ()
     expect(displayChatTitle("  Fix the CSP frame-src  ")).toBe("Fix the CSP frame-src") // trimmed
     // A real, user/model title that happens to end in an ISO timestamp must NOT be hidden.
     expect(displayChatTitle("Release cut 2026-07-21T01:23:44.123Z")).toBe("Release cut 2026-07-21T01:23:44.123Z")
+  })
+})
+
+describe("pinned-chats persistence (chat-menu Pin — consistency sweep)", () => {
+  const stub = (): Map<string, string> => {
+    const m = new Map<string, string>()
+    ;(globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    }
+    return m
+  }
+  afterEach(() => {
+    delete (globalThis as { localStorage?: unknown }).localStorage
+  })
+
+  it("keys the General rail without a project and a project rail by id", () => {
+    expect(pinnedChatsKey()).toBe("nightjar.pinned.chat")
+    expect(pinnedChatsKey("p_1")).toBe("nightjar.pinned.chat.p_1")
+  })
+
+  it("round-trips a pinned set under a raw key", () => {
+    const m = stub()
+    expect(savePinned(pinnedChatsKey("p_1"), new Set(["a", "b"]))).toBe(true)
+    expect(JSON.parse(m.get("nightjar.pinned.chat.p_1") ?? "null")).toEqual(["a", "b"])
+    expect([...loadPinned(pinnedChatsKey("p_1"))].sort()).toEqual(["a", "b"])
+  })
+
+  it("returns an empty set on absent / garbage / wrong-shape storage", () => {
+    stub()
+    expect(loadPinned("nightjar.pinned.chat.missing").size).toBe(0)
+    const ls = (globalThis as { localStorage: { setItem: (k: string, v: string) => void } }).localStorage
+    ls.setItem("nightjar.pinned.chat.g", "{not json")
+    expect(loadPinned("nightjar.pinned.chat.g").size).toBe(0)
+    ls.setItem("nightjar.pinned.chat.o", JSON.stringify({ not: "array" }))
+    expect(loadPinned("nightjar.pinned.chat.o").size).toBe(0)
+    ls.setItem("nightjar.pinned.chat.mix", JSON.stringify(["ok", 1, null, "also"]))
+    expect([...loadPinned("nightjar.pinned.chat.mix")].sort()).toEqual(["also", "ok"]) // filters non-strings
+    delete (globalThis as { localStorage?: unknown }).localStorage
+    expect(loadPinned("nightjar.pinned.chat").size).toBe(0) // no storage → empty, no throw
+    expect(savePinned("nightjar.pinned.chat", new Set(["x"]))).toBe(false)
+  })
+
+  it("deleteProjectPins removes ONLY that project's pin key (the purge-fan-out gap this PR fixes)", () => {
+    const m = stub()
+    m.set("nightjar.pinned.chat.p_1", JSON.stringify(["s1"]))
+    m.set("nightjar.pinned.chat.p_2", JSON.stringify(["s2"]))
+    m.set("nightjar.pinned.chat", JSON.stringify(["general"])) // General pins are not per-project
+    expect(deleteProjectPins("p_1")).toBe(true)
+    expect(m.has("nightjar.pinned.chat.p_1")).toBe(false)
+    expect(m.get("nightjar.pinned.chat.p_2")).toBe(JSON.stringify(["s2"]))
+    expect(m.get("nightjar.pinned.chat")).toBe(JSON.stringify(["general"]))
   })
 })
 
