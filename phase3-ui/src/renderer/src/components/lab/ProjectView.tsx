@@ -6,8 +6,9 @@ import { ProjectChat } from "./ProjectChat"
 // A project's home (Lab.md §4.6): the breadcrumb, a per-project Chat (5b — isolated to this
 // project's own OpenCode session), and the three Knowledge areas — Instructions, Memory, and
 // Files (persisted per project). Chat is the primary surface; Knowledge holds the project's
-// durable context. Instructions (PR-C) and Memory (AM-1) reach the agent as system context, gated by
-// per-project cloud consent so they never egress to a cloud model without opt-in; Files do not yet.
+// durable context. Instructions, manual Notes, and auto Memory (PR-C..AM-2) reach the agent as system
+// context, gated by per-project cloud consent so they never egress to a cloud model without opt-in;
+// Files do not yet.
 export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope; projectId: string; onBack: () => void }) {
   const store = useProjects(scope)
   // Read from `projects` state, NOT store.get(): `get` is memoized against the ref with an
@@ -49,10 +50,15 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
       {/* Chat stays MOUNTED across a tab switch (hidden, not unmounted) so switching to Knowledge
           and back doesn't tear down the session or lose scroll/streaming state. */}
       <div className={tab === "chat" ? "min-h-0 flex-1" : "hidden"}>
-        {/* Instructions + Memory come from this view's LIVE content, so both the chat's cloud-consent
-            banner AND its send-time injection use the same values the user sees — reacting immediately
-            to Knowledge-tab edits, with no live-vs-storage divergence (PR-C + AM-1). */}
-        <ProjectChat projectId={projectId} instructions={content.instructions} memory={content.memory} />
+        {/* Instructions + Notes + auto Memory come from this view's LIVE content, so both the chat's
+            cloud-consent banner AND its send-time injection use the same values the user sees —
+            reacting immediately to Knowledge-tab edits, with no live-vs-storage divergence (PR-C..AM-2). */}
+        <ProjectChat
+          projectId={projectId}
+          instructions={content.instructions}
+          memory={content.memory}
+          autoMemory={content.autoMemory}
+        />
       </div>
 
       <div className={tab === "knowledge" ? "min-h-0 flex-1 overflow-y-auto p-6" : "hidden"}>
@@ -74,16 +80,32 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
           </Panel>
 
           <Panel
-            emoji="💾"
-            title="Memory"
+            emoji="📝"
+            title="Notes"
             optional
             save={content.saveState.memory}
-            note="Durable context sent to this project's chats as system context (same cloud gate as Instructions). Private to you."
+            note="Your own durable notes for this project, sent to its chats as system context (same cloud gate as Instructions). Never overwritten by auto-memory. Private to you."
           >
             <textarea
               value={content.memory}
               onChange={(e) => content.setMemory(e.target.value)}
               placeholder="Notes this project should remember across chats…"
+              rows={4}
+              className="w-full resize-y rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
+            />
+          </Panel>
+
+          <Panel
+            emoji="💾"
+            title="Memory"
+            optional
+            save={content.saveState.autoMemory}
+            note="Durable memory for this project, sent to its chats (same cloud gate). Editable now; auto-generation from your chats arrives in the next update."
+          >
+            <textarea
+              value={content.autoMemory}
+              onChange={(e) => content.setAutoMemory(e.target.value)}
+              placeholder="What this project has learned — a durable summary…"
               rows={4}
               className="w-full resize-y rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
             />
@@ -100,7 +122,7 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
           </Panel>
 
           <p className="text-center text-xs text-nightjar-text/30">
-            The Chat tab is isolated to this project. Instructions and Memory guide its chats (cloud models need your per-project OK); Files don't reach the agent yet.
+            The Chat tab is isolated to this project. Instructions, Notes and Memory guide its chats (cloud models need your per-project OK); Files don't reach the agent yet.
           </p>
         </div>
       </div>

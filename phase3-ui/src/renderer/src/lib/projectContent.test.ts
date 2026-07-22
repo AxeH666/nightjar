@@ -7,6 +7,7 @@ import {
   hasCloudConsent,
   allowCloudConsent,
   deleteProjectConsent,
+  deleteProjectMemoryState,
   buildProjectSystem,
   hasProjectContext,
 } from "./projectContent"
@@ -132,29 +133,30 @@ describe("duplicate/delete report their real outcome", () => {
   })
 })
 
-// The gated project-context assembly (5b PR-C: Instructions; AM-1: + Memory) + its per-project cloud
+// The gated project-context assembly (Instructions + Notes + auto Memory) + its per-project cloud
 // consent. buildProjectSystem is the safety invariant — private knowledge must never reach a cloud
 // model without consent — so it is asserted directly (assert-then-mutate: flip any input, it withholds).
-describe("gated project-context injection (Instructions + Memory)", () => {
-  it("buildProjectSystem: attaches labelled knowledge only when LOCAL or CONSENTED", () => {
-    // Local model → attach whatever knowledge exists (no egress), labelled per section.
-    expect(buildProjectSystem({ instructions: "be terse", memory: "prefers TS", isLocal: true, consent: false })).toBe(
-      "Project instructions:\nbe terse\n\nProject memory:\nprefers TS",
+describe("gated project-context injection (Instructions + Notes + Memory)", () => {
+  it("buildProjectSystem: attaches the three labelled sections only when LOCAL or CONSENTED", () => {
+    // Local model → attach whatever knowledge exists (no egress), labelled + ordered per section.
+    expect(buildProjectSystem({ instructions: "be terse", memory: "prefers TS", autoMemory: "uses pnpm", isLocal: true, consent: false })).toBe(
+      "Project instructions:\nbe terse\n\nProject notes:\nprefers TS\n\nProject memory:\nuses pnpm",
     )
     // Cloud + consent → attach (the user opted this project in).
-    expect(buildProjectSystem({ instructions: "be terse", memory: "", isLocal: false, consent: true })).toBe("Project instructions:\nbe terse")
+    expect(buildProjectSystem({ instructions: "be terse", memory: "", autoMemory: "", isLocal: false, consent: true })).toBe("Project instructions:\nbe terse")
     // Cloud + NO consent → withhold ALL of it (the safety invariant), even though knowledge exists.
-    expect(buildProjectSystem({ instructions: "be terse", memory: "prefers TS", isLocal: false, consent: false })).toBeUndefined()
-    // Only one part present → only that section (no empty/dangling label).
-    expect(buildProjectSystem({ instructions: "", memory: "prefers TS", isLocal: true, consent: false })).toBe("Project memory:\nprefers TS")
+    expect(buildProjectSystem({ instructions: "be terse", memory: "prefers TS", autoMemory: "uses pnpm", isLocal: false, consent: false })).toBeUndefined()
+    // Only auto-memory present → only that section (no empty/dangling labels for the others).
+    expect(buildProjectSystem({ instructions: "", memory: "", autoMemory: "uses pnpm", isLocal: true, consent: false })).toBe("Project memory:\nuses pnpm")
     // No knowledge at all → undefined regardless of model/consent (nothing to send).
-    expect(buildProjectSystem({ instructions: "", memory: "   ", isLocal: true, consent: true })).toBeUndefined() // whitespace-only = empty
+    expect(buildProjectSystem({ instructions: "", memory: "   ", autoMemory: "", isLocal: true, consent: true })).toBeUndefined() // whitespace-only = empty
   })
 
-  it("hasProjectContext: true when EITHER Instructions or Memory has content", () => {
-    expect(hasProjectContext({ instructions: "x", memory: "" })).toBe(true)
-    expect(hasProjectContext({ instructions: "", memory: "y" })).toBe(true)
-    expect(hasProjectContext({ instructions: "", memory: "   " })).toBe(false) // both empty/whitespace → nothing to gate
+  it("hasProjectContext: true when ANY of Instructions / Notes / auto Memory has content", () => {
+    expect(hasProjectContext({ instructions: "x", memory: "", autoMemory: "" })).toBe(true)
+    expect(hasProjectContext({ instructions: "", memory: "y", autoMemory: "" })).toBe(true)
+    expect(hasProjectContext({ instructions: "", memory: "", autoMemory: "z" })).toBe(true)
+    expect(hasProjectContext({ instructions: "", memory: "   ", autoMemory: " " })).toBe(false) // all empty/whitespace → nothing to gate
   })
 
   it("cloud consent defaults to false and round-trips through storage", () => {
@@ -175,5 +177,20 @@ describe("gated project-context injection (Instructions + Memory)", () => {
 
   it("hasCloudConsent is false when storage is absent rather than throwing", () => {
     expect(hasCloudConsent("p_1")).toBe(false)
+  })
+
+  it("auto-memory has its OWN delete path and is NOT copied on duplicate (it's derived from chats)", () => {
+    const store = installStorage()
+    saveStr("src", "memory", "manual note") // a CONTENT_PART → DOES copy
+    saveStr("src", "autoMemory", "learned from chats") // NOT a CONTENT_PART → must NOT copy
+    // Duplicate carries the manual note but NOT the auto-memory (the duplicate has no chats).
+    copyProjectContent("src", "dst")
+    expect(store.get("nightjar.project.dst.memory")).toBe("manual note")
+    expect(store.has("nightjar.project.dst.autoMemory")).toBe(false)
+    // deleteProjectMemoryState clears the source's auto-memory (deleteProjectContent does not touch it).
+    deleteProjectContent("src")
+    expect(store.get("nightjar.project.src.autoMemory")).toBe("learned from chats") // survived content delete
+    expect(deleteProjectMemoryState("src")).toBe(true)
+    expect(store.has("nightjar.project.src.autoMemory")).toBe(false)
   })
 })

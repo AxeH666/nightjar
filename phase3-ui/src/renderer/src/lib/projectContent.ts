@@ -12,8 +12,11 @@ export interface ProjectFile {
   content: string
 }
 
-// The three parts a project owns. Also the key space for save reporting below.
-export type ContentPart = "instructions" | "memory" | "files"
+// The parts a project owns (the key space for save reporting below). `autoMemory` is the durable
+// project memory — user-editable now, auto-generated from the project's chats in AM-2b; it is NOT a
+// CONTENT_PART (below), so it is neither copied on duplicate (it's derived from chats a duplicate
+// won't have) nor cleared by deleteProjectContent — deleteProjectMemoryState owns its lifecycle.
+export type ContentPart = "instructions" | "memory" | "files" | "autoMemory"
 
 // The outcome of the MOST RECENT write for one part. `ok: false` means the write genuinely
 // FAILED (quota exceeded, storage blocked) and the value now lives in memory only.
@@ -32,6 +35,9 @@ export interface ProjectContent {
   setInstructions: (v: string) => void
   memory: string
   setMemory: (v: string) => void
+  // Durable project memory: user-editable, and auto-generated from the project's chats (AM-2b).
+  autoMemory: string
+  setAutoMemory: (v: string) => void
   files: ProjectFile[]
   addFile: (name: string, content: string) => void
   removeFile: (id: string) => void
@@ -144,20 +150,40 @@ export function deleteProjectConsent(projectId: string): boolean {
 // (withhold ALL project knowledge, the safe default; the send still happens). Pure + fed the LIVE
 // editor values by ProjectChat, so what the user sees is exactly what's sent. Unit-tested
 // (assert-then-mutate): flip any input — empty, cloud-without-consent — and it withholds.
-export function buildProjectSystem(args: { instructions: string; memory: string; isLocal: boolean; consent: boolean }): string | undefined {
+export function buildProjectSystem(args: {
+  instructions: string
+  memory: string
+  autoMemory: string
+  isLocal: boolean
+  consent: boolean
+}): string | undefined {
   const sections = [
     args.instructions.trim() && `Project instructions:\n${args.instructions.trim()}`,
-    args.memory.trim() && `Project memory:\n${args.memory.trim()}`,
+    args.memory.trim() && `Project notes:\n${args.memory.trim()}`,
+    args.autoMemory.trim() && `Project memory:\n${args.autoMemory.trim()}`,
   ].filter(Boolean) as string[]
   if (sections.length === 0) return undefined // nothing to attach
   if (!(args.isLocal || args.consent)) return undefined // cloud + no consent → withhold ALL of it
   return sections.join("\n\n")
 }
 
-// Whether a project has ANY knowledge (Instructions or Memory) worth gating — drives the consent
-// banner, so it doesn't nag when there's nothing to protect.
-export function hasProjectContext(args: { instructions: string; memory: string }): boolean {
-  return args.instructions.trim().length > 0 || args.memory.trim().length > 0
+// Whether a project has ANY knowledge (Instructions, manual Notes, or auto Memory) worth gating —
+// drives the consent banner, so it doesn't nag when there's nothing to protect.
+export function hasProjectContext(args: { instructions: string; memory: string; autoMemory: string }): boolean {
+  return args.instructions.trim().length > 0 || args.memory.trim().length > 0 || args.autoMemory.trim().length > 0
+}
+
+// Clear the auto-memory state (AM-2a: the accepted memory; AM-2b will add the pending proposal +
+// generation meta). Own delete path — NOT part of deleteProjectContent's CONTENT_PARTS, since
+// auto-memory is derived from a project's chats and must not ride along on a duplicate. Joins
+// purgeProjectStorage's fan-out (the NJ-40/41 leak class).
+export function deleteProjectMemoryState(projectId: string): boolean {
+  try {
+    localStorage.removeItem(key(projectId, "autoMemory"))
+    return true
+  } catch {
+    return false // may linger — the caller must surface that, not hide it
+  }
 }
 
 let fseq = 0
@@ -169,6 +195,7 @@ function newFileId(): string {
 export function useProjectContent(projectId: string): ProjectContent {
   const [instructions, setInstr] = useState(() => loadStr(projectId, "instructions"))
   const [memory, setMem] = useState(() => loadStr(projectId, "memory"))
+  const [autoMemory, setAuto] = useState(() => loadStr(projectId, "autoMemory"))
   const [files, setFiles] = useState<ProjectFile[]>(() => loadFiles(projectId))
   const [saveState, setSaveState] = useState<Partial<Record<ContentPart, SaveResult>>>({})
   const filesRef = useRef(files)
@@ -185,6 +212,7 @@ export function useProjectContent(projectId: string): ProjectContent {
   useEffect(() => {
     setInstr(loadStr(projectId, "instructions"))
     setMem(loadStr(projectId, "memory"))
+    setAuto(loadStr(projectId, "autoMemory"))
     const f = loadFiles(projectId)
     filesRef.current = f
     setFiles(f)
@@ -210,6 +238,13 @@ export function useProjectContent(projectId: string): ProjectContent {
     },
     [projectId, noteSave],
   )
+  const setAutoMemory = useCallback(
+    (v: string) => {
+      setAuto(v)
+      noteSave("autoMemory", saveStr(projectId, "autoMemory", v))
+    },
+    [projectId, noteSave],
+  )
   const addFile = useCallback(
     (name: string, content: string) => {
       const next = [{ id: newFileId(), name: name.trim() || "note", content }, ...filesRef.current]
@@ -229,5 +264,5 @@ export function useProjectContent(projectId: string): ProjectContent {
     [projectId, noteSave],
   )
 
-  return { instructions, setInstructions, memory, setMemory, files, addFile, removeFile, saveState }
+  return { instructions, setInstructions, memory, setMemory, autoMemory, setAutoMemory, files, addFile, removeFile, saveState }
 }
