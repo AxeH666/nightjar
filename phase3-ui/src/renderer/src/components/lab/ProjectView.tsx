@@ -6,8 +6,8 @@ import { ProjectChat } from "./ProjectChat"
 // A project's home (Lab.md §4.6): the breadcrumb, a per-project Chat (5b — isolated to this
 // project's own OpenCode session), and the three Knowledge areas — Instructions, Memory, and
 // Files (persisted per project). Chat is the primary surface; Knowledge holds the project's
-// durable context. Instructions now reach the agent as system context (PR-C), gated by per-project
-// cloud consent so they never egress to a cloud model without opt-in; Memory/Files do not yet.
+// durable context. Instructions (PR-C) and Memory (AM-1) reach the agent as system context, gated by
+// per-project cloud consent so they never egress to a cloud model without opt-in; Files do not yet.
 export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope; projectId: string; onBack: () => void }) {
   const store = useProjects(scope)
   // Read from `projects` state, NOT store.get(): `get` is memoized against the ref with an
@@ -49,10 +49,10 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
       {/* Chat stays MOUNTED across a tab switch (hidden, not unmounted) so switching to Knowledge
           and back doesn't tear down the session or lose scroll/streaming state. */}
       <div className={tab === "chat" ? "min-h-0 flex-1" : "hidden"}>
-        {/* Instructions come from this view's LIVE content, so both the chat's cloud-consent banner
-            AND its send-time injection use the same value the user sees — reacting immediately to
-            Knowledge-tab edits, with no live-vs-storage divergence (PR-C). */}
-        <ProjectChat projectId={projectId} instructions={content.instructions} />
+        {/* Instructions + Memory come from this view's LIVE content, so both the chat's cloud-consent
+            banner AND its send-time injection use the same values the user sees — reacting immediately
+            to Knowledge-tab edits, with no live-vs-storage divergence (PR-C + AM-1). */}
+        <ProjectChat projectId={projectId} instructions={content.instructions} memory={content.memory} />
       </div>
 
       <div className={tab === "knowledge" ? "min-h-0 flex-1 overflow-y-auto p-6" : "hidden"}>
@@ -73,7 +73,13 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
             />
           </Panel>
 
-          <Panel emoji="💾" title="Memory" optional save={content.saveState.memory} note="Durable context for this project. Private to you.">
+          <Panel
+            emoji="💾"
+            title="Memory"
+            optional
+            save={content.saveState.memory}
+            note="Durable context sent to this project's chats as system context (same cloud gate as Instructions). Private to you."
+          >
             <textarea
               value={content.memory}
               onChange={(e) => content.setMemory(e.target.value)}
@@ -94,7 +100,7 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
           </Panel>
 
           <p className="text-center text-xs text-nightjar-text/30">
-            The Chat tab is isolated to this project. Instructions now guide its chats (cloud models need your per-project OK); Memory and Files don't reach the agent yet.
+            The Chat tab is isolated to this project. Instructions and Memory guide its chats (cloud models need your per-project OK); Files don't reach the agent yet.
           </p>
         </div>
       </div>
