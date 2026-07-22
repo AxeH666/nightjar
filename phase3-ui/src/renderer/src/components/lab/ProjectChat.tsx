@@ -17,13 +17,23 @@ import { LOCAL_MODEL } from "../../lib/byok"
 // conversation, each bound to its own OpenCode session so it's isolated per project. Mirrors
 // ChatScreen's wiring but against the project's active session (projectChats[projectId]) and its
 // own history list. The active id comes from context state, so a reconnect that keeps the session
-// never blanks the transcript. This view attaches the project's knowledge — Instructions (PR-C) +
-// Memory (AM-1) — to each send as system context, GATED by per-project cloud consent (the banner
-// below) and computed from the SAME live values the banner uses; image-gen stays OFF here
+// never blanks the transcript. This view attaches the project's knowledge — Instructions, manual
+// Notes, and auto Memory (AM-2) — to each send as system context, GATED by per-project cloud consent
+// (the banner below) and computed from the SAME live values the banner uses; image-gen stays OFF here
 // (createImage: false), so the text send path is the only egress the gate must cover.
 const AGENT_FOR_MODE = { research: "research", websearch: "websearch", none: "assistant" } as const
 
-export function ProjectChat({ projectId, instructions = "", memory = "" }: { projectId: string; instructions?: string; memory?: string }) {
+export function ProjectChat({
+  projectId,
+  instructions = "",
+  memory = "",
+  autoMemory = "",
+}: {
+  projectId: string
+  instructions?: string
+  memory?: string
+  autoMemory?: string
+}) {
   const { messagesOf, busyOf, send, createImage, openProjectChat, newProjectChat, resumeProjectChat, deleteProjectChatOne, moveChatToScope, projectChats, projectChatIds } =
     useSessions()
   // The general-space Projects are this chat's Move destinations (to another project, or "Remove
@@ -50,8 +60,8 @@ export function ProjectChat({ projectId, instructions = "", memory = "" }: { pro
   // edits). The SAME values drive both the consent banner and the send-time injection, so what the user
   // sees is exactly what's sent — no live-vs-storage split-brain. buildProjectSystem bakes in the gate
   // (returns undefined when empty, or when a cloud model lacks consent → withhold ALL project knowledge).
-  const projectSystem = buildProjectSystem({ instructions, memory, isLocal: activeChoice.local, consent: consented })
-  const showConsent = connected && !activeChoice.local && hasProjectContext({ instructions, memory }) && !consented
+  const projectSystem = buildProjectSystem({ instructions, memory, autoMemory, isLocal: activeChoice.local, consent: consented })
+  const showConsent = connected && !activeChoice.local && hasProjectContext({ instructions, memory, autoMemory }) && !consented
 
   // Resolve the project's active chat on open, project switch, and reconnect (sessionID changes /
   // goes empty→set). A still-bound chat is returned as-is — there is NO liveness re-check (the

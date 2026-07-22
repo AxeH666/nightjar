@@ -94,7 +94,7 @@ describe("persistDuplicate leaves storage clean on any failure", () => {
 // purgeProjectStorage would leave this test passing while leaking, so extend it alongside any
 // new part.
 describe("purgeProjectStorage clears every per-project storage family", () => {
-  it("removes content, the chat session-id set, pinned + unread chats AND the cloud-consent flag, touching no other project", () => {
+  it("removes content, the chat session-id set, pins, unread, the cloud-consent flag AND auto-memory, touching no other project", () => {
     const store = installStorage()
     // Seed EVERY one of project p_1's families — content, session-id set, pinned, unread, consent.
     saveStr("p_1", "instructions", "x")
@@ -104,6 +104,7 @@ describe("purgeProjectStorage clears every per-project storage family", () => {
     store.set("nightjar.pinned.chat.p_1", JSON.stringify(["s1"])) // the chat-menu pin key
     store.set("nightjar.unread.chat.p_1", JSON.stringify(["s1"])) // the chat-menu unread key
     store.set("nightjar.project.p_1.cloudConsent", "1") // the 5b PR-C cloud-consent flag
+    store.set("nightjar.project.p_1.autoMemory", "learned") // the AM-2a auto-memory (its own delete path)
     // ...and a bystander project + General history/pins/unread that must survive.
     saveStr("p_2", "instructions", "keep me")
     store.set("nightjar.sessionIds.chat", JSON.stringify(["general"]))
