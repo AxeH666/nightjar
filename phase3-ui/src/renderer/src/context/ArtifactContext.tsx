@@ -11,7 +11,8 @@
 // Extracted from the former App.tsx monolith (redesign Stage 2), verbatim.
 import { createContext, useCallback, useContext, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { artifactActionFromTool, previewBridge } from "../lib/preview"
+import { previewBridge } from "../lib/preview"
+import { codeViewer } from "../lib/viewers"
 import type { ToolCall } from "../lib/opencode"
 
 // Prefer the newest .html as the active preview entry; otherwise the latest file.
@@ -122,8 +123,9 @@ export function ArtifactProvider({ children }: { children: ReactNode }) {
     (call: ToolCall, sid: string) => {
       // Live-preview: mirror the coding agent's write/edit file content into the
       // per-session sandbox and open the Artifacts panel. Re-mirror only when the
-      // content grows/completes (the same tool part arrives repeatedly).
-      const action = artifactActionFromTool(call)
+      // content grows/completes (the same tool part arrives repeatedly). The match/
+      // extract is the Code viewer's descriptor (M3 seam); the mirror + dedup stay here.
+      const action = codeViewer.match(call)
       const pv = previewBridge()
       if (!action || !pv || !sid) return
       // First artifact activity for a new session (e.g. after a reconnect) → drop

@@ -24,6 +24,7 @@ import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
 import { loadProjectChatIds, saveProjectChatIds, sessionIdsKey, sameChatScope, displayChatTitle, type ChatMoveScope } from "../lib/sessionScope"
 import { assembleTranscripts, buildSummaryPrompt, type ChatTranscript } from "../lib/autoMemory"
+import { isCadExportTool, cadExportPath } from "../lib/viewers"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -243,7 +244,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           const cadId = slotsRef.current.cad
           for (const m of (cadId && sessionsRef.current[cadId]?.messages) || [])
             for (const b of m.blocks)
-              if (b.kind === "tool" && b.call.status === "completed" && /build123d_export/i.test(b.call.tool))
+              if (b.kind === "tool" && b.call.status === "completed" && isCadExportTool(b.call.tool))
                 processedExportsRef.current.add(b.call.callID)
         }
       })
@@ -525,8 +526,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       // leave the viewer empty with no recovery (Bugbot). By session.idle every tool call is
       // terminal, so a still-pending export can't wrongly trip the retry here.
       if (refs?.cadExport) {
-        if (/build123d_export/i.test(call.tool)) {
-          if (call.status === "completed" && /Exported to:?\s*\S[^\n]*?\.step\b/i.test(call.output ?? "")) refs.cadExport.sawExport = true
+        if (isCadExportTool(call.tool)) {
+          if (call.status === "completed" && cadExportPath(call.output) !== null) refs.cadExport.sawExport = true
         } else if (/build123d_(execute|render_view)/i.test(call.tool)) {
           refs.cadExport.sawBuild = true
         }
@@ -878,15 +879,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (
           call.status !== "completed" ||
           !call.output ||
-          !/build123d_export/i.test(call.tool) ||
+          !isCadExportTool(call.tool) ||
           processedExportsRef.current.has(call.callID) || // already shown / errored
           convertingExportsRef.current.has(call.callID) // in flight — don't double-convert
         )
           continue
-        // export() outputs "Exported to <path>.step<suffix>" (single) OR "Exported to:\n
-        // <path>.step\n…" (multi/list). Match both: optional colon, any whitespace incl. the
-        // newline, then the first token ending in .step (stop before the volume/bbox suffix).
-        const path = /Exported to:?\s*(\S[^\n]*?\.step)\b/i.exec(call.output)?.[1]
+        // The .step path the viewer converts (cadExportPath handles the single "Exported to <p>.step"
+        // and the multi-line "Exported to:\n<p>.step\n…" forms — see lib/viewers/cadViewer).
+        const path = cadExportPath(call.output)
         if (!path) continue
         convertingExportsRef.current.add(call.callID)
         const gen = ++cadGenRef.current
