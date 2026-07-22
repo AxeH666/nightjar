@@ -183,14 +183,20 @@ describe("gated project-context injection (Instructions + Notes + Memory)", () =
     const store = installStorage()
     saveStr("src", "memory", "manual note") // a CONTENT_PART → DOES copy
     saveStr("src", "autoMemory", "learned from chats") // NOT a CONTENT_PART → must NOT copy
-    // Duplicate carries the manual note but NOT the auto-memory (the duplicate has no chats).
+    store.set("nightjar.project.src.autoMemoryProposal", JSON.stringify({ text: "pending", chatCount: 3 }))
+    store.set("nightjar.project.src.memoryMeta", JSON.stringify({ lastGeneratedAt: 1, sourceChatCount: 3 }))
+    // Duplicate carries the manual note but NONE of the auto-memory state (the duplicate has no chats).
     copyProjectContent("src", "dst")
     expect(store.get("nightjar.project.dst.memory")).toBe("manual note")
     expect(store.has("nightjar.project.dst.autoMemory")).toBe(false)
-    // deleteProjectMemoryState clears the source's auto-memory (deleteProjectContent does not touch it).
+    expect(store.has("nightjar.project.dst.autoMemoryProposal")).toBe(false)
+    expect(store.has("nightjar.project.dst.memoryMeta")).toBe(false)
+    // deleteProjectMemoryState clears ALL auto-memory keys (deleteProjectContent touches none of them).
     deleteProjectContent("src")
     expect(store.get("nightjar.project.src.autoMemory")).toBe("learned from chats") // survived content delete
     expect(deleteProjectMemoryState("src")).toBe(true)
     expect(store.has("nightjar.project.src.autoMemory")).toBe(false)
+    expect(store.has("nightjar.project.src.autoMemoryProposal")).toBe(false)
+    expect(store.has("nightjar.project.src.memoryMeta")).toBe(false)
   })
 })

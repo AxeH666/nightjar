@@ -28,6 +28,11 @@ const STREAM_IDLE_TIMEOUT_MS = 30000
 // (ask removed-but-paused server-side), or a history fetch FOREVER. A bit longer for prompt to
 // allow a large base64 attachment upload.
 const REQUEST_TIMEOUT_MS = 30000
+// The SYNCHRONOUS /message prompt blocks until the WHOLE turn finishes, so a local-model summary can
+// run far longer than a fire-and-forget prompt_async. Give it its own generous wall-clock bound
+// (rule 3 — bounded, not infinite) so a wedged generation can't hang the caller forever; the caller
+// surfaces the abort as a failed regeneration.
+const SYNC_PROMPT_TIMEOUT_MS = 120000
 
 export interface AgentInfo {
   name: string
@@ -161,6 +166,30 @@ export class OpenCodeClient {
     if (!res.ok && res.status !== 204) {
       throw new Error(`POST prompt_async → ${res.status}: ${await res.text()}`)
     }
+  }
+
+  // SYNCHRONOUS one-shot: POST /session/:id/message BLOCKS until the whole turn finishes and returns
+  // the final assistant message (WithParts) in the body. Used for background summarisation on an
+  // ephemeral session (no SSE demux needed) — auto-memory generation. Returns the concatenated
+  // assistant text (visible text parts only). `system` carries the summarise directive.
+  async prompt(sessionID: string, text: string, agent: string, model?: string, system?: string): Promise<string> {
+    let modelRef: { providerID: string; modelID: string } | undefined
+    if (model) {
+      const slash = model.indexOf("/")
+      if (slash > 0) modelRef = { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) }
+    }
+    const res = await fetch(this.url(`/session/${sessionID}/message`), {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ agent, ...(modelRef ? { model: modelRef } : {}), ...(system ? { system } : {}), parts: [{ type: "text", text }] }),
+      signal: AbortSignal.timeout(SYNC_PROMPT_TIMEOUT_MS), // rule 3: a wedged generation must not hang the caller
+    })
+    if (!res.ok) throw new Error(`POST message → ${res.status}: ${await res.text()}`)
+    const msg = (await res.json()) as MessageWithParts
+    return (msg.parts ?? [])
+      .filter((p) => p?.type === "text" && !p?.synthetic && !p?.ignored && typeof p?.text === "string")
+      .map((p) => p.text as string)
+      .join("")
   }
 
   async replyPermission(requestID: string, reply: ReplyKind, message?: string): Promise<void> {

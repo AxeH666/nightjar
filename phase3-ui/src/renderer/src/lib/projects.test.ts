@@ -104,7 +104,9 @@ describe("purgeProjectStorage clears every per-project storage family", () => {
     store.set("nightjar.pinned.chat.p_1", JSON.stringify(["s1"])) // the chat-menu pin key
     store.set("nightjar.unread.chat.p_1", JSON.stringify(["s1"])) // the chat-menu unread key
     store.set("nightjar.project.p_1.cloudConsent", "1") // the 5b PR-C cloud-consent flag
-    store.set("nightjar.project.p_1.autoMemory", "learned") // the AM-2a auto-memory (its own delete path)
+    store.set("nightjar.project.p_1.autoMemory", "learned") // AM-2a/2b auto-memory state (own delete path)
+    store.set("nightjar.project.p_1.autoMemoryProposal", JSON.stringify({ text: "p", chatCount: 1 }))
+    store.set("nightjar.project.p_1.memoryMeta", JSON.stringify({ lastGeneratedAt: 1, sourceChatCount: 1 }))
     // ...and a bystander project + General history/pins/unread that must survive.
     saveStr("p_2", "instructions", "keep me")
     store.set("nightjar.sessionIds.chat", JSON.stringify(["general"]))
