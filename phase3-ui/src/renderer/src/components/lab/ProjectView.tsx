@@ -321,7 +321,7 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
     setError(null)
     const res = await summarizeProjectChats(projectId, content.autoMemory)
     setBusy(false)
-    if (res.ok) content.setMemoryProposal(res.summary, res.chatCount)
+    if (res.ok) content.setMemoryProposal(res.summary, res.chatCount, res.coveredCount)
     else setError(res.error)
   }
 
@@ -361,6 +361,11 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
       {proposal && (
         <div className="mt-3 rounded-lg border border-nightjar-accent/50 bg-nightjar-accent/5 p-2">
           <p className="mb-1 text-xs font-medium text-nightjar-text/70">Proposed memory — review before it replaces the current one:</p>
+          {proposal.coveredCount < proposal.chatCount && (
+            <p className="mb-1 text-[11px] text-nightjar-alert">
+              ⚠ Based on {proposal.coveredCount} of {proposal.chatCount} chats (older/longer ones didn't fit).
+            </p>
+          )}
           <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-sm text-nightjar-text/80">{proposal.text}</pre>
           <div className="mt-2 flex gap-2">
             <button

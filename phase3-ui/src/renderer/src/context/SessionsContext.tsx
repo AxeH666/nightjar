@@ -167,7 +167,7 @@ interface SessionsValue {
   summarizeProjectChats: (
     projectId: string,
     currentMemory: string,
-  ) => Promise<{ ok: true; summary: string; chatCount: number } | { ok: false; error: string }>
+  ) => Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number } | { ok: false; error: string }>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
@@ -1460,7 +1460,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const MAX_MEMORY_CHATS = 20 // cap the chats gathered (newest-first) so gathering stays bounded
   const MAX_TRANSCRIPT_CHARS = 12000 // ~fits the local 4B context alongside the directive; tune live
   const summarizeProjectChats = useCallback(
-    async (projectId: string, currentMemory: string): Promise<{ ok: true; summary: string; chatCount: number } | { ok: false; error: string }> => {
+    async (
+      projectId: string,
+      currentMemory: string,
+    ): Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number } | { ok: false; error: string }> => {
       const client = clientRef.current
       if (!client) return { ok: false, error: "Not connected to the engine." }
       const allIds = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
@@ -1482,7 +1485,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         } catch {
           continue // skip a dead/unreadable chat rather than fail the whole summary
         }
-        const turns = msgs
+        // Order by creation time before extracting turns — GET /message is not guaranteed sorted, and
+        // a scrambled transcript summarises wrong (mirrors messagesFromHistory's defensive sort — Bugbot).
+        const turns = [...msgs]
+          .sort((a, b) => (a.info?.time?.created ?? 0) - (b.info?.time?.created ?? 0))
           .map((m) => ({
             role: m.info.role === "user" ? ("user" as const) : ("assistant" as const),
             text: (m.parts ?? [])
@@ -1495,7 +1501,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (turns.length) transcripts.push({ title: displayChatTitle(titles.get(id)), turns })
       }
       if (!transcripts.length) return { ok: false, error: "Couldn't read any chat content to summarise." }
-      const prompt = buildSummaryPrompt({ transcripts: assembleTranscripts(transcripts, MAX_TRANSCRIPT_CHARS), currentMemory })
+      const { text: transcriptText, includedChats } = assembleTranscripts(transcripts, MAX_TRANSCRIPT_CHARS)
+      if (!transcriptText.trim()) return { ok: false, error: "The project's chats are too large to summarise — try trimming them." }
+      const prompt = buildSummaryPrompt({ transcripts: transcriptText, currentMemory })
       let sid: string
       try {
         sid = await client.createSession("Auto-memory (temp)") // forced title → not auto-titled; deleted below
@@ -1505,7 +1513,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       try {
         const summary = (await client.prompt(sid, prompt, "summary", LOCAL_MODEL.id)).trim()
         if (!summary) return { ok: false, error: "The model returned an empty summary — try again." }
-        return { ok: true, summary, chatCount }
+        // chatCount = the project's FULL chat count (drives staleness); coveredCount = how many were
+        // actually summarised (≤ the cap, minus any dropped to fit) — so the UI can flag partial
+        // coverage rather than present it as complete (rule 8 — Bugbot).
+        return { ok: true, summary, chatCount, coveredCount: includedChats }
       } catch (err: any) {
         return { ok: false, error: `summary failed: ${err?.message ?? err}` }
       } finally {

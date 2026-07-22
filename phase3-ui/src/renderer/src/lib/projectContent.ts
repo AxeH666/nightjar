@@ -41,7 +41,7 @@ export interface ProjectContent {
   // A regenerated memory awaiting review (null = none pending). Regeneration NEVER overwrites the
   // accepted memory — it stages a proposal the user Accepts (adopt) or Discards (keep current).
   autoMemoryProposal: MemoryProposal | null
-  setMemoryProposal: (text: string, chatCount: number) => void
+  setMemoryProposal: (text: string, chatCount: number, coveredCount: number) => void
   acceptMemoryProposal: () => void
   discardMemoryProposal: () => void
   // When the accepted memory was last generated + how many chats it covered (null = never generated).
@@ -181,11 +181,14 @@ export function hasProjectContext(args: { instructions: string; memory: string; 
   return args.instructions.trim().length > 0 || args.memory.trim().length > 0 || args.autoMemory.trim().length > 0
 }
 
-// A regenerated auto-memory awaiting the user's Accept/Discard (AM-2b). Carries the chat count it
-// summarised so Accept can stamp the meta correctly even after a remount (the proposal persists).
+// A regenerated auto-memory awaiting the user's Accept/Discard (AM-2b). Carries `chatCount` (the
+// project's full chat count, stamped into the meta on Accept for staleness) and `coveredCount` (how
+// many chats the summary was actually based on) so the review can flag partial coverage — both
+// persist with the proposal so they survive a remount before the user decides.
 export interface MemoryProposal {
   text: string
   chatCount: number
+  coveredCount: number
 }
 // Metadata for the ACCEPTED auto-memory (not the proposal): when it was generated + how many chats it
 // covered, so the UI can show "last updated" and a count-based "N new chats since" staleness hint.
@@ -283,8 +286,8 @@ export function useProjectContent(projectId: string): ProjectContent {
   // Stage a regenerated memory for review (does NOT touch the accepted memory). Persisted so it
   // survives navigating away and back before the user decides.
   const setMemoryProposal = useCallback(
-    (text: string, chatCount: number) => {
-      const p: MemoryProposal = { text, chatCount }
+    (text: string, chatCount: number, coveredCount: number) => {
+      const p: MemoryProposal = { text, chatCount, coveredCount }
       setProposal(p)
       try {
         localStorage.setItem(key(projectId, "autoMemoryProposal"), JSON.stringify(p))

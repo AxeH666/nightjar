@@ -16,8 +16,11 @@ export interface ChatTranscript {
 // Concatenate a project's chats into ONE transcript for summarisation, in the order given (the caller
 // passes newest-first), capped to maxChars so a long history fits the local model's context. When the
 // cap is hit, later chats are dropped and an explicit marker is appended — so a summary is never
-// silently based on partial coverage (rule 8). Chats with no text are skipped.
-export function assembleTranscripts(chats: ChatTranscript[], maxChars: number): string {
+// silently based on partial coverage (rule 8). If even the FIRST chat overflows, a truncated head of
+// it is included (never nothing — else the model would summarise from the directive alone). Chats with
+// no text are skipped. Returns the text AND `includedChats` (how many made it in) so the caller can
+// tell the user "based on N of M chats" whenever coverage is partial.
+export function assembleTranscripts(chats: ChatTranscript[], maxChars: number): { text: string; includedChats: number } {
   const blocks: string[] = []
   let used = 0
   let truncated = false
@@ -25,17 +28,26 @@ export function assembleTranscripts(chats: ChatTranscript[], maxChars: number): 
     const lines = chat.turns.filter((t) => t.text.trim()).map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text.trim()}`)
     if (!lines.length) continue
     const block = `### ${chat.title.trim() || "Chat"}\n${lines.join("\n")}`
-    // +2 for the "\n\n" separator between blocks (not before the first).
-    const cost = block.length + (blocks.length ? 2 : 0)
-    if (used + cost > maxChars) {
+    const sep = blocks.length ? 2 : 0 // "\n\n" between blocks, not before the first
+    if (used + block.length + sep > maxChars) {
+      // Doesn't fit. If nothing is in yet, include a truncated HEAD so there's always material to
+      // summarise (never directive-only — Bugbot); otherwise stop before this chat.
+      if (blocks.length === 0) {
+        const room = maxChars - 48 // leave space for the marker below
+        if (room > 0) {
+          blocks.push(block.slice(0, room))
+          used += room
+        }
+      }
       truncated = true
       break
     }
     blocks.push(block)
-    used += cost
+    used += block.length + sep
   }
   const body = blocks.join("\n\n")
-  return truncated && body ? `${body}\n\n[…older chats omitted to fit the context window]` : body
+  const text = truncated && body ? `${body}\n\n[…older/longer chats omitted to fit the context window]` : body
+  return { text, includedChats: blocks.length }
 }
 
 // The summarise directive + material. `currentMemory` (if any) is offered as the base to BUILD ON, so

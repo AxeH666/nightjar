@@ -7,29 +7,40 @@ describe("assembleTranscripts", () => {
     turns: turns.map(([role, text]) => ({ role, text })),
   })
 
-  it("labels roles, headers each chat by title, and joins in the given order", () => {
+  it("labels roles, headers each chat by title, joins in order, and counts included chats", () => {
     const out = assembleTranscripts([chat("Setup", ["user", "use Rust"], ["assistant", "ok"]), chat("Bugs", ["user", "fix it"])], 10000)
-    expect(out).toBe("### Setup\nUser: use Rust\nAssistant: ok\n\n### Bugs\nUser: fix it")
+    expect(out.text).toBe("### Setup\nUser: use Rust\nAssistant: ok\n\n### Bugs\nUser: fix it")
+    expect(out.includedChats).toBe(2)
   })
 
   it("skips empty/whitespace turns and chats with no text", () => {
     const out = assembleTranscripts([chat("A", ["user", "  "], ["assistant", "kept"]), chat("Empty", ["user", ""])], 10000)
-    expect(out).toBe("### A\nAssistant: kept") // the whitespace user turn and the all-empty chat are dropped
+    expect(out.text).toBe("### A\nAssistant: kept") // the whitespace user turn and the all-empty chat are dropped
+    expect(out.includedChats).toBe(1)
   })
 
   it("falls back to 'Chat' for an untitled chat", () => {
-    expect(assembleTranscripts([chat("   ", ["user", "hi"])], 10000)).toBe("### Chat\nUser: hi")
+    expect(assembleTranscripts([chat("   ", ["user", "hi"])], 10000).text).toBe("### Chat\nUser: hi")
   })
 
-  it("drops later chats past the cap and appends an explicit truncation marker (never silent)", () => {
+  it("drops later chats past the cap, appends a marker, and reports fewer includedChats", () => {
     const first = assembleTranscripts([chat("Keep", ["user", "hi"])], 10000)
-    const out = assembleTranscripts([chat("Keep", ["user", "hi"]), chat("Drop", ["user", "x".repeat(500)])], first.length + 5)
-    expect(out).toBe("### Keep\nUser: hi\n\n[…older chats omitted to fit the context window]")
+    const out = assembleTranscripts([chat("Keep", ["user", "hi"]), chat("Drop", ["user", "x".repeat(500)])], first.text.length + 5)
+    expect(out.text).toBe("### Keep\nUser: hi\n\n[…older/longer chats omitted to fit the context window]")
+    expect(out.includedChats).toBe(1) // only the first chat made it — the caller can flag "1 of 2"
   })
 
-  it("returns '' (no marker) when there's nothing to include", () => {
-    expect(assembleTranscripts([], 100)).toBe("")
-    expect(assembleTranscripts([chat("Empty", ["user", ""])], 100)).toBe("")
+  it("includes a truncated HEAD when even the FIRST chat overflows — never directive-only (Bugbot)", () => {
+    const out = assembleTranscripts([chat("Big", ["user", "y".repeat(1000)])], 200)
+    expect(out.text.length).toBeGreaterThan(0) // NOT empty
+    expect(out.text.startsWith("### Big\nUser: yyy")).toBe(true)
+    expect(out.text).toContain("omitted to fit the context window")
+    expect(out.includedChats).toBe(1)
+  })
+
+  it("returns '' with includedChats 0 when there's nothing to include", () => {
+    expect(assembleTranscripts([], 100)).toEqual({ text: "", includedChats: 0 })
+    expect(assembleTranscripts([chat("Empty", ["user", ""])], 100)).toEqual({ text: "", includedChats: 0 })
   })
 })
 
