@@ -183,7 +183,7 @@ describe("gated project-context injection (Instructions + Notes + Memory)", () =
     const store = installStorage()
     saveStr("src", "memory", "manual note") // a CONTENT_PART → DOES copy
     saveStr("src", "autoMemory", "learned from chats") // NOT a CONTENT_PART → must NOT copy
-    store.set("nightjar.project.src.autoMemoryProposal", JSON.stringify({ text: "pending", chatCount: 3, coveredCount: 3 }))
+    store.set("nightjar.project.src.autoMemoryProposal", JSON.stringify({ text: "pending", chatCount: 3, coveredCount: 3, truncated: false }))
     store.set("nightjar.project.src.memoryMeta", JSON.stringify({ lastGeneratedAt: 1, sourceChatCount: 3 }))
     // Duplicate carries the manual note but NONE of the auto-memory state (the duplicate has no chats).
     copyProjectContent("src", "dst")

@@ -41,7 +41,7 @@ export interface ProjectContent {
   // A regenerated memory awaiting review (null = none pending). Regeneration NEVER overwrites the
   // accepted memory — it stages a proposal the user Accepts (adopt) or Discards (keep current).
   autoMemoryProposal: MemoryProposal | null
-  setMemoryProposal: (text: string, chatCount: number, coveredCount: number) => void
+  setMemoryProposal: (text: string, chatCount: number, coveredCount: number, truncated: boolean) => void
   acceptMemoryProposal: () => void
   discardMemoryProposal: () => void
   // When the accepted memory was last generated + how many chats it covered (null = never generated).
@@ -189,6 +189,7 @@ export interface MemoryProposal {
   text: string
   chatCount: number
   coveredCount: number
+  truncated: boolean // content was dropped/shortened to fit — flag partial coverage even at 1-of-1
 }
 // Metadata for the ACCEPTED auto-memory (not the proposal): when it was generated + how many chats it
 // covered, so the UI can show "last updated" and a count-based "N new chats since" staleness hint.
@@ -286,8 +287,8 @@ export function useProjectContent(projectId: string): ProjectContent {
   // Stage a regenerated memory for review (does NOT touch the accepted memory). Persisted so it
   // survives navigating away and back before the user decides.
   const setMemoryProposal = useCallback(
-    (text: string, chatCount: number, coveredCount: number) => {
-      const p: MemoryProposal = { text, chatCount, coveredCount }
+    (text: string, chatCount: number, coveredCount: number, truncated: boolean) => {
+      const p: MemoryProposal = { text, chatCount, coveredCount, truncated }
       setProposal(p)
       try {
         localStorage.setItem(key(projectId, "autoMemoryProposal"), JSON.stringify(p))

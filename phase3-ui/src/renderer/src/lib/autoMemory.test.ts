@@ -11,6 +11,7 @@ describe("assembleTranscripts", () => {
     const out = assembleTranscripts([chat("Setup", ["user", "use Rust"], ["assistant", "ok"]), chat("Bugs", ["user", "fix it"])], 10000)
     expect(out.text).toBe("### Setup\nUser: use Rust\nAssistant: ok\n\n### Bugs\nUser: fix it")
     expect(out.includedChats).toBe(2)
+    expect(out.truncated).toBe(false) // everything fit
   })
 
   it("skips empty/whitespace turns and chats with no text", () => {
@@ -28,19 +29,21 @@ describe("assembleTranscripts", () => {
     const out = assembleTranscripts([chat("Keep", ["user", "hi"]), chat("Drop", ["user", "x".repeat(500)])], first.text.length + 5)
     expect(out.text).toBe("### Keep\nUser: hi\n\n[…older/longer chats omitted to fit the context window]")
     expect(out.includedChats).toBe(1) // only the first chat made it — the caller can flag "1 of 2"
+    expect(out.truncated).toBe(true)
   })
 
-  it("includes a truncated HEAD when even the FIRST chat overflows — never directive-only (Bugbot)", () => {
+  it("truncated is true even when the SINGLE chat is shortened to fit (all chats 'included' — Bugbot)", () => {
     const out = assembleTranscripts([chat("Big", ["user", "y".repeat(1000)])], 200)
-    expect(out.text.length).toBeGreaterThan(0) // NOT empty
+    expect(out.text.length).toBeGreaterThan(0) // NOT empty — a truncated HEAD is included
     expect(out.text.startsWith("### Big\nUser: yyy")).toBe(true)
     expect(out.text).toContain("omitted to fit the context window")
     expect(out.includedChats).toBe(1)
+    expect(out.truncated).toBe(true) // includedChats == chatCount, yet coverage is still partial
   })
 
-  it("returns '' with includedChats 0 when there's nothing to include", () => {
-    expect(assembleTranscripts([], 100)).toEqual({ text: "", includedChats: 0 })
-    expect(assembleTranscripts([chat("Empty", ["user", ""])], 100)).toEqual({ text: "", includedChats: 0 })
+  it("returns '' with includedChats 0 and truncated false when there's nothing to include", () => {
+    expect(assembleTranscripts([], 100)).toEqual({ text: "", includedChats: 0, truncated: false })
+    expect(assembleTranscripts([chat("Empty", ["user", ""])], 100)).toEqual({ text: "", includedChats: 0, truncated: false })
   })
 })
 

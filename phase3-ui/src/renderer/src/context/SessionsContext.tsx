@@ -167,7 +167,7 @@ interface SessionsValue {
   summarizeProjectChats: (
     projectId: string,
     currentMemory: string,
-  ) => Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number } | { ok: false; error: string }>
+  ) => Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number; truncated: boolean } | { ok: false; error: string }>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
@@ -1464,7 +1464,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     async (
       projectId: string,
       currentMemory: string,
-    ): Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number } | { ok: false; error: string }> => {
+    ): Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number; truncated: boolean } | { ok: false; error: string }> => {
       const client = clientRef.current
       if (!client) return { ok: false, error: "Not connected to the engine." }
       const allIds = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
@@ -1508,7 +1508,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (turns.length) transcripts.push({ title: displayChatTitle(titles.get(id)), turns })
       }
       if (!transcripts.length) return { ok: false, error: "Couldn't read any chat content to summarise." }
-      const { text: transcriptText, includedChats } = assembleTranscripts(transcripts, MAX_TRANSCRIPT_CHARS)
+      const { text: transcriptText, includedChats, truncated } = assembleTranscripts(transcripts, MAX_TRANSCRIPT_CHARS)
       if (!transcriptText.trim()) return { ok: false, error: "The project's chats are too large to summarise — try trimming them." }
       const prompt = buildSummaryPrompt({ transcripts: transcriptText, currentMemory })
       let sid: string
@@ -1526,9 +1526,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         const summary = (await client.prompt(sid, prompt, validAgent("assistant"), LOCAL_MODEL.id)).trim()
         if (!summary) return { ok: false, error: "The model returned an empty summary — try again." }
         // chatCount = the project's FULL chat count (drives staleness); coveredCount = how many were
-        // actually summarised (≤ the cap, minus any dropped to fit) — so the UI can flag partial
-        // coverage rather than present it as complete (rule 8 — Bugbot).
-        return { ok: true, summary, chatCount, coveredCount: includedChats }
+        // actually summarised; truncated = whether ANY content was dropped (later chats OR a shortened
+        // head of one) — so the UI can flag partial coverage rather than present it as complete, even
+        // when every chat is "included" but one was truncated to fit (rule 8 — Bugbot).
+        return { ok: true, summary, chatCount, coveredCount: includedChats, truncated }
       } catch (err: any) {
         return { ok: false, error: `summary failed: ${err?.message ?? err}` }
       } finally {

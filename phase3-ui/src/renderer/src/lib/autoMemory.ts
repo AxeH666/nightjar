@@ -18,9 +18,13 @@ export interface ChatTranscript {
 // cap is hit, later chats are dropped and an explicit marker is appended — so a summary is never
 // silently based on partial coverage (rule 8). If even the FIRST chat overflows, a truncated head of
 // it is included (never nothing — else the model would summarise from the directive alone). Chats with
-// no text are skipped. Returns the text AND `includedChats` (how many made it in) so the caller can
-// tell the user "based on N of M chats" whenever coverage is partial.
-export function assembleTranscripts(chats: ChatTranscript[], maxChars: number): { text: string; includedChats: number } {
+// no text are skipped. Returns the text, `includedChats` (how many made it in), and `truncated` (was
+// ANY content dropped — later chats OR a truncated head of an oversized one) so the caller can flag
+// partial coverage even when every chat is "included" but one was shortened to fit.
+export function assembleTranscripts(
+  chats: ChatTranscript[],
+  maxChars: number,
+): { text: string; includedChats: number; truncated: boolean } {
   const blocks: string[] = []
   let used = 0
   let truncated = false
@@ -47,7 +51,7 @@ export function assembleTranscripts(chats: ChatTranscript[], maxChars: number): 
   }
   const body = blocks.join("\n\n")
   const text = truncated && body ? `${body}\n\n[…older/longer chats omitted to fit the context window]` : body
-  return { text, includedChats: blocks.length }
+  return { text, includedChats: blocks.length, truncated }
 }
 
 // The summarise directive + material. `currentMemory` (if any) is offered as the base to BUILD ON, so

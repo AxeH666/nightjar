@@ -324,7 +324,7 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
     setError(null)
     try {
       const res = await summarizeProjectChats(projectId, content.autoMemory)
-      if (res.ok) content.setMemoryProposal(res.summary, res.chatCount, res.coveredCount)
+      if (res.ok) content.setMemoryProposal(res.summary, res.chatCount, res.coveredCount, res.truncated)
       else setError(res.error)
     } finally {
       runningRef.current = false
@@ -372,9 +372,12 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
       {proposal && (
         <div className="mt-3 rounded-lg border border-nightjar-accent/50 bg-nightjar-accent/5 p-2">
           <p className="mb-1 text-xs font-medium text-nightjar-text/70">Proposed memory — review before it replaces the current one:</p>
-          {proposal.coveredCount < proposal.chatCount && (
+          {(proposal.coveredCount < proposal.chatCount || proposal.truncated) && (
             <p className="mb-1 text-[11px] text-nightjar-alert">
-              ⚠ Based on {proposal.coveredCount} of {proposal.chatCount} chats — some couldn't be included.
+              ⚠{" "}
+              {proposal.coveredCount < proposal.chatCount
+                ? `Based on ${proposal.coveredCount} of ${proposal.chatCount} chats — some couldn't be included.`
+                : "Based on a shortened version of your chats — they were too long to include in full."}
             </p>
           )}
           <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-sm text-nightjar-text/80">{proposal.text}</pre>
