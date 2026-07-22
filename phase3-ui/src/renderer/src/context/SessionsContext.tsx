@@ -22,7 +22,8 @@ import { claimsFileButNoneWritten } from "../lib/saveClaim"
 import { type Attachment, loadGeneratedImage } from "../lib/attachments"
 import { cad } from "../lib/cad"
 import { isLocalModel, LOCAL_MODEL, OPENROUTER_FREE_CHOICE } from "../lib/byok"
-import { loadProjectChatIds, saveProjectChatIds, sessionIdsKey, sameChatScope, type ChatMoveScope } from "../lib/sessionScope"
+import { loadProjectChatIds, saveProjectChatIds, sessionIdsKey, sameChatScope, displayChatTitle, type ChatMoveScope } from "../lib/sessionScope"
+import { assembleTranscripts, buildSummaryPrompt, type ChatTranscript } from "../lib/autoMemory"
 import { useConnection, useOpenCodeEvents } from "./ConnectionContext"
 import { useModel, type SendKind } from "./ModelContext"
 import { useArtifact } from "./ArtifactContext"
@@ -159,6 +160,14 @@ interface SessionsValue {
   // the moved session). Resolves TRUE if a move happened, FALSE on a no-op / abort (same scope,
   // deleted target, or a failed active-General replacement) — the caller unpins only when true.
   moveChatToScope: (sessionId: string, from: ChatMoveScope, to: ChatMoveScope) => Promise<boolean>
+  // Auto-memory (AM-2b) — summarise a project's chats into a memory paragraph on the LOCAL model,
+  // via an EPHEMERAL throwaway session (never registered, never shown, never egressed). Returns the
+  // summary text + how many chats it covered, or a surfaced error. The caller stages it as a proposal
+  // (projectContent) for the user to Accept/Discard — this never writes the memory itself.
+  summarizeProjectChats: (
+    projectId: string,
+    currentMemory: string,
+  ) => Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number; truncated: boolean } | { ok: false; error: string }>
   // safety-critical accessors (PermissionContext)
   hasSession: (sid: string) => boolean
   setBusy: (sid: string, val: boolean) => void
@@ -1441,6 +1450,95 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [resumeProjectChat, newProjectChat, newSession, markProjectChat, markSlotSession, unmarkSlotSession, gcSessions],
   )
 
+  // Auto-memory (AM-2b): summarise a project's chats into a memory paragraph. Runs on an EPHEMERAL
+  // throwaway session that is NEVER registered in perSessionRefs — so it never demuxes SSE, is never
+  // GC'd, never appears in a rail (rails filter to their own id sets), and never surfaces a permission
+  // prompt (PermissionContext gates on hasSession, which is false for it). LOCAL model only (decision
+  // 2: a whole project's chats must never egress to summarise). The synchronous /message call blocks
+  // until the turn finishes (bounded by SYNC_PROMPT_TIMEOUT_MS). The caller stages the result as a
+  // proposal for Accept/Discard — this never writes the memory.
+  const MAX_MEMORY_CHATS = 20 // cap the chats gathered (newest-first) so gathering stays bounded
+  const MAX_TRANSCRIPT_CHARS = 12000 // ~fits the local 4B context alongside the directive; tune live
+  const GATHER_DEADLINE_MS = 45000 // overall wall-clock for the multi-call gather phase (rule 3)
+  const summarizeProjectChats = useCallback(
+    async (
+      projectId: string,
+      currentMemory: string,
+    ): Promise<{ ok: true; summary: string; chatCount: number; coveredCount: number; truncated: boolean } | { ok: false; error: string }> => {
+      const client = clientRef.current
+      if (!client) return { ok: false, error: "Not connected to the engine." }
+      const allIds = projectChatIdsRef.current[projectId] ?? loadProjectChatIds(projectId)
+      const chatCount = allIds.length
+      if (chatCount === 0) return { ok: false, error: "This project has no chats to summarise yet." }
+      // Best-effort title map (cosmetic transcript headers) — captured BEFORE the ephemeral session
+      // exists, so it never lists itself.
+      const titles = new Map<string, string>()
+      try {
+        for (const s of await client.listSessions()) titles.set(s.id, s.title ?? "")
+      } catch {
+        /* titles are cosmetic — proceed without them */
+      }
+      // Bound the GATHER phase overall (rule 3): each getMessages is individually 15s-bounded, but 20
+      // sequential ones could still stack into minutes if the engine is slow. Stop gathering past the
+      // deadline and summarise what we have — coveredCount then reflects the shortfall and the UI flags
+      // partial coverage (Bugbot). The prompt call is separately bounded by SYNC_PROMPT_TIMEOUT_MS.
+      const gatherDeadline = Date.now() + GATHER_DEADLINE_MS
+      const transcripts: ChatTranscript[] = []
+      for (const id of allIds.slice(0, MAX_MEMORY_CHATS)) {
+        if (Date.now() > gatherDeadline) break
+        let msgs: MessageWithParts[] = []
+        try {
+          msgs = await client.getMessages(id)
+        } catch {
+          continue // skip a dead/unreadable chat rather than fail the whole summary
+        }
+        // Order by creation time before extracting turns — GET /message is not guaranteed sorted, and
+        // a scrambled transcript summarises wrong (mirrors messagesFromHistory's defensive sort — Bugbot).
+        const turns = [...msgs]
+          .sort((a, b) => (a.info?.time?.created ?? 0) - (b.info?.time?.created ?? 0))
+          .map((m) => ({
+            role: m.info.role === "user" ? ("user" as const) : ("assistant" as const),
+            text: (m.parts ?? [])
+              .filter((p: any) => p?.type === "text" && typeof p?.text === "string")
+              .map((p: any) => p.text as string)
+              .join(" ")
+              .trim(),
+          }))
+          .filter((t) => t.text)
+        if (turns.length) transcripts.push({ title: displayChatTitle(titles.get(id)), turns })
+      }
+      if (!transcripts.length) return { ok: false, error: "Couldn't read any chat content to summarise." }
+      const { text: transcriptText, includedChats, truncated } = assembleTranscripts(transcripts, MAX_TRANSCRIPT_CHARS)
+      if (!transcriptText.trim()) return { ok: false, error: "The project's chats are too large to summarise — try trimming them." }
+      const prompt = buildSummaryPrompt({ transcripts: transcriptText, currentMemory })
+      let sid: string
+      try {
+        sid = await client.createSession("Auto-memory (temp)") // forced title → not auto-titled; deleted below
+      } catch (err: any) {
+        return { ok: false, error: `couldn't start the summariser: ${err?.message ?? err}` }
+      }
+      try {
+        // Use the dedicated "summarizer" agent (opencode.json): mode=subagent, permission {"*":"deny"}
+        // so NO tool can execute — the earlier "assistant" agent auto-ALLOWS PIM + nightjar_save_memory
+        // (NJ-35), which would run ungated on this text-only turn since the ephemeral session isn't
+        // registered for a permission prompt (Bugbot). It's explicitly defined (unlike the built-in
+        // "summary"), so it reliably resolves; a workspace without it simply fails the regenerate.
+        const summary = (await client.prompt(sid, prompt, "summarizer", LOCAL_MODEL.id)).trim()
+        if (!summary) return { ok: false, error: "The model returned an empty summary — try again." }
+        // chatCount = the project's FULL chat count (drives staleness); coveredCount = how many were
+        // actually summarised; truncated = whether ANY content was dropped (later chats OR a shortened
+        // head of one) — so the UI can flag partial coverage rather than present it as complete, even
+        // when every chat is "included" but one was truncated to fit (rule 8 — Bugbot).
+        return { ok: true, summary, chatCount, coveredCount: includedChats, truncated }
+      } catch (err: any) {
+        return { ok: false, error: `summary failed: ${err?.message ?? err}` }
+      } finally {
+        client.deleteSession(sid).catch(() => {}) // clean teardown regardless of outcome
+      }
+    },
+    [clientRef],
+  )
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       const client = clientRef.current
@@ -1498,6 +1596,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     deleteProjectChat,
     deleteProjectChatOne,
     moveChatToScope,
+    summarizeProjectChats,
     hasSession,
     setBusy,
     sessionIdsBySlot,

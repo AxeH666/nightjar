@@ -75,11 +75,17 @@ Split the current Memory panel into:
   banner + notes now cover Instructions + Memory. Pure `buildProjectSystem`/`hasProjectContext`
   unit-tested (assert-then-mutate). No new storage (Memory + its purge already exist); dropped
   the now-dead `loadProjectInstructions`/`shouldInjectInstructions` from the PR-C fix.
-- **AM-2** — auto-memory proper: add `autoMemory`/`autoMemoryProposal`/`memoryMeta` (join the
-  purge fan-out, mutation-checked), split the Memory panel into Manual notes + Auto-memory,
-  the local summariser call (rule-3 timeout) feeding the propose→Accept/Discard flow, and the
-  staleness hint. Auto-memory joins `buildProjectSystem` as a third labelled section.
-  Live-verify (real model call).
+- **AM-2a (built)** — `autoMemory` field (editable, injected as a third labelled `buildProjectSystem`
+  section) + the Knowledge split (manual **Notes** vs auto **Memory**) + storage (own delete path,
+  not copied on duplicate, joins the purge fan-out, mutation-checked). No generation. Headless.
+- **AM-2b (built)** — the generator: `client.prompt` (synchronous `POST /session/:id/message`, own
+  120s wall-clock bound) + `SessionsContext.summarizeProjectChats` running on an EPHEMERAL throwaway
+  session (never registered/shown/GC'd; a dedicated tools-denied `summarizer` agent — permission
+  `{"*":"deny"}` — added to opencode.json so no tool can execute on this text-only turn; LOCAL model
+  only) + the pure
+  `lib/autoMemory` helpers (transcript assembly with an explicit truncation marker, prompt building,
+  count-based staleness) + `autoMemoryProposal`/`memoryMeta` + the propose→Accept/Discard UI +
+  Regenerate button + the "N new chats since" hint. The summariser output quality is live-verify.
 
 ## Open risks / notes (rule 7)
 

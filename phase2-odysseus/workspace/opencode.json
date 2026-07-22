@@ -102,6 +102,14 @@
         "read": "allow", "list": "allow", "glob": "allow", "grep": "allow", "todowrite": "allow",
         "edit": "ask", "write": "ask", "bash": "ask"
       }
+    },
+    "summarizer": {
+      "mode": "subagent",
+      "description": "Internal: summarise a project's chats into durable memory (text only, no tools).",
+      "prompt": "You are Nightjar's summariser. Read the conversations you are given and produce a concise, durable memory of the PROJECT — the facts, preferences, and decisions worth remembering across future chats. Reply with ONLY the memory text. Do not call any tools.",
+      "permission": {
+        "*": "deny"
+      }
     }
   },
   "mcp": {

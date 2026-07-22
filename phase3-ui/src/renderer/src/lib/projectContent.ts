@@ -38,6 +38,14 @@ export interface ProjectContent {
   // Durable project memory: user-editable, and auto-generated from the project's chats (AM-2b).
   autoMemory: string
   setAutoMemory: (v: string) => void
+  // A regenerated memory awaiting review (null = none pending). Regeneration NEVER overwrites the
+  // accepted memory — it stages a proposal the user Accepts (adopt) or Discards (keep current).
+  autoMemoryProposal: MemoryProposal | null
+  setMemoryProposal: (text: string, chatCount: number, coveredCount: number, truncated: boolean) => void
+  acceptMemoryProposal: () => void
+  discardMemoryProposal: () => void
+  // When the accepted memory was last generated + how many chats it covered (null = never generated).
+  memoryMeta: MemoryMeta | null
   files: ProjectFile[]
   addFile: (name: string, content: string) => void
   removeFile: (id: string) => void
@@ -173,13 +181,40 @@ export function hasProjectContext(args: { instructions: string; memory: string; 
   return args.instructions.trim().length > 0 || args.memory.trim().length > 0 || args.autoMemory.trim().length > 0
 }
 
-// Clear the auto-memory state (AM-2a: the accepted memory; AM-2b will add the pending proposal +
-// generation meta). Own delete path — NOT part of deleteProjectContent's CONTENT_PARTS, since
-// auto-memory is derived from a project's chats and must not ride along on a duplicate. Joins
-// purgeProjectStorage's fan-out (the NJ-40/41 leak class).
+// A regenerated auto-memory awaiting the user's Accept/Discard (AM-2b). Carries `chatCount` (the
+// project's full chat count, stamped into the meta on Accept for staleness) and `coveredCount` (how
+// many chats the summary was actually based on) so the review can flag partial coverage — both
+// persist with the proposal so they survive a remount before the user decides.
+export interface MemoryProposal {
+  text: string
+  chatCount: number
+  coveredCount: number
+  truncated: boolean // content was dropped/shortened to fit — flag partial coverage even at 1-of-1
+}
+// Metadata for the ACCEPTED auto-memory (not the proposal): when it was generated + how many chats it
+// covered, so the UI can show "last updated" and a count-based "N new chats since" staleness hint.
+export interface MemoryMeta {
+  lastGeneratedAt: number
+  sourceChatCount: number
+}
+function loadJson<T>(projectId: string, part: string): T | null {
+  try {
+    const raw = localStorage.getItem(key(projectId, part))
+    return raw ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null // absent or garbage → treat as none
+  }
+}
+
+// Clear ALL auto-memory state — the accepted memory, the pending proposal, and the generation meta.
+// Own delete path — NOT part of deleteProjectContent's CONTENT_PARTS, since auto-memory is derived
+// from a project's chats and must not ride along on a duplicate. Joins purgeProjectStorage's fan-out
+// (the NJ-40/41 leak class). Best-effort: reports false if ANY removal throws.
 export function deleteProjectMemoryState(projectId: string): boolean {
   try {
     localStorage.removeItem(key(projectId, "autoMemory"))
+    localStorage.removeItem(key(projectId, "autoMemoryProposal"))
+    localStorage.removeItem(key(projectId, "memoryMeta"))
     return true
   } catch {
     return false // may linger — the caller must surface that, not hide it
@@ -196,6 +231,8 @@ export function useProjectContent(projectId: string): ProjectContent {
   const [instructions, setInstr] = useState(() => loadStr(projectId, "instructions"))
   const [memory, setMem] = useState(() => loadStr(projectId, "memory"))
   const [autoMemory, setAuto] = useState(() => loadStr(projectId, "autoMemory"))
+  const [autoMemoryProposal, setProposal] = useState<MemoryProposal | null>(() => loadJson<MemoryProposal>(projectId, "autoMemoryProposal"))
+  const [memoryMeta, setMeta] = useState<MemoryMeta | null>(() => loadJson<MemoryMeta>(projectId, "memoryMeta"))
   const [files, setFiles] = useState<ProjectFile[]>(() => loadFiles(projectId))
   const [saveState, setSaveState] = useState<Partial<Record<ContentPart, SaveResult>>>({})
   const filesRef = useRef(files)
@@ -213,6 +250,8 @@ export function useProjectContent(projectId: string): ProjectContent {
     setInstr(loadStr(projectId, "instructions"))
     setMem(loadStr(projectId, "memory"))
     setAuto(loadStr(projectId, "autoMemory"))
+    setProposal(loadJson<MemoryProposal>(projectId, "autoMemoryProposal"))
+    setMeta(loadJson<MemoryMeta>(projectId, "memoryMeta"))
     const f = loadFiles(projectId)
     filesRef.current = f
     setFiles(f)
@@ -245,6 +284,53 @@ export function useProjectContent(projectId: string): ProjectContent {
     },
     [projectId, noteSave],
   )
+  // Stage a regenerated memory for review (does NOT touch the accepted memory). Persisted so it
+  // survives navigating away and back before the user decides.
+  const setMemoryProposal = useCallback(
+    (text: string, chatCount: number, coveredCount: number, truncated: boolean) => {
+      const p: MemoryProposal = { text, chatCount, coveredCount, truncated }
+      setProposal(p)
+      try {
+        localStorage.setItem(key(projectId, "autoMemoryProposal"), JSON.stringify(p))
+      } catch {
+        /* proposal lives in memory only this session — Accept still works from state */
+      }
+    },
+    [projectId],
+  )
+  // Adopt the pending proposal as the accepted memory and stamp the meta (what it covered + now),
+  // then clear the proposal. Reads the current proposal from the closure (Accept is a single
+  // deliberate click, and `autoMemoryProposal` is in deps, so it's never stale) and does its side
+  // effects OUTSIDE any setState updater (updaters must stay pure). Date.now() is fine in the renderer.
+  const acceptMemoryProposal = useCallback(() => {
+    const cur = autoMemoryProposal
+    if (!cur) return
+    setAuto(cur.text)
+    noteSave("autoMemory", saveStr(projectId, "autoMemory", cur.text))
+    const meta: MemoryMeta = { lastGeneratedAt: Date.now(), sourceChatCount: cur.chatCount }
+    setMeta(meta)
+    setProposal(null)
+    // Clear the proposal key FIRST and in its OWN try, so a failing meta write (quota) can't skip it
+    // and leave a stale proposal that rehydrates the accepted review on remount (Bugbot).
+    try {
+      localStorage.removeItem(key(projectId, "autoMemoryProposal"))
+    } catch {
+      /* the proposal lives in memory only now — still cleared for this session */
+    }
+    try {
+      localStorage.setItem(key(projectId, "memoryMeta"), JSON.stringify(meta))
+    } catch {
+      /* meta not persisted; state is already updated */
+    }
+  }, [projectId, noteSave, autoMemoryProposal])
+  const discardMemoryProposal = useCallback(() => {
+    setProposal(null)
+    try {
+      localStorage.removeItem(key(projectId, "autoMemoryProposal"))
+    } catch {
+      /* nothing more to do */
+    }
+  }, [projectId])
   const addFile = useCallback(
     (name: string, content: string) => {
       const next = [{ id: newFileId(), name: name.trim() || "note", content }, ...filesRef.current]
@@ -264,5 +350,21 @@ export function useProjectContent(projectId: string): ProjectContent {
     [projectId, noteSave],
   )
 
-  return { instructions, setInstructions, memory, setMemory, autoMemory, setAutoMemory, files, addFile, removeFile, saveState }
+  return {
+    instructions,
+    setInstructions,
+    memory,
+    setMemory,
+    autoMemory,
+    setAutoMemory,
+    autoMemoryProposal,
+    setMemoryProposal,
+    acceptMemoryProposal,
+    discardMemoryProposal,
+    memoryMeta,
+    files,
+    addFile,
+    removeFile,
+    saveState,
+  }
 }

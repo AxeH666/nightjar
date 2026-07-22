@@ -1,6 +1,9 @@
 import { useRef, useState, type ReactNode } from "react"
 import { useProjects, type ProjectScope } from "../../lib/projects"
 import { useProjectContent, type ProjectContent, type SaveResult } from "../../lib/projectContent"
+import { memoryStaleness } from "../../lib/autoMemory"
+import { useSessions } from "../../context/SessionsContext"
+import { useConnection } from "../../context/ConnectionContext"
 import { ProjectChat } from "./ProjectChat"
 
 // A project's home (Lab.md §4.6): the breadcrumb, a per-project Chat (5b — isolated to this
@@ -95,21 +98,7 @@ export function ProjectView({ scope, projectId, onBack }: { scope: ProjectScope;
             />
           </Panel>
 
-          <Panel
-            emoji="💾"
-            title="Memory"
-            optional
-            save={content.saveState.autoMemory}
-            note="Durable memory for this project, sent to its chats (same cloud gate). Editable now; auto-generation from your chats arrives in the next update."
-          >
-            <textarea
-              value={content.autoMemory}
-              onChange={(e) => content.setAutoMemory(e.target.value)}
-              placeholder="What this project has learned — a durable summary…"
-              rows={4}
-              className="w-full resize-y rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
-            />
-          </Panel>
+          <AutoMemoryPanel projectId={projectId} content={content} />
 
           <Panel
             emoji="📎"
@@ -302,5 +291,114 @@ function FilesEditor({ content }: { content: ProjectContent }) {
         </ul>
       )}
     </div>
+  )
+}
+
+// Coarse relative time for the "last updated" line (renderer Date.now() is fine here).
+function relTime(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000))
+  if (s < 60) return "just now"
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
+}
+
+// The Memory panel with auto-generation (AM-2b): edit the durable memory directly, or Regenerate it
+// from the project's chats on the LOCAL model. Regeneration NEVER overwrites — it stages a proposal
+// the user Accepts or Discards, so hand-edits (and manual Notes) are always safe. A count-based
+// "N new chats since" hint nudges (never auto-regenerates); generation is local so nothing egresses.
+function AutoMemoryPanel({ projectId, content }: { projectId: string; content: ProjectContent }) {
+  const { summarizeProjectChats, projectChatIds } = useSessions()
+  const { connected } = useConnection()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const runningRef = useRef(false) // synchronous in-flight guard: `busy` state lags a rapid double-click
+  const chatCount = (projectChatIds[projectId] ?? []).length
+  const proposal = content.autoMemoryProposal
+  const { stale, newChats } = memoryStaleness({ generatedChatCount: content.memoryMeta?.sourceChatCount ?? 0, currentChatCount: chatCount })
+
+  async function regenerate() {
+    if (runningRef.current) return // a run is already in flight — ignore the extra click (Bugbot)
+    runningRef.current = true
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await summarizeProjectChats(projectId, content.autoMemory)
+      if (res.ok) content.setMemoryProposal(res.summary, res.chatCount, res.coveredCount, res.truncated)
+      else setError(res.error)
+    } finally {
+      runningRef.current = false
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Panel
+      emoji="💾"
+      title="Memory"
+      optional
+      save={content.saveState.autoMemory}
+      note="Durable memory for this project, sent to its chats (same cloud gate). Generated on-device from your chats (never sent to the cloud) — or edit it yourself. Private to you."
+    >
+      <textarea
+        value={content.autoMemory}
+        onChange={(e) => content.setAutoMemory(e.target.value)}
+        placeholder="What this project has learned — a durable summary. Edit here, or Regenerate from your chats…"
+        rows={4}
+        className="w-full resize-y rounded-lg bg-nightjar-surface px-3 py-2 text-sm text-nightjar-text placeholder:text-nightjar-text/30 focus:outline-none focus:ring-1 focus:ring-nightjar-accent"
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <button
+          onClick={regenerate}
+          disabled={busy || !connected || chatCount === 0}
+          title={chatCount === 0 ? "This project has no chats to summarise yet" : !connected ? "Connect to the engine first" : "Summarise this project's chats on the local model"}
+          className="rounded-lg bg-nightjar-accent px-3 py-1 font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
+        >
+          {busy ? "Summarising…" : "Regenerate from chats"}
+        </button>
+        {content.memoryMeta && !busy && (
+          <span className="text-nightjar-text/40" title="When the memory was last auto-generated (a hand edit doesn't change this)">
+            Generated {relTime(content.memoryMeta.lastGeneratedAt)}
+          </span>
+        )}
+        {!busy && !proposal && stale && content.memoryMeta && (
+          <span className="text-nightjar-accent">
+            {newChats} new chat{newChats > 1 ? "s" : ""} since — regenerate?
+          </span>
+        )}
+        {error && <span className="text-nightjar-alert">{error}</span>}
+      </div>
+
+      {proposal && !busy && (
+        // Hidden while a NEW run is summarising, so the user can't Accept an outdated proposal mid-
+        // regenerate — only the latest run's result should be adoptable (Bugbot).
+        <div className="mt-3 rounded-lg border border-nightjar-accent/50 bg-nightjar-accent/5 p-2">
+          <p className="mb-1 text-xs font-medium text-nightjar-text/70">Proposed memory — review before it replaces the current one:</p>
+          {(proposal.coveredCount < proposal.chatCount || proposal.truncated) && (
+            <p className="mb-1 text-[11px] text-nightjar-alert">
+              ⚠{" "}
+              {proposal.coveredCount < proposal.chatCount
+                ? `Based on ${proposal.coveredCount} of ${proposal.chatCount} chats — some couldn't be included.`
+                : "Based on a shortened version of your chats — they were too long to include in full."}
+            </p>
+          )}
+          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-sm text-nightjar-text/80">{proposal.text}</pre>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={content.acceptMemoryProposal}
+              className="rounded-lg bg-nightjar-accent px-3 py-1 text-xs font-medium text-nightjar-base hover:brightness-110"
+            >
+              Accept
+            </button>
+            <button
+              onClick={content.discardMemoryProposal}
+              className="rounded-lg border border-nightjar-surface px-3 py-1 text-xs font-medium text-nightjar-text/70 hover:bg-nightjar-surface"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+    </Panel>
   )
 }
