@@ -310,11 +310,17 @@ export function useProjectContent(projectId: string): ProjectContent {
     const meta: MemoryMeta = { lastGeneratedAt: Date.now(), sourceChatCount: cur.chatCount }
     setMeta(meta)
     setProposal(null)
+    // Clear the proposal key FIRST and in its OWN try, so a failing meta write (quota) can't skip it
+    // and leave a stale proposal that rehydrates the accepted review on remount (Bugbot).
     try {
-      localStorage.setItem(key(projectId, "memoryMeta"), JSON.stringify(meta))
       localStorage.removeItem(key(projectId, "autoMemoryProposal"))
     } catch {
-      /* best-effort persist; the in-memory state is already updated */
+      /* the proposal lives in memory only now — still cleared for this session */
+    }
+    try {
+      localStorage.setItem(key(projectId, "memoryMeta"), JSON.stringify(meta))
+    } catch {
+      /* meta not persisted; state is already updated */
     }
   }, [projectId, noteSave, autoMemoryProposal])
   const discardMemoryProposal = useCallback(() => {
