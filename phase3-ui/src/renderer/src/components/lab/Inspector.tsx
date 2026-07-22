@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 
 // The shared LAB right-hand Inspector (Lab.md §4.3): one tabbed frame reused by every lab,
-// its tab set + content supplied by the active viewer. Generalizes CadViewer's control
+// its tab set + content supplied by the active viewer. Generalizes the former CAD viewer's control
 // sidebar (and, later via the ViewerManager, ArtifactPanel's Preview/Code/Files tabs) into
 // one Properties / Structure / Downloads shape. Pure presentation — no lab-specific logic.
 export interface InspectorTab {

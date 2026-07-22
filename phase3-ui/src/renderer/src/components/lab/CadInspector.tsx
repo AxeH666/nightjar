@@ -3,7 +3,7 @@ import type { CadScene } from "../../lib/useCadScene"
 
 // The CAD lab's Inspector content (Lab.md §4.3), built on the shared tabbed Inspector:
 //   • Structure — the parts tree + explode / isolate / per-part visibility / reset, moved
-//     out of CadViewer's built-in sidebar (and finally wiring the previously-unused
+//     out of the former standalone CAD viewer's built-in sidebar (and finally wiring the previously-unused
 //     setPartVisible controller hook to real checkboxes).
 //   • Properties — part count + bounding-box extents read from the model.
 //   • Downloads — an honest summary; a per-file save/reveal affordance needs main-process

@@ -2,11 +2,10 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { createCadScene, type CadPart, type CadSceneController } from "./cadScene"
 
 // useCadScene — the React lifecycle around the pure three.js CAD controller (lib/cadScene),
-// lifted out of CadViewer so the LAB shell can render the 3D canvas (center viewport) and
-// the explode / isolate / visibility controls (right Inspector) as SEPARATE regions driven
-// by one shared controller. CadViewer keeps its own self-contained copy for the standalone
-// CAD tab until that tab folds into LAB → Mechanical (M-CADfold), at which point this hook
-// is the sole path and the duplication is removed.
+// originally lifted out of the standalone CadViewer so the LAB shell can render the 3D canvas
+// (center viewport) and the explode / isolate / visibility controls (right Inspector) as
+// SEPARATE regions driven by one shared controller. Since M-CADfold removed CadViewer, this
+// hook is the SOLE CAD-scene path (no more duplication).
 export interface CadScene {
   canvasRef: RefObject<HTMLCanvasElement>
   parts: CadPart[]
@@ -30,7 +29,7 @@ export function useCadScene(glb: ArrayBuffer | null): CadScene {
   const [error, setError] = useState<string | null>(null)
 
   // Create the three.js scene once, tied to the canvas; dispose on unmount. (Verbatim from
-  // the original CadViewer mount effect.)
+  // the former standalone CAD viewer's mount effect.)
   useEffect(() => {
     if (!canvasRef.current) return
     const ctrl = createCadScene(canvasRef.current)
