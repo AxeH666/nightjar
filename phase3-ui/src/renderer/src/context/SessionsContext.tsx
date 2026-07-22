@@ -1453,8 +1453,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // Auto-memory (AM-2b): summarise a project's chats into a memory paragraph. Runs on an EPHEMERAL
   // throwaway session that is NEVER registered in perSessionRefs — so it never demuxes SSE, is never
   // GC'd, never appears in a rail (rails filter to their own id sets), and never surfaces a permission
-  // prompt (the tools-denied "summary" agent can't call a tool anyway). LOCAL model only (decision 2:
-  // a whole project's chats must never egress to summarise). The synchronous /message call blocks
+  // prompt (PermissionContext gates on hasSession, which is false for it). LOCAL model only (decision
+  // 2: a whole project's chats must never egress to summarise). The synchronous /message call blocks
   // until the turn finishes (bounded by SYNC_PROMPT_TIMEOUT_MS). The caller stages the result as a
   // proposal for Accept/Discard — this never writes the memory.
   const MAX_MEMORY_CHATS = 20 // cap the chats gathered (newest-first) so gathering stays bounded
@@ -1511,7 +1511,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: `couldn't start the summariser: ${err?.message ?? err}` }
       }
       try {
-        const summary = (await client.prompt(sid, prompt, "summary", LOCAL_MODEL.id)).trim()
+        // Use the "assistant" agent — it's the shipped workspace's general agent (the tools-denied
+        // built-in "summary" agent is NOT in opencode.json and may not resolve — Bugbot). Tool use is
+        // triple-guarded anyway: the directive says don't call tools, the ephemeral session is never
+        // registered so PermissionContext (hasSession gate) can't surface a prompt for it, and the
+        // 120s wall-clock bounds any turn that stalls on a would-be permission.
+        const summary = (await client.prompt(sid, prompt, validAgent("assistant"), LOCAL_MODEL.id)).trim()
         if (!summary) return { ok: false, error: "The model returned an empty summary — try again." }
         // chatCount = the project's FULL chat count (drives staleness); coveredCount = how many were
         // actually summarised (≤ the cap, minus any dropped to fit) — so the UI can flag partial
@@ -1523,7 +1528,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         client.deleteSession(sid).catch(() => {}) // clean teardown regardless of outcome
       }
     },
-    [clientRef],
+    [clientRef, validAgent],
   )
 
   const deleteSession = useCallback(

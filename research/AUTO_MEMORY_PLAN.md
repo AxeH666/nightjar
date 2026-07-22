@@ -80,7 +80,9 @@ Split the current Memory panel into:
   not copied on duplicate, joins the purge fan-out, mutation-checked). No generation. Headless.
 - **AM-2b (built)** — the generator: `client.prompt` (synchronous `POST /session/:id/message`, own
   120s wall-clock bound) + `SessionsContext.summarizeProjectChats` running on an EPHEMERAL throwaway
-  session (never registered/shown/GC'd; tools-denied `summary` agent; LOCAL model only) + the pure
+  session (never registered/shown/GC'd; the `assistant` agent since the built-in `summary` isn't in
+  the workspace config; no permission prompt possible as the session is unregistered; LOCAL model
+  only) + the pure
   `lib/autoMemory` helpers (transcript assembly with an explicit truncation marker, prompt building,
   count-based staleness) + `autoMemoryProposal`/`memoryMeta` + the propose→Accept/Discard UI +
   Regenerate button + the "N new chats since" hint. The summariser output quality is live-verify.
