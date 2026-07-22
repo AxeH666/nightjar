@@ -312,17 +312,24 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
   const { connected } = useConnection()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const runningRef = useRef(false) // synchronous in-flight guard: `busy` state lags a rapid double-click
   const chatCount = (projectChatIds[projectId] ?? []).length
   const proposal = content.autoMemoryProposal
   const { stale, newChats } = memoryStaleness({ generatedChatCount: content.memoryMeta?.sourceChatCount ?? 0, currentChatCount: chatCount })
 
   async function regenerate() {
+    if (runningRef.current) return // a run is already in flight — ignore the extra click (Bugbot)
+    runningRef.current = true
     setBusy(true)
     setError(null)
-    const res = await summarizeProjectChats(projectId, content.autoMemory)
-    setBusy(false)
-    if (res.ok) content.setMemoryProposal(res.summary, res.chatCount, res.coveredCount)
-    else setError(res.error)
+    try {
+      const res = await summarizeProjectChats(projectId, content.autoMemory)
+      if (res.ok) content.setMemoryProposal(res.summary, res.chatCount, res.coveredCount)
+      else setError(res.error)
+    } finally {
+      runningRef.current = false
+      setBusy(false)
+    }
   }
 
   return (
@@ -349,7 +356,11 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
         >
           {busy ? "Summarising…" : "Regenerate from chats"}
         </button>
-        {content.memoryMeta && !busy && <span className="text-nightjar-text/40">Updated {relTime(content.memoryMeta.lastGeneratedAt)}</span>}
+        {content.memoryMeta && !busy && (
+          <span className="text-nightjar-text/40" title="When the memory was last auto-generated (a hand edit doesn't change this)">
+            Generated {relTime(content.memoryMeta.lastGeneratedAt)}
+          </span>
+        )}
         {!busy && !proposal && stale && content.memoryMeta && (
           <span className="text-nightjar-accent">
             {newChats} new chat{newChats > 1 ? "s" : ""} since — regenerate?
@@ -363,7 +374,7 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
           <p className="mb-1 text-xs font-medium text-nightjar-text/70">Proposed memory — review before it replaces the current one:</p>
           {proposal.coveredCount < proposal.chatCount && (
             <p className="mb-1 text-[11px] text-nightjar-alert">
-              ⚠ Based on {proposal.coveredCount} of {proposal.chatCount} chats (older/longer ones didn't fit).
+              ⚠ Based on {proposal.coveredCount} of {proposal.chatCount} chats — some couldn't be included.
             </p>
           )}
           <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-sm text-nightjar-text/80">{proposal.text}</pre>

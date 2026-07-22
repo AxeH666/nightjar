@@ -1459,6 +1459,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // proposal for Accept/Discard — this never writes the memory.
   const MAX_MEMORY_CHATS = 20 // cap the chats gathered (newest-first) so gathering stays bounded
   const MAX_TRANSCRIPT_CHARS = 12000 // ~fits the local 4B context alongside the directive; tune live
+  const GATHER_DEADLINE_MS = 45000 // overall wall-clock for the multi-call gather phase (rule 3)
   const summarizeProjectChats = useCallback(
     async (
       projectId: string,
@@ -1477,8 +1478,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       } catch {
         /* titles are cosmetic — proceed without them */
       }
+      // Bound the GATHER phase overall (rule 3): each getMessages is individually 15s-bounded, but 20
+      // sequential ones could still stack into minutes if the engine is slow. Stop gathering past the
+      // deadline and summarise what we have — coveredCount then reflects the shortfall and the UI flags
+      // partial coverage (Bugbot). The prompt call is separately bounded by SYNC_PROMPT_TIMEOUT_MS.
+      const gatherDeadline = Date.now() + GATHER_DEADLINE_MS
       const transcripts: ChatTranscript[] = []
       for (const id of allIds.slice(0, MAX_MEMORY_CHATS)) {
+        if (Date.now() > gatherDeadline) break
         let msgs: MessageWithParts[] = []
         try {
           msgs = await client.getMessages(id)
