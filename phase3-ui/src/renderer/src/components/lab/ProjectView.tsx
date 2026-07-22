@@ -369,7 +369,9 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
         {error && <span className="text-nightjar-alert">{error}</span>}
       </div>
 
-      {proposal && (
+      {proposal && !busy && (
+        // Hidden while a NEW run is summarising, so the user can't Accept an outdated proposal mid-
+        // regenerate — only the latest run's result should be adoptable (Bugbot).
         <div className="mt-3 rounded-lg border border-nightjar-accent/50 bg-nightjar-accent/5 p-2">
           <p className="mb-1 text-xs font-medium text-nightjar-text/70">Proposed memory — review before it replaces the current one:</p>
           {(proposal.coveredCount < proposal.chatCount || proposal.truncated) && (

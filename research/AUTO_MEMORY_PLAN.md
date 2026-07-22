@@ -80,8 +80,8 @@ Split the current Memory panel into:
   not copied on duplicate, joins the purge fan-out, mutation-checked). No generation. Headless.
 - **AM-2b (built)** — the generator: `client.prompt` (synchronous `POST /session/:id/message`, own
   120s wall-clock bound) + `SessionsContext.summarizeProjectChats` running on an EPHEMERAL throwaway
-  session (never registered/shown/GC'd; the `assistant` agent since the built-in `summary` isn't in
-  the workspace config; no permission prompt possible as the session is unregistered; LOCAL model
+  session (never registered/shown/GC'd; a dedicated tools-denied `summarizer` agent — permission
+  `{"*":"deny"}` — added to opencode.json so no tool can execute on this text-only turn; LOCAL model
   only) + the pure
   `lib/autoMemory` helpers (transcript assembly with an explicit truncation marker, prompt building,
   count-based staleness) + `autoMemoryProposal`/`memoryMeta` + the propose→Accept/Discard UI +

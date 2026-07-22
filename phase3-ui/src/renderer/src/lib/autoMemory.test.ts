@@ -24,19 +24,21 @@ describe("assembleTranscripts", () => {
     expect(assembleTranscripts([chat("   ", ["user", "hi"])], 10000).text).toBe("### Chat\nUser: hi")
   })
 
-  it("drops later chats past the cap, appends a marker, and reports fewer includedChats", () => {
-    const first = assembleTranscripts([chat("Keep", ["user", "hi"])], 10000)
-    const out = assembleTranscripts([chat("Keep", ["user", "hi"]), chat("Drop", ["user", "x".repeat(500)])], first.text.length + 5)
+  it("drops later chats past the cap, appends a marker WITHIN maxChars, and counts fewer chats", () => {
+    const out = assembleTranscripts([chat("Keep", ["user", "hi"]), chat("Drop", ["user", "x".repeat(500)])], 200)
     expect(out.text).toBe("### Keep\nUser: hi\n\n[…older/longer chats omitted to fit the context window]")
     expect(out.includedChats).toBe(1) // only the first chat made it — the caller can flag "1 of 2"
     expect(out.truncated).toBe(true)
+    expect(out.text.length).toBeLessThanOrEqual(200) // marker space is reserved — cap is enforced (Bugbot)
   })
 
   it("truncated is true even when the SINGLE chat is shortened to fit (all chats 'included' — Bugbot)", () => {
-    const out = assembleTranscripts([chat("Big", ["user", "y".repeat(1000)])], 200)
+    const maxChars = 200
+    const out = assembleTranscripts([chat("Big", ["user", "y".repeat(1000)])], maxChars)
     expect(out.text.length).toBeGreaterThan(0) // NOT empty — a truncated HEAD is included
     expect(out.text.startsWith("### Big\nUser: yyy")).toBe(true)
     expect(out.text).toContain("omitted to fit the context window")
+    expect(out.text.length).toBeLessThanOrEqual(maxChars) // head + marker still within the cap
     expect(out.includedChats).toBe(1)
     expect(out.truncated).toBe(true) // includedChats == chatCount, yet coverage is still partial
   })

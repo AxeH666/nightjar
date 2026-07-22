@@ -1518,12 +1518,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: `couldn't start the summariser: ${err?.message ?? err}` }
       }
       try {
-        // Use the "assistant" agent — it's the shipped workspace's general agent (the tools-denied
-        // built-in "summary" agent is NOT in opencode.json and may not resolve — Bugbot). Tool use is
-        // triple-guarded anyway: the directive says don't call tools, the ephemeral session is never
-        // registered so PermissionContext (hasSession gate) can't surface a prompt for it, and the
-        // 120s wall-clock bounds any turn that stalls on a would-be permission.
-        const summary = (await client.prompt(sid, prompt, validAgent("assistant"), LOCAL_MODEL.id)).trim()
+        // Use the dedicated "summarizer" agent (opencode.json): mode=subagent, permission {"*":"deny"}
+        // so NO tool can execute — the earlier "assistant" agent auto-ALLOWS PIM + nightjar_save_memory
+        // (NJ-35), which would run ungated on this text-only turn since the ephemeral session isn't
+        // registered for a permission prompt (Bugbot). It's explicitly defined (unlike the built-in
+        // "summary"), so it reliably resolves; a workspace without it simply fails the regenerate.
+        const summary = (await client.prompt(sid, prompt, "summarizer", LOCAL_MODEL.id)).trim()
         if (!summary) return { ok: false, error: "The model returned an empty summary — try again." }
         // chatCount = the project's FULL chat count (drives staleness); coveredCount = how many were
         // actually summarised; truncated = whether ANY content was dropped (later chats OR a shortened
@@ -1536,7 +1536,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         client.deleteSession(sid).catch(() => {}) // clean teardown regardless of outcome
       }
     },
-    [clientRef, validAgent],
+    [clientRef],
   )
 
   const deleteSession = useCallback(

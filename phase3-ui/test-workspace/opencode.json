@@ -11,6 +11,8 @@
         "*": "deny",
         "read": "allow", "list": "allow", "glob": "allow", "grep": "allow",
         "edit": "ask", "write": "ask", "bash": "ask"
-      } }
+      } },
+    "summarizer": { "mode": "subagent", "description": "Internal: summarise chats into memory (text only, no tools).",
+      "permission": { "*": "deny" } }
   }
 }

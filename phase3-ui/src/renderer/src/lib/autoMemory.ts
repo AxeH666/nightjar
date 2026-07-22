@@ -21,10 +21,14 @@ export interface ChatTranscript {
 // no text are skipped. Returns the text, `includedChats` (how many made it in), and `truncated` (was
 // ANY content dropped — later chats OR a truncated head of an oversized one) so the caller can flag
 // partial coverage even when every chat is "included" but one was shortened to fit.
+const OMISSION_MARKER = "\n\n[…older/longer chats omitted to fit the context window]"
 export function assembleTranscripts(
   chats: ChatTranscript[],
   maxChars: number,
 ): { text: string; includedChats: number; truncated: boolean } {
+  // Reserve room for the marker up front so the RESULT (body + marker) never exceeds maxChars — the
+  // marker was previously appended past the cap (Bugbot). Body is built against this reduced budget.
+  const budget = Math.max(0, maxChars - OMISSION_MARKER.length)
   const blocks: string[] = []
   let used = 0
   let truncated = false
@@ -33,15 +37,12 @@ export function assembleTranscripts(
     if (!lines.length) continue
     const block = `### ${chat.title.trim() || "Chat"}\n${lines.join("\n")}`
     const sep = blocks.length ? 2 : 0 // "\n\n" between blocks, not before the first
-    if (used + block.length + sep > maxChars) {
+    if (used + block.length + sep > budget) {
       // Doesn't fit. If nothing is in yet, include a truncated HEAD so there's always material to
       // summarise (never directive-only — Bugbot); otherwise stop before this chat.
-      if (blocks.length === 0) {
-        const room = maxChars - 48 // leave space for the marker below
-        if (room > 0) {
-          blocks.push(block.slice(0, room))
-          used += room
-        }
+      if (blocks.length === 0 && budget > 0) {
+        blocks.push(block.slice(0, budget))
+        used += budget
       }
       truncated = true
       break
@@ -50,7 +51,7 @@ export function assembleTranscripts(
     used += block.length + sep
   }
   const body = blocks.join("\n\n")
-  const text = truncated && body ? `${body}\n\n[…older/longer chats omitted to fit the context window]` : body
+  const text = truncated && body ? `${body}${OMISSION_MARKER}` : body
   return { text, includedChats: blocks.length, truncated }
 }
 
