@@ -15,7 +15,8 @@ import { labById } from "./labs"
 // Mechanical & Physics inside the LAB shell (Lab.md §5). REUSES the existing CAD stack — the
 // `cad` session slot, the `cad` agent, and the STEP→GLB pipeline — so it adds no new agent,
 // MCP, permission gate, or session slot. One useCadScene controller drives BOTH the center
-// canvas AND the right Inspector's controls. The standalone CAD tab is untouched (§2/§10).
+// canvas AND the right Inspector's controls. Since M-CADfold (§2/§10) this is the SOLE CAD
+// surface — the standalone CAD tab (CadScreen/CadViewer) has been removed.
 type LabView = { kind: "workspace" } | { kind: "projects" } | { kind: "project"; id: string }
 
 export function MechanicalLab({ onBack, onOpenSettings }: { onBack: () => void; onOpenSettings: () => void }) {

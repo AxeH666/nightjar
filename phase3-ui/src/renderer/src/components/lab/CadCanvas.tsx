@@ -2,7 +2,7 @@ import type { RefObject } from "react"
 
 // The CAD 3D viewport for the LAB shell — canvas ONLY. The explode / isolate / visibility
 // controls now live in the right Inspector (CadInspector), driven by the same useCadScene
-// controller. Mirrors CadViewer's viewport overlays: a "Building model…" busy state, an
+// controller. Carries the former standalone CAD viewer's viewport overlays: a "Building model…" busy state, an
 // empty hint, and a GLB parse-error banner.
 export function CadCanvas({
   canvasRef,

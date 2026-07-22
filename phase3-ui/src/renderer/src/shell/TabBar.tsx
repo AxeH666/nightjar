@@ -7,17 +7,17 @@
 // surface out of the build. Dropping it from TabId is deliberate; it turns any remaining
 // reference into a typecheck error rather than dead runtime code.
 //
-// `CoworkScreen.tsx` is kept in the tree for v2 — nothing imports it. The slot it vacates
-// is where the CAD tab lands (Task 5).
+// `CoworkScreen.tsx` is kept in the tree for v2 — nothing imports it.
 //
-// LAB (Lab.md) is added as a launcher tab beside CAD; CAD stays standalone until LAB's
-// shared shell is proven, then folds into LAB → Mechanical (§2/§10).
-export type TabId = "chat" | "projects" | "cad" | "lab" | "code"
+// M-CADfold (Lab.md §2/§10): the standalone CAD tab is GONE — CAD now lives solely at
+// LAB → Mechanical, whose shell (rail + canvas + inspector + Prompt-to-CAD composer) is a
+// superset of the old CAD tab. As with Cowork, "cad" is dropped from TabId (not just hidden),
+// so any remaining reference becomes a typecheck error rather than dead runtime code.
+export type TabId = "chat" | "projects" | "lab" | "code"
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "projects", label: "Projects" },
-  { id: "cad", label: "CAD" },
   { id: "lab", label: "LAB" },
   { id: "code", label: "Code" },
 ]

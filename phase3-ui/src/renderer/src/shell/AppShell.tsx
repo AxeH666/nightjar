@@ -4,8 +4,9 @@
 // settings). Replaces the old flat single-screen AppBody. Consumes the context
 // stack; owns only the active-tab state.
 //
-// v1 ships FOUR tabs: Chat, CAD (Prompt-to-CAD, Task 5), LAB (the discipline-lab hub,
-// Lab.md), and Code. Cowork is deferred to v2 and is neither listed (TabBar) nor mounted.
+// v1 tabs: Chat, Projects, LAB (the discipline-lab hub, Lab.md — CAD lives here now at
+// LAB → Mechanical after M-CADfold), and Code. Cowork is deferred to v2 and is neither
+// listed (TabBar) nor mounted.
 import { useState } from "react"
 import { useConnection } from "../context/ConnectionContext"
 import { useModel } from "../context/ModelContext"
@@ -18,7 +19,6 @@ import { useOnlineCapabilities } from "../lib/useOnlineCapabilities"
 import { TabBar, type TabId } from "./TabBar"
 import { ChatScreen } from "../screens/ChatScreen"
 import { ProjectsScreen } from "../screens/ProjectsScreen"
-import { CadScreen } from "../screens/CadScreen"
 import { LabScreen } from "../screens/LabScreen"
 import { CodeScreen } from "../screens/CodeScreen"
 import { ModelSwitcher } from "../components/ModelSwitcher"
@@ -157,9 +157,6 @@ export function AppShell() {
         </div>
         <div className={tab === "projects" ? "h-full" : "hidden"}>
           <ProjectsScreen />
-        </div>
-        <div className={tab === "cad" ? "h-full" : "hidden"}>
-          <CadScreen />
         </div>
         <div className={tab === "lab" ? "h-full" : "hidden"}>
           <LabScreen onOpenSettings={() => setShowKeys(true)} />
