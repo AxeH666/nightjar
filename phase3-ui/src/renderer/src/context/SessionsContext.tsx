@@ -788,10 +788,14 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         try {
           // B3: reap the prior code session on reconnect if it was never used —
           // otherwise every reconnect (BYOK change, SSE drop, crash-restart) leaves an
-          // empty "June coding" session behind, cluttering the Code list and growing
+          // empty, auto-titled session behind, cluttering the Code list and growing
           // nightjar.codeSessionIds without bound.
           const prevCodeId = slotsRef.current.code
-          const codeId = await client.createSession(DEFAULT_TITLE.code)
+          // No forced title → the engine auto-titles the code session from the conversation (a
+          // forced title suppresses OpenCode's ensureTitle); matches newSession, and the rail masks
+          // the pre-title placeholder via displayChatTitle. Reapability below is title-INDEPENDENT
+          // (keys only on messages/busy/lastSent), so dropping the title does not change the B3 reap.
+          const codeId = await client.createSession()
           if (!cancelled) {
             // Decide reapability AFTER the await (Bugbot: a pre-await snapshot goes
             // stale) and BEFORE rebind (which gc's the old id): the user may have sent
@@ -825,7 +829,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   // cad slot ← created here on connect, recreated on reconnect (Task 5). The cad slot now
   // has a resumable history rail too (LAB → Mechanical), so it mirrors the code slot: mark
   // each new cad session, and reap the prior one on reconnect if it was never used — else
-  // every reconnect leaves an empty "June CAD" session cluttering the Mechanical history.
+  // every reconnect leaves an empty, auto-titled session cluttering the Mechanical history.
   // Any real conversation is carried into the new session and kept in the list.
   useEffect(() => {
     if (!primaryId) return
@@ -837,7 +841,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         try {
           const prevCadId = slotsRef.current.cad
-          const cadId = await client.createSession(DEFAULT_TITLE.cad)
+          // No forced title → the engine auto-titles the cad session (mirrors the code slot above);
+          // the rail masks the pre-title placeholder via displayChatTitle, and the B3 reap below is
+          // title-independent (messages/busy/lastSent only).
+          const cadId = await client.createSession()
           if (!cancelled) {
             // Decide reapability AFTER the await and BEFORE rebind (which gc's the old id),
             // mirroring the code slot's B3 reap: reap only if the prior session is still
