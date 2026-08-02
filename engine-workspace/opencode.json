@@ -152,6 +152,7 @@
       "type": "local",
       "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/websearch_server.py"],
       "environment": { "NIGHTJAR_ROOT": "{env:NIGHTJAR_ROOT}" },
+      "timeout": 120000,
       "enabled": true
     },
     "odysseus-research": {
