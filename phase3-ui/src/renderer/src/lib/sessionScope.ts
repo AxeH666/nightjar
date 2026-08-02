@@ -153,16 +153,20 @@ export function saveProjectChatIds(projectId: string, ids: string[]): boolean {
 // The engine (OpenCode) gives a brand-new session a placeholder title — a prefix + ISO timestamp
 // — and replaces it with a real, conversation-derived title after the first message
 // (session/prompt.ts ensureTitle, gated on isDefaultTitle). Map anything still on a placeholder
-// (or empty, or the legacy forced "June chat") to a friendly "New chat" so the rail never shows a
-// raw timestamp while a chat is waiting to be auto-titled.
+// (or empty, or a legacy forced default like "June chat"/"June coding") to a friendly "New chat"
+// so the rail never shows a raw timestamp while a chat is waiting to be auto-titled.
 // The engine's placeholder is a FULL match on `<prefix><ISO timestamp>` (from OpenCode
 // session/session.ts isDefaultTitle: prefixes "New session - " / "Child session - "). Anchor to
 // the whole string — a suffix match would mis-hide a real title that merely ENDS with a timestamp
 // (Bugbot). Keep these in sync if the engine's prefixes change.
 const PLACEHOLDER_TITLE = /^(New session - |Child session - )\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
-// Legacy forced titles Nightjar used before auto-titling ("June chat" for new chats, "June
-// session" for the connection primary) — both are placeholders, not user-chosen names.
-const LEGACY_DEFAULTS = new Set(["June chat", "June session"])
+// Legacy forced titles Nightjar used before auto-titling: "June chat" (new chats) + "June session"
+// (the connection primary) for the chat slot, plus "June coding" (code slot) + "June CAD" (cad
+// slot). The latter two were dropped from createSession so code/cad also engine-auto-title, but
+// sessions created before that fix — and the in-memory rebind/resume fallback (DEFAULT_TITLE) —
+// still carry them, so they must mask to "New chat" too. All four are placeholders, not
+// user-chosen names.
+const LEGACY_DEFAULTS = new Set(["June chat", "June session", "June coding", "June CAD"])
 // The label shown for an as-yet-unnamed chat. Exported so the rename UI can detect it (and start
 // blank on it) without hard-coding the string in a second place (consistency sweep).
 export const NEW_CHAT_LABEL = "New chat"

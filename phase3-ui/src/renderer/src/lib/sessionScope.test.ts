@@ -143,6 +143,8 @@ describe("displayChatTitle — a placeholder never shows as a raw timestamp", ()
     expect(displayChatTitle(undefined)).toBe("New chat")
     expect(displayChatTitle("June chat")).toBe("New chat") // legacy forced default (new chats)
     expect(displayChatTitle("June session")).toBe("New chat") // legacy forced default (connection primary)
+    expect(displayChatTitle("June coding")).toBe("New chat") // legacy forced default (code slot, pre auto-title)
+    expect(displayChatTitle("June CAD")).toBe("New chat") // legacy forced default (cad slot, pre auto-title)
   })
 
   it("passes through a real title untouched — even one that merely ENDS with a timestamp (Bugbot)", () => {
