@@ -34,7 +34,7 @@ adding networked access.
 | OpenCode | native agent engine | MIT | `research/opencode/LICENSE` (git submodule, `AxeH666/opencode` fork — fetched on clone); also credited in Odysseus `licenses/opencode-MIT-LICENSE.txt` |
 | Row-Bot | voice/vision/memory/browser bolt-on | Apache-2.0 | `phase2-mcp/NOTICE`, `phase2-mcp/LICENSE.row-bot` |
 | Odysseus | email/RAG/research/PIM bolt-on | AGPL-3.0-or-later | `research/odysseus/LICENSE`, `research/odysseus/ACKNOWLEDGMENTS.md`, `research/odysseus/licenses/` |
-| llmfit (© 2026 Alex Jones) | hardware model-fit (vendored) | MIT | `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS |
+| llmfit (© 2026 Alex Jones) | hardware model-fit (vendored at `phase1-engine/hwfit_vendor/`) | MIT | `phase1-engine/hwfit_vendor/LICENSE.llmfit-MIT` (travels with the vendored copy); also `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS while that submodule remains |
 | Tongyi DeepResearch | deep-research pipeline (via Odysseus) | Apache-2.0 | `research/odysseus/licenses/DeepResearch-Apache-2.0.txt` |
 | three.js (© three.js authors) | custom voice-reactive vortex orb (WebGL, redesign Step 7) | MIT | `phase3-ui/node_modules/three/LICENSE` |
 | react (© Meta Platforms / Facebook, Inc.) | UI framework for the Electron renderer | MIT | `phase3-ui/node_modules/react/LICENSE` (npm dep) |
@@ -134,7 +134,7 @@ restrictive-checkpoint risk is **latent** — it only arises if an operator both
 server *and* points it at a restricted model.
 
 **License status of the candidate local models** (from llmfit's curated registry,
-`phase2-odysseus/hwfit_vendor/services/hwfit/image_models.py`; the license field there is
+`phase1-engine/hwfit_vendor/services/hwfit/image_models.py`; the license field there is
 *metadata* — confirm each model-card LICENSE at download per rule 5, since these are
 downloaded, not vendored):
 

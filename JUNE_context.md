@@ -73,7 +73,8 @@ gates on readiness, restarts on crash with backoff, and kills process trees on s
 ```
 phase1-engine/      local model + inference proxy (bun .mjs) + safety plugins + reports
 phase2-mcp/         Row-Bot-derived capabilities MCP + wake daemon + side-channel   (venv)
-phase2-odysseus/    Odysseus MCP wrappers + config + THE WORKSPACE (opencode.json)  (venv)
+engine-workspace/   THE WORKSPACE — opencode.json (agents, MCP servers, providers) + opencode-serve cwd
+phase2-odysseus/    Odysseus MCP wrappers (venv)
 phase-cad/          Prompt-to-CAD: build123d MCP shim + STEP→GLB converter      (.venv, py3.12)
 phase3-ui/          Electron + React desktop app (the whole UI + supervisor)    (node_modules)
 browser-use-mcp/    autonomous browser MCP                                          (venv)
@@ -113,7 +114,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 ### 4.2 Agent engine
 - **OpenCode**, run by **bun** directly from TypeScript source
   (`research/opencode/packages/opencode/src/index.ts serve --port 4096`).
-- Config: `phase2-odysseus/workspace/opencode.json` — defines the **agents** and **MCP servers**.
+- Config: `engine-workspace/opencode.json` — defines the **agents** and **MCP servers**.
 - Substitutes `{env:VAR}` in config (globally, mid-string) — this is how repo-relative paths work.
 
 ### 4.3 Models
@@ -167,7 +168,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 
 ---
 
-## 6. Agents & the tool surface (`phase2-odysseus/workspace/opencode.json`)
+## 6. Agents & the tool surface (`engine-workspace/opencode.json`)
 
 **Agents** (each `mode: "primary"` with an identity prompt): `research`, `websearch`,
 `assistant`, `cad`, `coding`.
@@ -191,7 +192,7 @@ and `{env:NJ_VENV_PY}` (the cross-platform bit — see §9).
 - **App data:** `~/.nightjar` (Linux) / `C:\Users\<you>\.nightjar` (Windows) — **separate per OS,
   so a Windows install does not touch WSL data.**
 - **Odysseus data:** `~/.nightjar/odysseus` (+ embedded Chroma at `…/chroma`).
-- **Workspace** (opencode-serve cwd): `phase2-odysseus/workspace`.
+- **Workspace** (opencode-serve cwd): `engine-workspace/`.
 - **BYOK keys:** encrypted, stored **per machine** → they do **not** carry over from WSL to
   Windows; re-add them there.
 - Key env overrides: `NIGHTJAR_BUN`, `NIGHTJAR_LLAMA_BIN`, `NIGHTJAR_MODEL_GGUF`,

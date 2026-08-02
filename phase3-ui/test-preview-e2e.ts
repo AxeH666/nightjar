@@ -14,7 +14,8 @@ import { rm } from "node:fs/promises"
 
 const BASE = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const MODEL = "llamacpp/qwen3-4b-instruct-2507"
-const WS = process.env.NIGHTJAR_WORKSPACE || "/home/axehe/nightjar/phase2-odysseus/workspace"
+// Repo-relative: this file lives in phase3-ui/, so the workspace is ../engine-workspace.
+const WS = process.env.NIGHTJAR_WORKSPACE || new URL("../engine-workspace", import.meta.url).pathname
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 let pass = 0, fail = 0
 const check = (n: string, ok: boolean, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"}: ${n}${extra ? " — " + extra : ""}`); ok ? pass++ : fail++ }

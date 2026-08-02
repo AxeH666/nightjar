@@ -130,11 +130,16 @@ desktop.ini
 # The coding agent writes previewable web artifacts here. Keeping it untracked
 # means the git-gate safety plugin never sees it in `git status`, so multi-file
 # design builds are never rolled back mid-generation (agent re-reads stay valid).
-phase2-odysseus/workspace/preview/
+engine-workspace/preview/
 
 # ── CAD export artifacts (test / agent output) ───────────────────────────────
 # STEP/STL/GLB the CAD agent or tests emit into the workspace are generated, not
 # source (e.g. a stray demo_car.step). Ignore them so they don't clutter status.
-phase2-odysseus/workspace/*.step
-phase2-odysseus/workspace/*.stl
-phase2-odysseus/workspace/*.glb
+engine-workspace/*.step
+engine-workspace/*.stl
+engine-workspace/*.glb
+
+# The workspace's previous home (phase2-odysseus/workspace/). Kept ignored so
+# leftover generated artifacts in an existing checkout don't show up as
+# untracked noise after the move. Remove once that directory is gone (PR G).
+phase2-odysseus/workspace/

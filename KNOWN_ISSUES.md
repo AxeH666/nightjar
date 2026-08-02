@@ -13,7 +13,7 @@ Consolidated so nothing drifts. Prune as items resolve. (Cross-session copy: the
 **Decisions the maintainer must make:**
 - **Image reading on the 6 GB GPU (NJ-32).** Local vision (`gemma3:4b`) can't fit alongside the chat model → images fail. Pick one: (a) **cloud vision** (Vision=Online + a vision-capable model/key — `gpt-oss-120b` is text-only), (b) **tune local VRAM** (fewer llama `-ngl` / smaller `-c` so vision fits, slower chat), or (c) images-cloud-only.
 - **Dev-workflow (NJ-30).** Recommendation flagged, NOT applied: native **Windows** for GUI/interaction testing, WSL for headless CI + Linux packaging.
-- **Stray `phase2-odysseus/workspace/demo_car.step`** (untracked CAD test output) — add to `.gitignore`? (offered, awaiting yes/no).
+- **Stray CAD test output in the engine workspace** (untracked `*.step`) — now covered by the `engine-workspace/*.step` ignore rule added when the workspace moved out of `phase2-odysseus/` (PR A). No action needed unless you want the old `phase2-odysseus/workspace/` directory cleaned up before PR G removes it.
 
 **FYI / user action:** Fireworks chat "healed" to the local model after the WSLg crashes (chat pref = offline). The key WORKS — just re-select Fireworks in the model dropdown.
 
@@ -60,6 +60,32 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 13-agent audit of the merged code). They stay here (not in ✅ RESOLVED) until re-triggered
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
+
+## NJ-48 — a wrong plugin path in `opencode.json` silently disables a SAFETY plugin — MITIGATED 2026-08-02
+
+- **Severity:** high if it ever happens — it disables a safety guard with **no signal at all**.
+- **Found:** while moving the engine workspace (PR A). OpenCode resolves path-like
+  plugin specs relative to the **directory of the config file**
+  (`packages/opencode/src/config/plugin.ts` → `path.resolve(path.dirname(configFilepath), spec)`),
+  so moving `opencode.json` changes the required `../` depth.
+- **The hazard (verified by deliberately breaking one path, rule 6):** with a
+  wrong `../` depth on `nightjar-doom-loop.ts`, the engine **still booted**,
+  `/agent` still answered with the full agent list, and the *other* plugins still
+  loaded — the broken one was skipped with **no error on stdout, stderr, or any
+  HTTP surface**. "It boots and chat works" therefore does NOT prove the plugins
+  are loaded.
+- **Why it matters:** four of the six are the Nightjar safety harness
+  (`no-destructive-write`, `generation-cap`, `doom-loop`, `git-gate`). A typo in
+  a relative path would silently remove a guard that CLAUDE.md rules 1–4 depend
+  on, and every symptom would look like "the safety plugin just didn't fire."
+- **Mitigation (this PR):** `phase1-engine/tests/test_plugin_paths.mjs` statically
+  asserts every `plugin` entry resolves to an existing file, and that all four
+  safety plugins are listed by name. Verified in both directions — passes on the
+  real config, exits 1 on a tree with one broken path.
+- **Residual:** the guard proves the file *exists*, not that OpenCode successfully
+  *executed* it. A plugin that loads but throws at init is still silent. Closing
+  that needs an upstream change (OpenCode surfacing plugin load failures) or a
+  per-plugin runtime probe; not attempted here.
 
 ## NJ-47 — `tests/test_vision.py` crashes on a default Windows console (cp1252) — OPEN 2026-08-02
 

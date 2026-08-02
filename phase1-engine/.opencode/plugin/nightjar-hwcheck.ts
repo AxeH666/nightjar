@@ -14,7 +14,7 @@ import { homedir } from "node:os"
 
 // repo-relative, not a hardcoded machine path (NIGHTJAR_ROOT set by supervisor/setup)
 const ROOT = process.env.NIGHTJAR_ROOT || join(homedir(), "nightjar")
-const HWFIT_CLI = join(ROOT, "phase2-odysseus/hwfit_vendor/hwfit_cli.py")
+const HWFIT_CLI = join(ROOT, "phase1-engine/hwfit_vendor/hwfit_cli.py")
 
 export const NightjarHwCheck: Plugin = async ({ $ }) => {
   // hwfit_cli is pure-stdlib Python (no venv), so any interpreter works — but `python3` is not on
