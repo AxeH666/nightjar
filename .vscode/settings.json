@@ -4,11 +4,10 @@
   //   - research/* upstream clones (opencode, row-bot, open-webui, orb-ui,
   //     gemma-chat) are git-IGNORED dev references, each with its own .git, so
   //     VS Code auto-detects them as separate repos.
-  //   - research/odysseus is a real SUBMODULE whose working tree is INTENTIONALLY
-  //     patched (phase2-odysseus/odysseus-patches/), so VS Code perpetually shows
-  //     it as "modified". There's nothing to commit there — the patch is by design
-  //     — so ignore it in the SCM view too. (The submodule still works normally on
-  //     the git CLI; the pinned commit is still tracked.)
+  //   - research/odysseus is a real SUBMODULE (clean mirror since the Odysseus
+  //     removal retired the integration patch, PR G; kept only until PR E removes
+  //     the last runtime use). Old checkouts may still carry the applied patch, so
+  //     keep it ignored in the SCM view. (The pinned commit is still tracked.)
   "git.ignoredRepositories": [
     "research/gemma-chat",
     "research/opencode",

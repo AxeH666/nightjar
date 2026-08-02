@@ -4,7 +4,7 @@
 // reminders fire ONLY while the app is open. (The paid always-on Telegram server, PR 17, is the
 // laptop-closed path.)
 //
-// The poll runs a short Python one-shot (phase2-odysseus/servers/task_poller.py) that CLAIMS the
+// The poll runs a short Python one-shot (phase2-mcp/task_poller.py) that CLAIMS the
 // due tasks — marks them fired + advances/completes — and prints them as JSON. So a task fires at
 // most once even if two polls overlap, and a missed notification is bounded to one (best-effort,
 // which is the honest guarantee for a local-only tier).

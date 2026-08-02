@@ -61,6 +61,31 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-51 — image generation is OFFLINE between PR G and PR E — OPEN 2026-08-02
+
+- **What:** Odysseus removal PR G deleted `phase2-odysseus/` (per maintainer decision:
+  bank the cleanup now, image gen is its own follow-up). That directory held the venv
+  the `odysseus-image` MCP server ran in and `seed_image_endpoint.py`, the script the
+  Electron main shells to wire a BYOK key / the local diffusion server into the image
+  endpoint. With the venv gone the server can never spawn, so the MCP block and the
+  assistant's `odysseus-image_generate_image: ask` grant were removed too (NJ-49's
+  lesson: never leave reachable-but-broken config dangling).
+- **User-visible:** asking the assistant to generate an image now gets "no such tool"
+  behaviour (the agent has no image tool) instead of a working generation or a
+  descriptive error. The Capabilities UI still shows the image capability; selecting it
+  cannot take effect. `index.ts`'s image-endpoint reconcile (`runImageSeed`) now always
+  resolves false — it is best-effort by design and logs the failure, but it is a no-op.
+- **Returns in PR E**, which decides between pointing image gen at a cloud API directly
+  (likely, given the cloud-vision direction) or rebuilding the local diffusers path.
+  E must also rework or delete: the `runImageSeed`/`applyImageEndpoint` machinery in
+  `phase3-ui/src/main/index.ts`, the diffusion sidecar launch in `services.ts`
+  (`research/odysseus/scripts/diffusion_server.py` — still referenced, still AGPL), and
+  the Capabilities image rows.
+- **License status (explicit, so G is not mistaken for the finish line):** the
+  `research/odysseus` submodule REMAINS in the tree and REMAINS the reason the combined
+  work is AGPL-3.0-or-later. The relicensing payoff lands at E, when the submodule's
+  last runtime use goes away — not at G.
+
 ## NJ-50 — PIM rebuilt on Nightjar's own schema; legacy Odysseus data migrates once — RESOLVED 2026-08-02
 
 - **What:** Odysseus removal PR D replaced `from core.database import ...` (Odysseus,

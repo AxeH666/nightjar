@@ -55,7 +55,7 @@ together over **MCP** rather than merged. See `NIGHTJAR_LICENSE_AND_ATTRIBUTION.
     ├─ cad-build123d      → phase-cad/.venv     (build123d / OCCT)  ⭐ the CAD lab
     ├─ nightjar           → phase2-mcp/venv     (voice/vision/memory/browser)
     ├─ browser-use        → browser-use-mcp/venv
-    └─ odysseus-{email,image,rag,research,docs,pim} → phase2-odysseus/venv
+    └─ (odysseus tiers removed — email/rag/docs deleted; research/pim/websearch rebuilt Nightjar-side in phase2-mcp; image returns in PR E)
 
   Model layer:  llama-server (:8085, CUDA)  ←  inference-proxy (:8086, bun)
   Side-channel: sidechannel.py (:8765 WS) + wake_daemon.py (:8766)
@@ -74,7 +74,7 @@ gates on readiness, restarts on crash with backoff, and kills process trees on s
 phase1-engine/      local model + inference proxy (bun .mjs) + safety plugins + reports
 phase2-mcp/         Row-Bot-derived capabilities MCP + wake daemon + side-channel   (venv)
 engine-workspace/   THE WORKSPACE — opencode.json (agents, MCP servers, providers) + opencode-serve cwd
-phase2-odysseus/    Odysseus MCP wrappers (venv)
+
 phase-cad/          Prompt-to-CAD: build123d MCP shim + STEP→GLB converter      (.venv, py3.12)
 phase3-ui/          Electron + React desktop app (the whole UI + supervisor)    (node_modules)
 browser-use-mcp/    autonomous browser MCP                                          (venv)
@@ -132,7 +132,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 |---|---|---|
 | **phase-cad** (`.venv`, **Python 3.12 exactly**, via `uv`) | Prompt-to-CAD | `build123d>=0.11,<0.12`, `build123d-mcp==0.3.79`, `cadquery-ocp-novtk` (OCCT/VTK) |
 | **phase2-mcp** (`venv`) | voice/vision/memory/browser | `faster-whisper`+`ctranslate2` (STT), `kokoro-onnx`+`phonemizer-fork`+`espeakng-loader` (TTS), `openwakeword` (wake word), `faiss-cpu`+`scikit-learn` (memory), `ollama`, `opencv-python-headless`, `mss`, `playwright`, `av`, `soundfile`, `mcp`, `websockets` |
-| **phase2-odysseus** (`venv`) | email/RAG/research/PIM | `chromadb` (**embedded — no Docker**), `fastembed`, `onnxruntime`, `sqlalchemy`, `caldav`+`icalendar`+`recurring-ical-events`, `aiosmtpd`, `pypdf`, `ddgs`/`duckduckgo_search`, `fastapi`+`uvicorn`, `croniter`, `youtube-transcript-api` |
+
 | **browser-use-mcp** (`venv`) | autonomous browser | `browser-use==0.13.3` (drives Chromium over CDP — needs a Chrome/Chromium) |
 | **diffusion-mcp** (`venv`) | local image gen | `torch` (install the CUDA wheel for GPU), `diffusers`, `transformers`, `accelerate`, `safetensors` |
 | **telegram-scheduler** | always-on reminders (separate deployable) | `fastapi`, `apscheduler`, `aiogram`, `sqlalchemy`, `httpx` |
@@ -179,9 +179,10 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 inspect/cross_sections/…) + 5 `ask` (execute/export/import_cad_file/load_part/install_skill);
 the other 18 (incl. the destructive `reset`) are **unreachable**.
 
-**MCP servers (7):** `nightjar`, `nightjar-websearch`, `nightjar-research`, `nightjar-pim`,
-`browser-use`, `odysseus-image`, `cad-build123d`.
-(`odysseus-image` is the LAST Odysseus tier — deferred to the image-gen follow-up, PR E.)
+**MCP servers (6):** `nightjar`, `nightjar-websearch`, `nightjar-research`, `nightjar-pim`,
+`browser-use`, `cad-build123d`.
+(Image generation is offline until the image-gen follow-up (PR E) — `odysseus-image` was
+removed with `phase2-odysseus/` in PR G, since the venv it ran in no longer exists.)
 (Odysseus removal: `odysseus-email` / `odysseus-rag` / `odysseus-docs` were deleted in PR C —
 see KNOWN_ISSUES NJ-49 for the reachability audit that justified it.)
 (`nightjar-websearch` was split out of `odysseus-research` in the Odysseus-removal PR B — it is

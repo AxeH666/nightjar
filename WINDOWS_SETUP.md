@@ -27,7 +27,7 @@
 | nightjar-websearch (MCP) | `phase2-mcp/venv` | — (stdio) | quick web search (ddgs; no Odysseus) | web-search mode |
 | nightjar-pim (MCP) | `phase2-mcp/venv` | — (stdio) | notes / tasks / calendar (own SQLite) | assistant tools |
 | nightjar-research (MCP) | `phase2-mcp/venv` | — (stdio) | deep research (own loop; pypdf) | research mode |
-| odysseus-image (MCP) | `phase2-odysseus/venv` | — (stdio) | image gen (LAST Odysseus tier; PR E) | assistant tools |
+| ~~odysseus-image~~ | — | — | image gen — REMOVED with phase2-odysseus (PR G); returns in the image-gen follow-up (PR E) | — |
 | browser-use (MCP) | `browser-use-mcp/venv` | — (stdio) | autonomous browser | browser tool |
 | side-channel | `phase2-mcp/venv` python | 8765 | wake-word/TTS/orb side-channel | voice orb |
 | wake-daemon | `phase2-mcp/venv` python | 8766 | "Hey Nightjar" loop | wake word (needs mic) |
@@ -82,13 +82,13 @@ for phase-cad; use it everywhere for consistency.
   ```
 - **Native Windows (PowerShell):** run the one-shot `powershell -ExecutionPolicy Bypass -File
   scripts\setup.ps1` (the PowerShell equivalent of `setup.sh` — submodules incl. the engine,
-  `bun install`, the Odysseus patch, all venvs, the UI). Or do it per backend by hand:
+  `bun install`, all venvs, the UI). Or do it per backend by hand:
   ```powershell
-  # for each of: phase2-mcp, phase2-odysseus, browser-use-mcp
+  # for each of: phase2-mcp, browser-use-mcp
   py -3.12 -m venv phase2-mcp\venv
   .\phase2-mcp\venv\Scripts\python -m pip install --upgrade pip
   .\phase2-mcp\venv\Scripts\python -m pip install -r phase2-mcp\requirements.txt
-  # …repeat for phase2-odysseus\ and browser-use-mcp\
+  # …repeat for browser-use-mcp\
   ```
   On Windows the interpreter is **`venv\Scripts\python.exe`** (not `venv/bin/python`) — this is
   exactly what §7 is about.
@@ -131,7 +131,7 @@ venv via [`uv`](https://docs.astral.sh/uv/)**, kept isolated from the other venv
 
 ### 3.8 Odysseus submodule + patch
 `scripts/setup.sh` fetches `research/odysseus` (git submodule) and applies
-`phase2-odysseus/odysseus-patches/nightjar-odysseus.patch` (embedded ChromaDB, no Docker). If
+~~the Odysseus patch~~ — retired in the Odysseus removal (PR G); setup now reverts a previously-patched submodule to pristine. If
 you set venvs up manually, still run the submodule init + `git -C research/odysseus apply <patch>`
 (or run `scripts/setup.sh` under Git Bash). Only needed for the email/RAG/research/PIM tools — **not**
 for the LAB/CAD verification.
@@ -253,13 +253,13 @@ First install the four prerequisites (**reopen the terminal after each** so PATH
 4. **uv** → `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`.
 
 Then run the setup script — it fetches the submodules (incl. the **OpenCode engine**),
-`bun install`s the engine, applies the Odysseus patch, builds the **phase-cad** venv, and
+`bun install`s the engine, builds the **phase-cad** venv, and
 installs the UI's node modules:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -CoreOnly
 ```
 - `-CoreOnly` is the minimal LAB/CAD-via-BYOK path (engine + phase-cad + UI). **Drop it** to
-  also build the `phase2-mcp` / `phase2-odysseus` / `browser-use` venvs and (best-effort)
+  also build the `phase2-mcp` / `browser-use` venvs and (best-effort)
   Ollama + the diffusion backend: `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1`.
 - The engine `bun install` may print a `tree-sitter-powershell` postinstall error — **harmless**
   (a TUI-only grammar; the script auto-retries `--ignore-scripts`, which the HTTP `serve` path

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Nightjar one-shot setup for a fresh clone.
-#   - fetches the submodules (Odysseus + the OpenCode ENGINE) + applies the Odysseus patch
+#   - fetches the submodules (Odysseus + the OpenCode ENGINE; the Odysseus patch is retired)
 #   - installs the engine's deps (bun install)
-#   - creates the Python venvs (phase2-mcp/odysseus/browser-use) + the phase-cad venv + deps
+#   - creates the Python venvs (phase2-mcp, browser-use) + the phase-cad venv + deps
 #   - installs the UI's node modules
 #   - installs Ollama + the gemma3:4b vision model (best-effort — offline image analysis)
 #   - installs the local diffusion image backend (best-effort)
@@ -52,26 +52,11 @@ else
   echo "   WARNING: bun not found — the engine will not start. Install: curl -fsSL https://bun.sh/install | bash" >&2
 fi
 
-# 3) Apply Nightjar's Odysseus patch (idempotent) --------------------------------------
-echo "-- [3/10] Odysseus integration patch --"
-PATCH="$ROOT/phase2-odysseus/odysseus-patches/nightjar-odysseus.patch"
-if git -C research/odysseus apply --reverse --check "$PATCH" 2>/dev/null; then
-  echo "   already applied — skipping"
-elif git -C research/odysseus apply --check "$PATCH" 2>/dev/null; then
-  # HARD-FAIL if the apply itself fails — a missing patch means the Odysseus tier
-  # runs WITHOUT embedded ChromaDB (no-docker) + the docs RAG fix, which breaks at
-  # runtime. Better to stop setup here than to "succeed" into a broken install.
-  if ! git -C research/odysseus apply "$PATCH"; then
-    echo "   ERROR: Odysseus patch failed to apply (after passing --check)." >&2
-    exit 1
-  fi
-  echo "   applied ($PATCH)"
-else
-  echo "   ERROR: Odysseus patch does not apply cleanly and is not already applied." >&2
-  echo "          The Odysseus tier would be MISSING embedded ChromaDB (no-docker)." >&2
-  echo "          Inspect the submodule commit vs the patch: $PATCH" >&2
-  exit 1
-fi
+# 3) Odysseus integration patch — RETIRED (Odysseus removal, PR G) --------------------
+# The patch served the odysseus rag/docs/pim/email tiers, all removed or rebuilt
+# Nightjar-side. Revert an existing checkout's submodule to pristine.
+echo "-- [3/10] Odysseus patch: retired (reverting if present) --"
+if [ -e research/odysseus/.git ]; then git -C research/odysseus checkout -- . 2>/dev/null || true; fi
 
 # 4) Python venvs + deps ---------------------------------------------------------------
 make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)
@@ -94,7 +79,6 @@ if [ -x "phase2-mcp/venv/$VBIN/$PYEXE" ]; then
   "phase2-mcp/venv/$VBIN/$PYEXE" -m pip uninstall -y -q \
     kokoro-onnx phonemizer-fork espeakng-loader >/dev/null 2>&1 || true
 fi
-echo "-- [5/10] phase2-odysseus venv --"; make_venv phase2-odysseus
 # Browser Use (autonomous form-filling) — isolated venv so its heavy deps
 # (openai/anthropic/google-genai/…) never destabilize phase2-mcp/venv.
 echo "-- [6/10] browser-use venv --";     make_venv browser-use-mcp
