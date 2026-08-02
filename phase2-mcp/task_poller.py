@@ -4,6 +4,7 @@
 The Electron main spawns this on an interval; for each task it prints, main shows a desktop
 notification (only while the app is open — the free tier's guarantee). Reuses pim_server's
 task_due + task_mark_fired so the next_run math and the schema stay in one place.
+Runs in the phase2-mcp venv (Odysseus removal, PR D).
 
 CLAIM semantics: this marks each due task fired BEFORE printing it (advancing a recurring
 task's next_run, completing a 'once'). So a task is claimed exactly once even if two polls
@@ -20,8 +21,7 @@ from datetime import datetime
 
 def main() -> int:
     try:
-        import _bootstrap  # noqa: F401 — sets sys.path/env; must import before pim_server
-        import pim_server as pim
+        import pim_server as pim  # Nightjar PIM (own SQLAlchemy models, no Odysseus)
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"due": [], "error": f"import failed: {exc.__class__.__name__}: {exc}"}))
         return 1

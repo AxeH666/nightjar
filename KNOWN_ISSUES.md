@@ -61,6 +61,36 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-50 — PIM rebuilt on Nightjar's own schema; legacy Odysseus data migrates once — RESOLVED 2026-08-02
+
+- **What:** Odysseus removal PR D replaced `from core.database import ...` (Odysseus,
+  AGPL) with Nightjar's own SQLAlchemy models (`phase2-mcp/pim_db.py`, MIT). Store moved
+  from Odysseus's `~/.nightjar/odysseus/app.db` to `~/.nightjar/pim.db`.
+- **Schema narrowing:** Odysseus's `ScheduledTask` carries ~30 columns plus foreign keys to
+  `sessions`, `crew_members` and itself; Nightjar only ever read/wrote a small subset. The
+  new models declare that subset and nothing else, keeping the `(status, next_run)` index
+  the poller's hot query needs.
+- **Migration:** one-time, on first use, via raw `sqlite3` — no Odysseus import — so it
+  still works after the submodule is deleted (PR G). Non-destructive (old file is opened
+  read-only), idempotent (only fills EMPTY tables, so re-runs never duplicate and never
+  clobber rows written since), and column-intersecting (an older or newer Odysseus schema
+  degrades to the common columns instead of raising).
+- **⚠️ Could NOT be verified against real data.** `~/.nightjar/odysseus/` exists on the dev
+  box but is **empty** — created by the old `_bootstrap`'s `mkdir` on import, never
+  populated. So there was nothing to migrate here. `tests/test_pim_migration.py` exercises
+  it against a SYNTHESIZED legacy `app.db` built to Odysseus's real (wide) table shapes.
+  **Other machines may hold real notes/tasks/events — a first run there is the only true
+  test of the migration.** If it misbehaves, the old `app.db` is untouched and can be
+  re-migrated after deleting `~/.nightjar/pim.db`.
+- **Also caught:** `tzdata==2026.2` was pinned in `phase2-odysseus/requirements.txt` because
+  `nl_intent.py` uses `zoneinfo` and Windows ships no system tz database. Moving that module
+  to `phase2-mcp` without the pin broke timezone parsing (`ZoneInfoNotFoundError: UTC`) —
+  now pinned there too. A dependency that lives only in the *other* venv's requirements is
+  easy to drop on a module move; check the source venv's pins, not just the imports.
+- **Residual:** the moved code still calls `datetime.utcnow()`, which emits a
+  DeprecationWarning on Python 3.12 and is slated for removal. Pre-existing, not touched
+  here; worth a sweep when convenient.
+
 ## NJ-49 — `odysseus-docs` was GRANTED, not ungranted — reachability audit before deleting the dead tiers — RESOLVED 2026-08-02
 
 - **Context:** Odysseus removal, PR C deleted the `odysseus-email`, `odysseus-rag` and

@@ -7,7 +7,9 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# modules under test live one level up, in phase2-mcp/ (moved there in PR D
+# when PIM was rebuilt on Nightjar's own SQLAlchemy schema)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime  # noqa: E402
 from nl_intent import parse_reminder, intent_to_task_args  # noqa: E402
 

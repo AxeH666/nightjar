@@ -179,8 +179,8 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 inspect/cross_sections/…) + 5 `ask` (execute/export/import_cad_file/load_part/install_skill);
 the other 18 (incl. the destructive `reset`) are **unreachable**.
 
-**MCP servers (7):** `nightjar`, `nightjar-websearch`, `browser-use`, `odysseus-image`,
-`odysseus-research`, `odysseus-pim`, `cad-build123d`.
+**MCP servers (7):** `nightjar`, `nightjar-websearch`, `nightjar-pim`, `browser-use`,
+`odysseus-image`, `odysseus-research`, `cad-build123d`.
 (Odysseus removal: `odysseus-email` / `odysseus-rag` / `odysseus-docs` were deleted in PR C —
 see KNOWN_ISSUES NJ-49 for the reachability audit that justified it.)
 (`nightjar-websearch` was split out of `odysseus-research` in the Odysseus-removal PR B — it is
