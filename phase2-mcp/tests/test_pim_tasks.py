@@ -6,18 +6,24 @@
 # The load-bearing assertions are DEAD_ROW_HEALED (a row the old task_create wrote with no
 # next_run gets a real one on migration) and RECURRING_ADVANCES (a fired daily task gets its
 # next_run pushed forward, not left to re-fire the same slot).
-# Run: ODYSSEUS_DATA_DIR=$(mktemp -d) python3 test_pim_tasks.py
+# Run: python3 test_pim_tasks.py   (isolates its own temp DB)
 import os
 import sys
 import tempfile
 from datetime import datetime, timedelta
 
-# Isolate the DB before importing the server (which opens it at import).
-os.environ.setdefault("ODYSSEUS_DATA_DIR", tempfile.mkdtemp(prefix="pim-test-"))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Isolate the DB before importing the server (which opens it at import). Also point
+# ODYSSEUS_DATA_DIR at the same empty temp dir so the one-time legacy migration finds
+# no app.db and is a no-op here.
+_tmp = tempfile.mkdtemp(prefix="pim-test-")
+os.environ["NIGHTJAR_PIM_DB"] = os.path.join(_tmp, "pim.db")
+os.environ["ODYSSEUS_DATA_DIR"] = _tmp
+# modules under test live one level up, in phase2-mcp/ (moved there in PR D
+# when PIM was rebuilt on Nightjar's own SQLAlchemy schema)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pim_server as p  # noqa: E402
-from core.database import SessionLocal, ScheduledTask  # noqa: E402
+from pim_db import SessionLocal, ScheduledTask  # noqa: E402 — Nightjar models, no Odysseus
 
 fails = []
 

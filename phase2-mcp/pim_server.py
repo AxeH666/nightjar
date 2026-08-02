@@ -1,9 +1,12 @@
 #!/usr/bin/env python
-"""Nightjar MCP wrapper: Odysseus PIM (calendar + notes + tasks) — ONE server.
+"""Nightjar PIM MCP server: calendar + notes + tasks — ONE server. No Odysseus.
 
-These live only as FastAPI route closures over SQLAlchemy models in Odysseus
-(no service layer), so this wrapper drives the ORM models directly via
-SessionLocal. Consolidated into a single MCP server (not three) per the plan.
+Was a wrapper driving Odysseus's SQLAlchemy models via `from core.database import
+...` (AGPL). Odysseus removal PR D swapped that for Nightjar's own models in
+`pim_db.py` (SQLAlchemy, MIT) — the same tool surface and the same next_run math,
+over a schema that declares only the columns Nightjar ever used, in its own store
+at ~/.nightjar/pim.db. Existing Odysseus data is migrated once on first use.
+
 All rows are owner-scoped to the single Nightjar user.
 """
 from __future__ import annotations
@@ -11,17 +14,22 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-import _bootstrap  # sets sys.path + env (must be first)
+import os
+
 from mcp.server.fastmcp import FastMCP
 
-from core.database import (
-    SessionLocal, Base, engine,
-    Note, ScheduledTask, CalendarCal, CalendarEvent,
+from pim_db import (  # Nightjar's own models (SQLAlchemy, MIT) — no Odysseus
+    CalendarCal,
+    CalendarEvent,
+    Note,
+    ScheduledTask,
+    SessionLocal,
+    init,
 )
 from schedule_backend import compute_next_run  # pure next_run math (NJ-16)
 
-# ensure tables exist (headless, no FastAPI startup)
-Base.metadata.create_all(bind=engine)
+# Create tables and, once, migrate any pre-existing Odysseus PIM rows across.
+init()
 
 VALID_SCHEDULES = ("once", "daily", "weekly", "monthly")
 
@@ -64,8 +72,10 @@ def _migrate_dead_task_rows() -> int:
 
 _migrate_dead_task_rows()
 
-mcp = FastMCP("odysseus-pim")
-OWNER = _bootstrap.OWNER
+mcp = FastMCP("nightjar-pim")
+# Single-user Nightjar. Same env var the Odysseus wrapper read, so an existing
+# install keeps the same owner scope and its migrated rows stay visible.
+OWNER = os.environ.get("ODYSSEUS_MCP_MEMORY_OWNER") or os.environ.get("NIGHTJAR_PIM_OWNER") or "nightjar"
 
 
 def _uid() -> str:

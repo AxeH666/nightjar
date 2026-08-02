@@ -25,10 +25,10 @@ let initialTimer: ReturnType<typeof setTimeout> | null = null
 let stopped = false
 
 function pyPath(): string {
-  return venvPython(join(REPO, "phase2-odysseus", "venv"))
+  return venvPython(join(REPO, "phase2-mcp", "venv"))
 }
 function pollerScript(): string {
-  return join(REPO, "phase2-odysseus", "servers", "task_poller.py")
+  return join(REPO, "phase2-mcp", "task_poller.py")
 }
 
 interface DueTask {
