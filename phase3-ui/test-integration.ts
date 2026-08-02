@@ -3,7 +3,7 @@
 // Validates the full contract the UI depends on. Run with: bun test-integration.ts
 //
 // REQUIRES the app's production opencode-serve on :4096 — i.e. serving
-// phase2-odysseus/workspace (the workspace the Electron app launches), which defines
+// engine-workspace/ (the workspace the Electron app launches), which defines
 // the research/assistant/coding modes this test asserts. Do NOT point it at the light
 // phase3-ui/test-workspace (that one only has a `coding` agent). Bring the stack up via
 // the app (`npm run dev`) or the same sidecars test-supervisor.ts spawns.

@@ -609,7 +609,7 @@ renderer files + 1 config:
    **message-watcher effect** (§7.4), and export them on the value object. Add the preload
    bridge (`preload/index.ts`) and an `ipcMain.handle` in `main/index.ts` that runs a
    **wall-clock-bounded** converter (CLAUDE.md rule 3).
-6. **`phase2-odysseus/workspace/opencode.json`** — add `agent.foo` (`mode:"primary"`,
+6. **`engine-workspace/opencode.json`** — add `agent.foo` (`mode:"primary"`,
    identity `prompt`, and a **`permission` map** gating every write/exec tool as `"ask"`
    under `"*":"deny"`) and `mcp.foo-mcp` (`type:"local"`, `command` = the phase's venv
    python + a thin launcher shim, both off `{env:NIGHTJAR_ROOT}`; `environment`;

@@ -104,7 +104,8 @@ phase reports.)
 ```
 phase1-engine/     local model + inference proxy + safety plugins
 phase2-mcp/        Row-Bot-derived capabilities (MCP) + wake-word daemon + side-channel
-phase2-odysseus/   Odysseus MCP wrappers + config + workspace + Odysseus patch
+engine-workspace/  opencode.json (agents, MCP servers, providers) + the opencode-serve cwd
+phase2-odysseus/   Odysseus MCP wrappers + Odysseus patch
 phase3-ui/         Electron + React desktop UI (chat, modes, permissions, voice orb)
 research/opencode/ OpenCode engine source — git SUBMODULE (MIT; the only agent loop)
 research/odysseus/ Odysseus source — git SUBMODULE (AGPL; runtime dependency)

@@ -32,7 +32,7 @@ already carries a wall-clock timeout (rule 3); every run is *additionally* bound
 ## Safety
 
 `run_browser_task` drives a real browser (high blast radius), so it is permission-gated
-**`"ask"`** in `phase2-odysseus/workspace/opencode.json` (assistant mode) per rule 1 —
+**`"ask"`** in `engine-workspace/opencode.json` (assistant mode) per rule 1 —
 never auto-approved.
 
 ## Isolation

@@ -149,7 +149,7 @@ for the LAB/CAD verification.
 | `NIGHTJAR_BUN` | path to `bun` | set to `%USERPROFILE%\.bun\bin\bun.exe` |
 | `NIGHTJAR_LLAMA_BIN` | path to `llama-server` | set to your `llama-server.exe` |
 | `NIGHTJAR_MODEL_GGUF` | GGUF path | override if not in `~/models/…` |
-| `NIGHTJAR_WORKSPACE` | opencode cwd | default `phase2-odysseus/workspace` |
+| `NIGHTJAR_WORKSPACE` | opencode cwd | default `engine-workspace/` |
 | `NIGHTJAR_DIFFUSION_PY` / `NIGHTJAR_IMAGE_MODEL_DIR` | image backend | Windows venv/model paths |
 | `NIGHTJAR_SKIP_OLLAMA` / `NIGHTJAR_SKIP_DIFFUSION` | skip optional models in bash setup | — |
 | `NIGHTJAR_DESIGN_PROFILE` | lift local-model output caps | optional |

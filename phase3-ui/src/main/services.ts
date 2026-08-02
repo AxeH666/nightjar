@@ -59,7 +59,7 @@ export function findImageModel(): string | null {
 }
 // Exported so the preview/artifact layer can compute tidy relative mirror paths
 // (relative(WORKSPACE, filePath)) for files the coding agent writes.
-export const WORKSPACE = process.env.NIGHTJAR_WORKSPACE || join(REPO, "phase2-odysseus/workspace")
+export const WORKSPACE = process.env.NIGHTJAR_WORKSPACE || join(REPO, "engine-workspace")
 
 // True when running under WSL/WSLg (a Linux Electron hosted by Windows). Detected via
 // /proc/version ("WSL"/"microsoft"), with an os.release() fallback. Cached — the kernel

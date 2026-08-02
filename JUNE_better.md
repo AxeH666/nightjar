@@ -98,7 +98,7 @@ Drop an **image** onto the message area → it attaches, previews, sends, and (l
 - It **inherits research's Local/Cloud backend** via `NIGHTJAR_RESEARCH_PROVIDER` (so it follows the global toggle automatically — no new capability/env needed).
 - Keep `deep_research` unchanged (its `max_time+30` cap stays).
 
-**(b) New `websearch` agent mode** in [opencode.json](phase2-odysseus/workspace/opencode.json): `permission {"*":"deny","odysseus-research_web_search":"allow"}`, short prompt ("do a quick web search and answer concisely with sources — do NOT deep-research or email"). Leave the `research` agent (deep_research) as-is.
+**(b) New `websearch` agent mode** in [opencode.json](engine-workspace/opencode.json): `permission {"*":"deny","odysseus-research_web_search":"allow"}`, short prompt ("do a quick web search and answer concisely with sources — do NOT deep-research or email"). Leave the `research` agent (deep_research) as-is.
 
 **(c) Composer routing split:**
 - [ChatSurface.tsx](phase3-ui/src/renderer/src/components/ChatSurface.tsx): stop the `research || webSearch` collapse (L140); make Research and Web-search **mutually exclusive** (selecting one clears the other) and pass a distinct signal, e.g. `onSend(t, { attachments, mode: "research" | "websearch" | undefined })`.
@@ -107,7 +107,7 @@ Drop an **image** onto the message area → it attaches, previews, sends, and (l
 
 ### Files
 - [deep_research_server.py](phase2-odysseus/servers/deep_research_server.py): add `web_search` tool (+ a pure helper for testability, mirroring `research_backend`).
-- [opencode.json](phase2-odysseus/workspace/opencode.json): `websearch` agent + allow `odysseus-research_web_search` in it.
+- [opencode.json](engine-workspace/opencode.json): `websearch` agent + allow `odysseus-research_web_search` in it.
 - [ChatSurface.tsx](phase3-ui/src/renderer/src/components/ChatSurface.tsx) + [ChatScreen.tsx](phase3-ui/src/renderer/src/screens/ChatScreen.tsx) + [ToolsMenu.tsx](phase3-ui/src/renderer/src/components/composer/ToolsMenu.tsx): split routing + mutually-exclusive toggles.
 
 ### Verify (rule 6)
@@ -237,7 +237,7 @@ Switch to Local → popup shows → dismiss → switch Cloud → switch Local ag
 
 ### Files (new)
 - A CAD Python project `phase-cad/`: `uv` pinned to **3.12** + build123d + build123d-mcp (pinned) + the `cadquery-ocp-novtk != 7.9.3.1.1` constraint.
-- CAD MCP wiring in [opencode.json](phase2-odysseus/workspace/opencode.json) (build123d-mcp under its Python-3.12 `uv` env; permission **`ask`** on `execute`/`export` per rule 1).
+- CAD MCP wiring in [opencode.json](engine-workspace/opencode.json) (build123d-mcp under its Python-3.12 `uv` env; permission **`ask`** on `execute`/`export` per rule 1).
 - The trusted **STEP → GLB** converter + its Electron-main IPC (wall-clock timeout per rule 3).
 - three.js viewer component in the renderer + preload/IPC to receive the **GLB** and load it.
 
