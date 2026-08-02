@@ -46,7 +46,10 @@ export interface CapabilityMeta {
 // header model switcher (which already persists through this store).
 export const CAPABILITIES: CapabilityMeta[] = [
   { id: "chat", name: "Chat & coding", onlineProviders: [], offlineLabel: "Local · Qwen3-4B" },
-  { id: "image", name: "Image generation", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local diffusion (Z-Image)" },
+  // PR E (Odysseus removal): no local diffusion path ships — Offline = image gen
+  // unavailable, and the label must SAY so rather than promise Z-Image (Bugbot).
+  // A local diffusers backend would flip this label back when it lands.
+  { id: "image", name: "Image generation", onlineProviders: ["openai", "openrouter"], offlineLabel: "Not available offline (pick an Online provider)" },
   { id: "research", name: "Deep research", onlineProviders: ["openai", "openrouter", "groq", "deepseek", "mistral", "xai", "fireworks-ai"], offlineLabel: "Local · Qwen3-4B" },
   { id: "vision", name: "Vision (image analysis)", onlineProviders: ["openai", "openrouter"], offlineLabel: "Local · gemma3:4b" },
   { id: "browser", name: "Browser agent", onlineProviders: ["openrouter", "openai"], offlineLabel: "Local · Qwen3-4B" },
@@ -156,5 +159,12 @@ export function envForOpencode(): Record<string, string> {
   // NIGHTJAR_VISION_PROVIDER + that provider's NIGHTJAR_BYOK_* key).
   const vision = getPref("vision")
   out.NIGHTJAR_VISION_PROVIDER = vision.mode === "online" && vision.providerId ? vision.providerId : "local"
+  // Image generation (Odysseus removal PR E): same shape — the old Odysseus-DB
+  // seed/reconcile machinery is gone; imagegen_backend.py reads
+  // NIGHTJAR_IMAGE_PROVIDER + that provider's NIGHTJAR_BYOK_* key. "local" means
+  // NO backend today (the local diffusion path went with PR G; a diffusers
+  // backend can return as an additive provider) — the tool says so plainly.
+  const image = getPref("image")
+  out.NIGHTJAR_IMAGE_PROVIDER = image.mode === "online" && image.providerId ? image.providerId : "local"
   return out
 }

@@ -61,6 +61,29 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-54 — Odysseus submodule REMOVED; image gen is BYOK cloud; relicensing now unblocked — RESOLVED 2026-08-03
+
+- **What (PR E):** `research/odysseus` (the AGPL submodule, and the last reason the
+  combined work HAD to be AGPL) is gone. Image generation is rebuilt as
+  `phase2-mcp/imagegen_server.py` — a direct BYOK call to an OpenAI-compatible
+  `/images/generations` endpoint (OpenAI or OpenRouter), selected EXPLICITLY via the
+  image capability (env: `NIGHTJAR_IMAGE_PROVIDER`); a stored key alone never routes.
+  The Electron image-seed/reconcile machinery (~190 lines in `index.ts`), the
+  `image-endpoint.ts` resolver, and the diffusion sidecar launch in `services.ts` were
+  removed; the image capability now applies like research/vision/browser (engine-env +
+  restart).
+- **Behaviour:** Offline image mode = a plain "needs an Online provider" message (no
+  local diffusion path ships). A local diffusers backend can return later as an
+  ADDITIVE provider behind the same MCP tool without re-blocking anything.
+- **License status:** Nightjar REMAINS AGPL-3.0-or-later (its own code was released
+  under it). Relicensing is now UNBLOCKED but is a separate maintainer decision on a
+  frozen dependency graph — deliberately NOT part of this PR.
+- **Existing checkouts:** the local `research/odysseus/` directory stays on disk
+  (untracked, gitignored) — delete it manually when convenient. `~/.nightjar/odysseus/`
+  data is likewise untouched (the PIM migration of NJ-50 reads it if present).
+- **Generated images** now land in `~/.nightjar/images/` (was Odysseus's
+  `generated_images/`); the chat inline-render IPC was repointed.
+
 ## NJ-53 — venv-wide license sweep findings (the copyleft guard's first run) — RESOLVED (guarded) 2026-08-02
 
 - **Context:** `phase2-mcp/tests/test_no_copyleft_venv.py` now sweeps every installed
@@ -108,7 +131,7 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
 - **Guarded:** `test_no_copyleft_venv.py` allowlists primp tolerating exactly
   `no-file`; if a future primp ships something classifiable as copyleft, it fails.
 
-## NJ-51 — image generation is OFFLINE between PR G and PR E — OPEN 2026-08-02
+## NJ-51 — image generation is OFFLINE between PR G and PR E — RESOLVED 2026-08-03 (PR E: BYOK cloud image gen via phase2-mcp/imagegen_server.py; see NJ-54)
 
 - **What:** Odysseus removal PR G deleted `phase2-odysseus/` (per maintainer decision:
   bank the cleanup now, image gen is its own follow-up). That directory held the venv

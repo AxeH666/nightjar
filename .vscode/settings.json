@@ -4,16 +4,12 @@
   //   - research/* upstream clones (opencode, row-bot, open-webui, orb-ui,
   //     gemma-chat) are git-IGNORED dev references, each with its own .git, so
   //     VS Code auto-detects them as separate repos.
-  //   - research/odysseus is a real SUBMODULE (clean mirror since the Odysseus
-  //     removal retired the integration patch, PR G; kept only until PR E removes
-  //     the last runtime use). Old checkouts may still carry the applied patch, so
-  //     keep it ignored in the SCM view. (The pinned commit is still tracked.)
   "git.ignoredRepositories": [
     "research/gemma-chat",
     "research/opencode",
     "research/open-webui",
     "research/orb-ui",
     "research/row-bot",
-    "research/odysseus"
+    "research/odysseus"  // removed in PR E; entry kept so an existing checkout's leftover dir stays quiet
   ]
 }

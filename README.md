@@ -34,7 +34,7 @@ Phases 1–4 are built and reported:
 
 - **Phase 1 / 1.5 — engine + safety harness** ([report](phase1-engine/PHASE1_REPORT.md), [1.5](phase1-engine/PHASE1.5_REPORT.md)): local Qwen3-4B via llama.cpp behind a timeout proxy + run-supervisor watchdog + OpenCode safety plugins.
 - **Phase 2 — capabilities** ([report](phase2-mcp/PHASE2_REPORT.md)): Row-Bot's voice/vision/memory/browser re-exposed as a 14-tool MCP server; a live **wake-word daemon** (`phase2-mcp/wake_daemon.py`) drives the "Hey Nightjar" loop.
-- **Phase 2b — Odysseus** ([report](research/PHASE2B_REPORT.md)): email/RAG/research/PIM as MCP sidecars — since **removed** (the tiers were deleted or rebuilt Nightjar-side; `research/odysseus` remains only for image gen until PR E).
+- **Phase 2b — Odysseus** ([report](research/PHASE2B_REPORT.md)): email/RAG/research/PIM as MCP sidecars — since **fully removed** (tiers deleted or rebuilt Nightjar-side, PRs #140–#145; the submodule itself dropped in PR E; image gen is now a BYOK cloud call).
 - **Phase 3 — UI shell** ([report](phase3-ui/PHASE3_REPORT.md)): chat + tool-call cards + explicit mode selector + permission/approval panel + a multi-sidecar supervisor.
 - **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): a voice-reactive orb + a Siri-style overlay, wired to the live pipeline. *(Phase 4 integrated orb-ui; Step 7 later replaced it with a custom three.js orb.)*
 
@@ -121,7 +121,7 @@ email/RAG/research/PIM tier). Its attribution
 (`research/odysseus/{LICENSE,ACKNOWLEDGMENTS.md,licenses/}`) rides along with the
 submodule. The submodule is kept a faithful mirror of upstream; Nightjar's two
 integration changes are applied on top as a reviewable patch
-(the integration patch was retired in PR G; the submodule is a clean mirror kept only until PR E). The **OpenCode** engine (`research/opencode`) is
+(the Odysseus submodule was removed in PR E). The **OpenCode** engine (`research/opencode`) is
 likewise a git **submodule**, pinned to the `AxeH666/opencode` fork (a durable fork of
 `sst/opencode` so the exact commit stays fetchable). The remaining `research/` clones
 (orb-ui, gemma-chat, …) stay git-ignored — development references; the code Nightjar

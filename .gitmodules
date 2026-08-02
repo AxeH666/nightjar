@@ -1,11 +1,3 @@
-[submodule "research/odysseus"]
-	path = research/odysseus
-	url = https://github.com/pewdiepie-archdaemon/odysseus.git
-	# The Odysseus integration patch was retired in the Odysseus removal (PR G);
-	# the working tree is a clean upstream mirror now. ignore=dirty is kept so an
-	# existing checkout with the old patch still applied stays quiet until setup
-	# reverts it (the gitlink COMMIT is still tracked normally).
-	ignore = dirty
 [submodule "research/opencode"]
 	path = research/opencode
 	url = https://github.com/AxeH666/opencode.git
