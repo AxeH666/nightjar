@@ -26,7 +26,8 @@
 | nightjar (MCP) | `phase2-mcp/venv` | — (stdio) | voice/vision/memory/browser tools | assistant tools |
 | nightjar-websearch (MCP) | `phase2-mcp/venv` | — (stdio) | quick web search (ddgs; no Odysseus) | web-search mode |
 | nightjar-pim (MCP) | `phase2-mcp/venv` | — (stdio) | notes / tasks / calendar (own SQLite) | assistant tools |
-| odysseus-* (MCP ×2) | `phase2-odysseus/venv` | — (stdio) | image gen / deep research | assistant tools |
+| nightjar-research (MCP) | `phase2-mcp/venv` | — (stdio) | deep research (own loop; pypdf) | research mode |
+| odysseus-image (MCP) | `phase2-odysseus/venv` | — (stdio) | image gen (LAST Odysseus tier; PR E) | assistant tools |
 | browser-use (MCP) | `browser-use-mcp/venv` | — (stdio) | autonomous browser | browser tool |
 | side-channel | `phase2-mcp/venv` python | 8765 | wake-word/TTS/orb side-channel | voice orb |
 | wake-daemon | `phase2-mcp/venv` python | 8766 | "Hey Nightjar" loop | wake word (needs mic) |
