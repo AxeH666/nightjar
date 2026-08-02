@@ -64,7 +64,9 @@ WEAK_TITLES = [
     ("ECLIPSE PUBLIC LICENSE", "EPL"),
 ]
 
-FATAL_VERDICTS = {"AGPL", "GPL", "LGPL", "MPL", "EPL", "no-file"}
+# "unreadable" is fatal too (Bugbot): a license file we cannot read could be the
+# GPL one — an unreadable notice must fail exactly like a missing one, not pass.
+FATAL_VERDICTS = {"AGPL", "GPL", "LGPL", "MPL", "EPL", "no-file", "unreadable"}
 
 # Packaging tooling lives in every venv and is not part of Nightjar's runtime
 # graph (never imported, never shipped as a Nightjar capability). pip in
@@ -125,11 +127,21 @@ def classify(text: str) -> str:
     t = text.upper()
     for phrase, verdict in GPL_TITLES:
         if phrase in t:
+            # Order matters (Bugbot): the preamble check comes FIRST. Without it
+            # the exception string could wave through a file that only mentions
+            # GPL in prose — and, worse, the exception must only ever downgrade
+            # a REAL license text, never substitute for the preamble test.
+            if FSF_PREAMBLE not in t:
+                return "gpl-mention-only"  # prose reference, not the license itself
             if GCC_EXCEPTION in t:
-                return "GPL-with-GCC-runtime-exception"  # acceptable by rule
-            if FSF_PREAMBLE in t:
-                return verdict
-            return "gpl-mention-only"  # prose reference, not the license itself
+                # Residual granularity limit, stated: classification is per-file,
+                # so an aggregate containing real GPL text for component A and a
+                # GCC-exception notice for component B would still be excepted
+                # here. No such file exists in this venv (numpy/scipy's files
+                # attach the exception to their only GPL text, libgfortran's);
+                # if one appears, the allowlist — not this rule — is the tool.
+                return "GPL-with-GCC-runtime-exception"
+            return verdict
     for phrase, verdict in WEAK_TITLES:
         if phrase in t:
             return verdict
@@ -269,6 +281,14 @@ def main() -> int:
             "MIT License. Permission is hereby granted, free of charge... Note: earlier\n"
             "releases were distributed under the GNU General Public License (GPL).\n",
             encoding="utf-8")
+        # (d) Bugbot: the GCC-exception string must NOT rescue a file that lacks
+        # the FSF preamble — that is a prose mention, and stays one.
+        di4 = fake_sp / "exception_prose-1.0.dist-info"
+        di4.mkdir()
+        (di4 / "LICENSE").write_text(
+            "This bundle references the GNU General Public License and the\n"
+            "GCC RUNTIME LIBRARY EXCEPTION in passing, but contains no license text.\n",
+            encoding="utf-8")
         neg = scan(fake_sp)
         check("pre-1.8 trafilatura flagged as GPL despite lying metadata",
               "GPL" in neg["trafilatura"]["fatal"], str(neg["trafilatura"]["fatal"]))
@@ -276,6 +296,37 @@ def main() -> int:
               "no-file" in neg["espeakng_loader"]["fatal"], str(neg["espeakng_loader"]["fatal"]))
         check("a prose GPL mention does NOT false-positive",
               not neg["prose_mention"]["fatal"], str(neg["prose_mention"]["fatal"]))
+        check("GCC-exception string cannot rescue a preamble-less mention",
+              not neg["exception_prose"]["fatal"]
+              and neg["exception_prose"]["files"][0][1] == "gpl-mention-only",
+              str(neg["exception_prose"]["files"]))
+
+        # (e) Bugbot: an UNREADABLE license file must fail like a missing one.
+        # Windows mandatory file locks make the read raise; on other platforms
+        # this control degrades to a stated skip rather than a fake pass.
+        di5 = fake_sp / "locked_license-1.0.dist-info"
+        di5.mkdir()
+        lf = di5 / "LICENSE"
+        lf.write_text("could be anything — the point is it cannot be read\n", encoding="utf-8")
+        locked = False
+        try:
+            import msvcrt
+            fh = open(lf, "r+")
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            locked = True
+        except (ImportError, OSError):
+            fh = None
+        if locked:
+            try:
+                neg5 = scan(fake_sp)
+                check("an unreadable license file is fatal, not a silent pass",
+                      "unreadable" in neg5["locked_license"]["fatal"],
+                      str(neg5["locked_license"]))
+            finally:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                fh.close()
+        else:
+            print("  [skip] unreadable-file control needs Windows mandatory locks (not available here)")
 
     print("\n== 4. installed-license census ==")
     from collections import Counter
