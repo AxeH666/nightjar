@@ -61,6 +61,53 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-53 — venv-wide license sweep findings (the copyleft guard's first run) — RESOLVED (guarded) 2026-08-02
+
+- **Context:** `phase2-mcp/tests/test_no_copyleft_venv.py` now sweeps every installed
+  distribution, classifying the ACTUAL shipped license text (rule 5 — never metadata).
+  Its first run surfaced the following, each triaged individually:
+- **Real catch #1 — GPL still physically installed:** `phonemizer-fork` and
+  `espeakng-loader` were dropped from requirements in #139 and setup purges them on
+  managed installs, but the DEV venv had never run the purge — the GPL espeak binary
+  was still on disk. Uninstalled. This alone justifies the guard.
+- **Real weak-copyleft in bundled binaries (allowlisted with reasoning, shippable):**
+  - `soundfile` (BSD) ships `libsndfile_x64.dll` — LGPL-2.1, full text in
+    `_soundfile_data/COPYING`. ctypes-loaded (dynamic), replaceable.
+  - `opencv-python-headless` redistributes FFmpeg (LGPL) binaries in `cv2/`, per its
+    own LICENSE-3RD-PARTY.txt. Dynamically linked, replaceable.
+  - `pywin32` (PSF) bundles `adodbapi` — LGPL-2.1. Nightjar never imports it.
+  - `certifi` and `tqdm` are MPL-2.0 (file-level copyleft; unmodified redistribution
+    imposes nothing on the app).
+- **False positives the classifier now handles by rule, not allowlist:**
+  - GPL-family requires the FSF "verbatim copies" preamble, not just the title —
+    prose mentions (typing_extensions' PSF history, pywin32's IDLE notes) don't trip it.
+  - numpy/scipy embed the full GPL text for the bundled GCC runtime (libgfortran) —
+    accompanied by the GCC RUNTIME LIBRARY EXCEPTION, which exists precisely to permit
+    unrestricted redistribution.
+  - playwright's `driver/LICENSE` is Node.js's aggregate file; its GPL sections are
+    `pkg.m4` autoconf macros (build-time, for ICU4C) carrying the Autoconf special
+    exception, with ICU4C's own note that the condition is met.
+- **Wheels shipping NO license file at all** (the espeakng-loader failure mode, now a
+  hard fail unless allowlisted): `tokenizers` (upstream Apache-2.0), `flatbuffers`
+  (upstream Apache-2.0), `ctranslate2` (upstream MIT), `primp` (NJ-52). Allowlisted
+  with upstream evidence recorded; the wheel-level omission is the packagers' gap.
+  ⚠️ Residual: for these three the upstream license is repo-level knowledge, not a
+  file read from the wheel — the wheel simply has nothing to read.
+- **Scope residual:** the guard covers the phase2-mcp venv (Nightjar's own runtime).
+  `phase-cad/.venv` and `browser-use-mcp/venv` are not yet swept; extend when convenient.
+
+## NJ-52 — `primp` ships no license file in its wheel — RESOLVED (audited) 2026-08-02
+
+- **What:** `primp` (the compiled Rust HTTP client `ddgs` uses) ships `License: MIT
+  License` in METADATA but **no license file at all** in the wheel — the same class of
+  gap that hid espeakng-loader's stripped GPL binary (rule 5's origin incident).
+- **Resolution:** primp ships a CycloneDX **SBOM** (`dist-info/sboms/`), which is
+  stronger evidence than a single LICENSE file: all **236 statically-linked Rust
+  components** declare licenses — MIT / Apache-2.0 / BSD / ISC / Zlib / Unicode-3.0 /
+  0BSD — **zero copyleft**, zero undeclared.
+- **Guarded:** `test_no_copyleft_venv.py` allowlists primp tolerating exactly
+  `no-file`; if a future primp ships something classifiable as copyleft, it fails.
+
 ## NJ-51 — image generation is OFFLINE between PR G and PR E — OPEN 2026-08-02
 
 - **What:** Odysseus removal PR G deleted `phase2-odysseus/` (per maintainer decision:
@@ -276,8 +323,13 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   plus a small patch/shim so misaki uses it, or upstreaming a pluggable
   number-expander into misaki. **Not attempted in this PR** — flagged as a
   separate decision, since it trades a small license nit for carrying a patch.
-- **Decision needed from the maintainer:** accept LGPL-2.1 in the graph, or
-  schedule the replacement before any relicense.
+- **DECISION (maintainer, 2026-08-02): KEEP num2words. CLOSED — do not reopen.**
+  Reasoning: LGPL-2.1, pure Python, dynamically imported and trivially replaceable by
+  the user, so LGPL §5-conformant even in a proprietary distribution. Replacing it
+  means ~150 lines of our own number-speller plus carrying a patch against misaki
+  forever, for a theoretical benefit. `test_no_copyleft_venv.py` allowlists it
+  tolerating exactly LGPL — if its license ever CHANGES, the guard fails and this
+  decision gets re-reviewed.
 
 ## NJ-41 — `useProjects` is per-component state, not a shared store — the root cause behind the PR-#125 whack-a-mole — OPEN (refactor deferred to its own PR) 2026-07-20
 
