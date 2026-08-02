@@ -61,6 +61,36 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-49 — `odysseus-docs` was GRANTED, not ungranted — reachability audit before deleting the dead tiers — RESOLVED 2026-08-02
+
+- **Context:** Odysseus removal, PR C deleted the `odysseus-email`, `odysseus-rag` and
+  `odysseus-docs` MCP blocks. The plan described all three as having no reachable
+  callers. Two of the three matched; **`odysseus-docs` did not.**
+- **What the audit actually found** (parsed from `engine-workspace/opencode.json`,
+  cross-checked against `phase3-ui/src`):
+  - `odysseus-email` — `enabled: false`, **zero** permission grants in any agent,
+    zero UI references. Genuinely dead. ✅
+  - `odysseus-rag` — `enabled: true` but **zero** permission grants; every agent is
+    `"*": "deny"`, so no agent could ever call it. Unreachable. ✅
+  - `odysseus-docs` — `enabled: true` **and `odysseus-docs_document_search` was
+    `"allow"` on the `assistant` agent**, with the assistant's prompt and description
+    both advertising "document" tools. So it was reachable by the default chat agent,
+    not dead config. ⚠️
+- **Why deleting it was still correct:** the index it searches can only ever be empty.
+  The *only* way to add documents is Odysseus's own `rag` server (list/add/remove
+  indexed directories), which is permission-denied in every agent and has no UI. There
+  is no ingest path anywhere in Nightjar — no MCP tool, no UI action. So
+  `document_search` was reachable-but-inert: it could be called and would always return
+  nothing.
+- **Handled:** removed the MCP block, the `assistant` grant, and the "document" mentions
+  from the assistant's prompt + description (otherwise the agent would advertise a tool
+  it no longer has). Deleted the now-orphaned `docs_query_server.py` wrapper and
+  `tests/test_email_send.py`.
+- **Lesson (why this is recorded):** "has no UI" is NOT the same as "has no reachable
+  caller". Agent permission grants are a second, independent entry point, and the tool
+  surface must be audited from `opencode.json` permissions — not from the UI alone.
+  Any future tier deletion should run the same parse-the-permissions check first.
+
 ## NJ-48 — a wrong plugin path in `opencode.json` silently disables a SAFETY plugin — MITIGATED 2026-08-02
 
 - **Severity:** high if it ever happens — it disables a safety guard with **no signal at all**.
