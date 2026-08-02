@@ -63,14 +63,26 @@ async def _ddgs_search(query: str, max_results: int, timeout_s: float) -> Sequen
 
 
 async def _fetch(url: str, timeout_s: float) -> tuple:
-    """GET a page under a hard timeout, capped in size. Returns (content_type, body)."""
+    """GET a page under a hard timeout, capped in size. Returns (content_type, body).
+
+    STREAMED, not buffered: `resp.content` would read the entire body into memory
+    before any slice could apply (Bugbot), so iterate chunks and stop the moment
+    the cap is crossed — a 200 MB "page" costs at most MAX_FETCH_BYTES + one chunk.
+    """
     async with httpx.AsyncClient(
         timeout=timeout_s, follow_redirects=True,
         headers={"User-Agent": "Nightjar/1.0 (+https://github.com/AxeH666/nightjar)"},
     ) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        return resp.headers.get("content-type", ""), resp.content[:MAX_FETCH_BYTES]
+        async with client.stream("GET", url) as resp:
+            resp.raise_for_status()
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in resp.aiter_bytes():
+                chunks.append(chunk)
+                size += len(chunk)
+                if size >= MAX_FETCH_BYTES:
+                    break
+            return resp.headers.get("content-type", ""), b"".join(chunks)[:MAX_FETCH_BYTES]
 
 
 def _pdf_to_text(body: bytes) -> str:

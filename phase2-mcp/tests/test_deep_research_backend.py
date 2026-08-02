@@ -73,7 +73,12 @@ check("plan_queries later rounds differ", plan_queries("q", 1, [{"url": "u"}]) !
 
 b = split_budget(90, 1, 2)
 check("split_budget floors a tiny budget", all(v > 0 for v in split_budget(1, 1, 2).values()))
-check("total_budget >= the synth slice", total_budget(90, 1, 2) >= b["synth"])
+# Bugbot alignment: the cap must cover BOTH synthesis attempts (the empty-report
+# retry), and rounds=0 must be normalized the same way the loop normalizes it.
+check("total_budget covers two synth slices", total_budget(90, 1, 2) >= b["synth"] * 2)
+check("total_budget(rounds=0) == total_budget(rounds=1)",
+      total_budget(90, 0, 2) == total_budget(90, 1, 2),
+      (total_budget(90, 0, 2), total_budget(90, 1, 2)))
 
 msgs = build_report_messages("T", [{"title": "S1", "url": "http://s1", "text": "body one"}], 2500)
 check("report messages carry citation rules", "[n]" in msgs[0]["content"])

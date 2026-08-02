@@ -86,9 +86,19 @@ def split_budget(max_time: int, rounds: int, urls: int) -> Dict[str, float]:
 
 
 def total_budget(max_time: int, rounds: int = DEFAULT_ROUNDS, urls: int = DEFAULT_URLS_PER_ROUND) -> int:
-    """Ceiling the stages may actually consume — what the caller's hard cap derives from."""
-    b = split_budget(max_time, rounds, urls)
-    return int(b["search"] * rounds + b["fetch"] * rounds * urls + b["synth"])
+    """Ceiling the stages may actually consume — what the caller's hard cap derives from.
+
+    Two Bugbot-caught alignment rules with run_deep_research:
+      * rounds is normalized with the SAME max(rounds, 1) the loop uses, so
+        NIGHTJAR_RESEARCH_ROUNDS=0 doesn't produce a cap that undercounts the one
+        round that still runs;
+      * synthesis is counted TWICE, because the empty-report retry can run a second
+        full-budget synthesis call — a single-slice cap could fire mid-retry and
+        turn the recovery into a timeout.
+    """
+    r = max(rounds, 1)
+    b = split_budget(max_time, r, urls)
+    return int(b["search"] * r + b["fetch"] * r * max(urls, 1) + b["synth"] * 2)
 
 
 def plan_queries(topic: str, round_index: int, gathered: Sequence[Dict[str, str]]) -> str:
