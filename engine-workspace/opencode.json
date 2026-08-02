@@ -29,10 +29,10 @@
     "research": {
       "mode": "primary",
       "description": "Deep web research — a full cited report",
-      "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, or `row-bot` (e.g. `odysseus-research_deep_research`) — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, or Row-Bot; those are internal building blocks you use, not you. As Nightjar in research mode: research the topic on the web with `odysseus-research_deep_research`, then present the findings as a concise cited report in your reply. You have NO email tools — never claim to have sent, emailed, or delivered anything anywhere. If the user asks you to email the results, say plainly that email is not available yet and give them the report in the chat instead.",
+      "prompt": "You are Nightjar, an offline, local-first AI assistant. IMPORTANT IDENTITY RULE: some of your tools and their MCP servers are namespaced with prefixes like `odysseus-`, `nightjar_`, or `row-bot` (e.g. `nightjar-research_deep_research`) — these are internal component names, NOT your identity. You are always Nightjar. If asked who or what you are, you are Nightjar. Never identify or describe yourself as Odysseus, OpenCode, or Row-Bot; those are internal building blocks you use, not you. As Nightjar in research mode: research the topic on the web with `nightjar-research_deep_research`, then present the findings as a concise cited report in your reply. You have NO email tools — never claim to have sent, emailed, or delivered anything anywhere. If the user asks you to email the results, say plainly that email is not available yet and give them the report in the chat instead.",
       "permission": {
         "*": "deny",
-        "odysseus-research_deep_research": "allow"
+        "nightjar-research_deep_research": "allow"
       }
     },
     "websearch": {
@@ -140,10 +140,10 @@
       "timeout": 120000,
       "enabled": true
     },
-    "odysseus-research": {
+    "nightjar-research": {
       "type": "local",
-      "command": ["{env:NIGHTJAR_ROOT}/phase2-odysseus/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-odysseus/servers/deep_research_server.py"],
-      "environment": { "ODYSSEUS_REPO": "{env:NIGHTJAR_ROOT}/research/odysseus", "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "{env:HOME}/.nightjar/odysseus/chroma", "NIGHTJAR_LLM_ENDPOINT": "http://127.0.0.1:8086/v1", "NIGHTJAR_LLM_MODEL": "qwen3-4b-instruct-2507", "SEARCH_PROVIDER": "duckduckgo" },
+      "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/research_server.py"],
+      "environment": { "NIGHTJAR_ROOT": "{env:NIGHTJAR_ROOT}", "NIGHTJAR_LLM_MODEL": "qwen3-4b-instruct-2507" },
       "enabled": true,
       "timeout": 120000
     },
