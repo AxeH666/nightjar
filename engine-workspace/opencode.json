@@ -60,6 +60,7 @@
         "nightjar-pim_calendar_create_event": "allow", "nightjar-pim_calendar_list_events": "allow",
         "nightjar_save_memory": "allow", "nightjar_search_memory": "allow",
         "nightjar_analyze_image": "ask",
+        "nightjar-image_generate_image": "ask",
         "browser-use_run_browser_task": "ask"
       }
     },
@@ -124,6 +125,13 @@
       "environment": { "NIGHTJAR_DATA_DIR": "{env:HOME}/.nightjar", "NIGHTJAR_LLM_ENDPOINT": "http://127.0.0.1:8086/v1", "NIGHTJAR_LLM_MODEL": "qwen3-4b-instruct-2507" },
       "enabled": true,
       "timeout": 300000
+    },
+    "nightjar-image": {
+      "type": "local",
+      "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/imagegen_server.py"],
+      "environment": { "NIGHTJAR_ROOT": "{env:NIGHTJAR_ROOT}" },
+      "timeout": 300000,
+      "enabled": true
     },
     "nightjar-websearch": {
       "type": "local",

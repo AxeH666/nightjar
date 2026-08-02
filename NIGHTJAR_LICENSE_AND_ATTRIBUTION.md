@@ -2,23 +2,34 @@
 
 ## License of the combined work: **AGPL-3.0-or-later**
 
-Nightjar is a fully open-source, local-first AI coding + personal assistant. As
-a result of integrating **Odysseus** (AGPL-3.0-or-later) as a capability tier,
-**the combined Nightjar work is licensed under the GNU Affero General Public
-License, version 3 or later (AGPL-3.0-or-later).**
+Nightjar is a fully open-source, local-first AI coding + personal assistant,
+licensed under the GNU Affero General Public License, version 3 or later
+(AGPL-3.0-or-later) — see `COPYING`.
 
-Why this is the correct and clean result:
-- **Odysseus** is AGPL-3.0-or-later — the strongest copyleft among the inputs, so
-  it sets the license floor for the combined work.
-- **OpenCode** (MIT) and **Row-Bot** (Apache-2.0) are permissive and are one-way
-  compatible *into* AGPLv3 — their code may be included in an AGPL work; the
-  combined work is AGPL, while those portions retain their original notices.
-- Bridging is done over **MCP (JSON-RPC over stdio) between separate processes**,
-  not by linking codebases into one binary. Even under the stricter "single
-  combined work" reading this is compliant (all inputs are AGPL-compatible); under
-  the "mere aggregation" reading the process boundary would not even propagate
-  AGPL to the OpenCode/Row-Bot processes. Either way, releasing the whole under
-  AGPL-3.0-or-later is safe.
+**History of that choice, and its current status (updated 2026-08-03, PR E):**
+- The AGPL license was originally **forced** by integrating Odysseus
+  (AGPL-3.0-or-later) as a capability tier. That constraint is **gone**: the
+  Odysseus removal (PRs #140–#145 and this PR) deleted or rebuilt every Odysseus
+  tier Nightjar used, and this PR removed the `research/odysseus` submodule
+  itself. **No Odysseus code remains in the tree.**
+- Correction for the record: earlier revisions of this document justified the
+  integration as "bridging over MCP between separate processes, not linking
+  codebases." That justification was **never actually available** — Nightjar's
+  wrappers imported Odysseus's modules **in-process** (six direct imports via a
+  `sys.path` bridge: the ORM in `pim_server`, `DeepResearcher` in
+  `deep_research_server`, `DocsService` in `docs_query_server`, and so on). The
+  combined work was AGPL because AGPL code was linked in, not because of a
+  process boundary. The conclusion (AGPL combined work) was right; that
+  argument for it was not.
+- **Nightjar remains AGPL-3.0-or-later today** because its own code was released
+  under that license. With the Odysseus constraint removed, RELICENSING IS NOW
+  UNBLOCKED — but any license change is a separate, deliberate maintainer
+  decision taken against a frozen dependency graph, not part of the removal
+  PRs. Until that decision, nothing about the project's license has changed.
+- The dependency-graph copyleft status is continuously enforced by
+  `phase2-mcp/tests/test_no_copyleft_venv.py` (no GPL/AGPL; the accepted
+  weak-copyleft items are allowlisted with recorded reasoning — see NJ-42,
+  NJ-52, NJ-53 in `KNOWN_ISSUES.md`).
 
 ### AGPL §13 (network use) — operational note
 AGPL requires that users interacting with the software **over a network** be
@@ -31,10 +42,10 @@ adding networked access.
 
 | Component | Role | License | Attribution preserved at |
 |---|---|---|---|
-| OpenCode | native agent engine | MIT | `research/opencode/LICENSE` (git submodule, `AxeH666/opencode` fork — fetched on clone); also credited in Odysseus `licenses/opencode-MIT-LICENSE.txt` |
+| OpenCode | native agent engine | MIT | `research/opencode/LICENSE` (git submodule, `AxeH666/opencode` fork — fetched on clone) |
 | Row-Bot | voice/vision/memory/browser bolt-on | Apache-2.0 | `phase2-mcp/NOTICE`, `phase2-mcp/LICENSE.row-bot` |
-| Odysseus | email/RAG/research/PIM bolt-on | AGPL-3.0-or-later | `research/odysseus/LICENSE`, `research/odysseus/ACKNOWLEDGMENTS.md`, `research/odysseus/licenses/` |
-| llmfit (© 2026 Alex Jones) | hardware model-fit (vendored at `phase1-engine/hwfit_vendor/`) | MIT | `phase1-engine/hwfit_vendor/LICENSE.llmfit-MIT` (travels with the vendored copy); also `research/odysseus/licenses/llmfit-MIT-LICENSE.txt` + Odysseus ACKNOWLEDGMENTS while that submodule remains |
+| Odysseus | **REMOVED (PR E, 2026-08-03)** — was the email/RAG/research/PIM bolt-on; every tier was deleted or rebuilt Nightjar-side (PRs #140–#145), and the submodule is gone. No Odysseus code remains | AGPL-3.0-or-later (historical) | upstream https://github.com/pewdiepie-archdaemon/odysseus |
+| llmfit (© 2026 Alex Jones) | hardware model-fit (vendored at `phase1-engine/hwfit_vendor/`) | MIT | `phase1-engine/hwfit_vendor/LICENSE.llmfit-MIT` (travels with the vendored copy) |
 | Tongyi DeepResearch (Alibaba-NLP / Tongyi Lab) | deep-research **pattern reference only** — Nightjar's `phase2-mcp/deep_research_backend.py` is an original implementation of the search→fetch→extract→synthesize shape; **no code copied** (the AGPL Odysseus adaptation was removed in PR F) | Apache-2.0 | pattern credited here; upstream https://github.com/Alibaba-NLP/DeepResearch |
 | three.js (© three.js authors) | custom voice-reactive vortex orb (WebGL, redesign Step 7) | MIT | `phase3-ui/node_modules/three/LICENSE` |
 | react (© Meta Platforms / Facebook, Inc.) | UI framework for the Electron renderer | MIT | `phase3-ui/node_modules/react/LICENSE` (npm dep) |
@@ -47,18 +58,18 @@ adding networked access.
 | kokoro-onnx (© 2024 thewh1teagle) | **data only** — the 114-entry phoneme→id table, vendored to `phase2-mcp/nightjar_capabilities/kokoro_vocab.json`; the package itself is **no longer a dependency** | MIT | `phase2-mcp/NOTICE` |
 | en_core_web_sm (© 2016 ExplosionAI GmbH) | spaCy English pipeline misaki uses for POS tagging | MIT | `phase2-mcp/NOTICE` (pip dep, install-time) |
 
-Odysseus's own `ACKNOWLEDGMENTS.md` and `licenses/` directory (opencode-MIT,
-llmfit-MIT, DeepResearch-Apache-2.0, OpenDyslexic-OFL) are carried forward
-verbatim and must ship with any Nightjar distribution.
+(Historical note: while the Odysseus submodule was in-tree, its
+`ACKNOWLEDGMENTS.md` and `licenses/` directory had to ship with any Nightjar
+distribution. That obligation ended when the submodule was removed in PR E —
+no Odysseus code ships. The one Odysseus-transited component Nightjar keeps,
+llmfit, carries its own MIT license file at `phase1-engine/hwfit_vendor/`.)
 
-### Copyleft watch-items pulled in via Odysseus (document if shipped)
-- **PyMuPDF** — AGPL-3.0, *optional* (PDF form-filling only). Ship only if that
-  feature is needed; its terms then apply to it.
-- **SearXNG** — AGPL, runs as a *separate composed service* (not linked). Nightjar
-  does **not** require it (Deep Research is configured to use the DuckDuckGo
-  provider instead — no extra service). If SearXNG is ever used, it's a separate
-  AGPL service.
-- **caldav** — dual GPL-3.0-or-later / Apache-2.0; used under Apache-2.0. Fine.
+### Copyleft watch-items pulled in via Odysseus — RETIRED (PR E)
+PyMuPDF / SearXNG / caldav were watch-items of the Odysseus dependency tree,
+which is no longer part of Nightjar. None of them is a Nightjar dependency:
+deep research uses **pypdf (BSD)** and the ddgs DuckDuckGo provider, and PIM is
+Nightjar's own SQLAlchemy store. `test_no_copyleft_venv.py` fails the build if
+any of them (or any other GPL/AGPL package) enters the phase2-mcp venv.
 
 ### Copyleft watch-items in the TTS path
 - **phonemizer-fork (GPL-3.0-or-later) + espeakng-loader (compiled espeak-ng,
@@ -110,57 +121,37 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
   renamed Nightjar → JUNE; internal identifiers stay (`NIGHTJAR_*` env, `window.nightjar` IPC,
   the `nightjar.*` Tailwind class namespace). The AGPL license of the combined work is unchanged
   by the rename. (Runtime verification of the redesign branches is pending a live-stack run.)
-- **Step 10 — Odysseus fork.** Attribution is **unchanged by re-hosting** — the fork keeps
-  Odysseus's `LICENSE` / `ACKNOWLEDGMENTS.md` / `licenses/` intact; AGPL travels with the
-  code regardless of host (see §10 fork subsection).
+- **Step 10 — Odysseus fork. RETIRED (PR E)** — the submodule was removed instead of
+  re-hosted; there is no Odysseus code left to attribute.
 - **Step 12 — wake word ("Hey June").** local-wake (MIT) / openWakeWord (Apache-2.0) +
   verifier — add whichever ships.
 
-## Image-generation model licenses (Step 3 audit — 2026-07-06)
-**What's wired today.** Nightjar registers one image capability — the `odysseus-image`
-MCP (`research/odysseus/mcp_servers/image_gen_server.py`). It is **API-based**: it POSTs to
-an OpenAI-compatible `/images/generations` endpoint resolved from Odysseus settings,
-auto-detecting `gpt-image-1.5` / `gpt-image-1` / `dall-e-3` when unconfigured. Nightjar's
-`opencode.json` sets **no** `image_model` or local image endpoint, so out of the box image
-generation would call **OpenAI's cloud** (needs a BYOK OpenAI key). There is currently **no
-local image model wired**, and therefore **no restrictive local checkpoint on the
-active/shipped path**. (Image generation is also **non-functional as shipped** for a second,
-non-license reason — no agent mode is granted the `generate_image` tool; see NJ-6.)
+## Image generation — current state (PR E, 2026-08-03) and the Step-3 audit history
 
-**Latent local path.** `research/odysseus/scripts/diffusion_server.py` is a local,
-`diffusers`-backed OpenAI-compatible image server, but it is **launched/referenced nowhere
-in Nightjar** and takes an operator-supplied `--model` (no baked-in default). So the
-restrictive-checkpoint risk is **latent** — it only arises if an operator both runs that
-server *and* points it at a restricted model.
+**What's wired today.** Image generation is `phase2-mcp/imagegen_server.py`
+(Nightjar-authored, AGPL like the rest of the project): a BYOK call to an
+OpenAI-compatible `/images/generations` endpoint. The backend is the user's
+EXPLICIT image-capability choice (OpenAI or OpenRouter) plus that provider's
+key — a stored key alone never routes, and Offline mode reports plainly that
+image generation needs an Online provider. **No model checkpoint is bundled or
+downloaded; no local diffusion path ships.** The only license surface is the
+user's own provider account.
 
-**License status of the candidate local models** (from llmfit's curated registry,
-`phase1-engine/hwfit_vendor/services/hwfit/image_models.py`; the license field there is
-*metadata* — confirm each model-card LICENSE at download per rule 5, since these are
-downloaded, not vendored):
+**Corrections to the 2026-07-06 audit text this section replaces** (both claims
+had gone stale and are preserved here for the record):
+- *"Image generation is non-functional as shipped — no agent mode is granted
+  generate_image (NJ-6)"* — later fixed: the assistant agent was granted
+  `generate_image` at `ask`, so the tool WAS reachable from PR #3x onward,
+  and again is (as `nightjar-image_generate_image: ask`) since PR E.
+- *"diffusion_server.py is launched/referenced nowhere in Nightjar"* — became
+  false when NJ-6's fix wired `services.ts` to launch
+  `research/odysseus/scripts/diffusion_server.py` as a managed sidecar. That
+  launch (and the whole local path) was removed in PR E along with the
+  submodule.
 
-| Model | ~VRAM (q4 / fp8) | License | Default-safe? |
-|---|---|---|---|
-| **Z-Image-Turbo** (Tongyi) | 6 / 10 GB | **Apache-2.0** | ✅ **recommended default** |
-| Z-Image (Tongyi) | 6 / 10 GB | Apache-2.0 | ✅ |
-| Qwen-Image / -2512 / -Edit | 14 / 22 GB | Apache-2.0 | ✅ (larger card) |
-| FLUX.1-schnell (BFL) | 10 / 17 GB | Apache-2.0 | ✅ |
-| **FLUX.1-dev / FLUX.2-dev** (BFL) | 10 / 17 GB | **FLUX [dev] Non-Commercial** | ❌ never a default |
-| **SD 3.5** medium/large/turbo | 7–12 GB | **Stability AI Community License** (free < $1M rev, else commercial) | ❌ never a default |
-| SDXL / SD 1.5 | 6–8 GB | CreativeML OpenRAIL-M (use-restrictions) | ❌ not a default |
-| HunyuanImage 3.0 (Tencent) | 9 / 16 GB | Tencent Hunyuan Community License (use-restrictions) | ❌ not a default |
-
-**Recommendation.**
-1. **Default local model → Z-Image-Turbo (Apache-2.0)** — already the top-ranked entry in
-   llmfit's registry, ~6 GB at q4 (fits the 6–8 GB target), 8-step/fast; fully
-   commercial-safe for an AGPL product and matches the roadmap's named target.
-2. **Wire the local path** (follow-up implementation, not this audit): run
-   `diffusion_server.py --model Tongyi-MAI/Z-Image-Turbo` as a managed sidecar and point
-   `odysseus-image` at it, so image generation is genuinely **local-first/offline** rather
-   than silently depending on a cloud OpenAI key (tracked as **NJ-6** in `KNOWN_ISSUES.md`).
-3. **Guardrail:** **FLUX.1-dev / FLUX.2-dev / SD 3.5 / SDXL / SD 1.5 / Hunyuan must never be
-   a shipped or auto-selected default** — non-commercial / community / RAIL restrictions are
-   incompatible with a freely-distributable AGPL product's default. If ever offered, make it
-   opt-in with an explicit per-model license notice.
-4. **Wan2.2-TI2V-5B** (the roadmap's alternate, Apache-2.0) is a **text/image-to-VIDEO**
-   model — relevant only if image_gen later expands to video; for still images
-   Z-Image-Turbo is the pick. It is not currently in the registry.
+**If a local image backend returns** (as an additive provider behind the same
+MCP tool), the Step-3 model-license audit's guardrails still apply and are kept
+below: **Z-Image-Turbo (Apache-2.0)** was the recommended default;
+**FLUX.1-dev / SD 3.5 / SDXL / SD 1.5 / Hunyuan must never be shipped or
+auto-selected defaults** (non-commercial / community / RAIL restrictions).
+Re-run the per-model license check at that point (rule 5 — model cards change).

@@ -10,10 +10,9 @@ import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO, REPO_POSIX, HOME_POSIX, WORKSPACE, findImageModel, isWSL, VENV_PY, venvPython } from "./services"
+import { nightjarServices, REPO, REPO_POSIX, HOME_POSIX, WORKSPACE, isWSL, VENV_PY, venvPython } from "./services"
 import * as byok from "./byok"
 import * as capabilities from "./capabilities"
-import { resolveImageBackend, type ImageBackend } from "./image-endpoint"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
 import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type SchedulerStatus } from "./scheduler"
@@ -57,166 +56,13 @@ const AUDIO_ROOTS = [
   tmpdir(),
 ].map((r) => resolve(r) + sep)
 
-// Odysseus's data dir (DB + settings) — must match the image MCP's ODYSSEUS_DATA_DIR
-// in opencode.json ({env:HOME}/.nightjar/odysseus).
-const ODYSSEUS_DATA_DIR = join(homedir(), ".nightjar", "odysseus")
-
-// Auto-wire the user's OpenAI BYOK key into Odysseus's image endpoint so image
-// generation works from the single key entry — no separate seed step. Runs the same
-// phase2-odysseus/seed_image_endpoint.py the CLI uses, passing the decrypted key via
-// env. Best-effort: a failure never blocks storing the key or the engine restart.
-// Resolves TRUE only on a clean (exit-0) seed/unseed; false on spawn error or a non-zero
-// exit. applyImageEndpoint logs a false result (a failed seed/unseed leaves the DB in a
-// transient state the NEXT reconcile — key change, diffusion health, capability change,
-// or startup — heals). NOTE: under explicit selection we do NOT keep a non-chosen backend
-// alive on a failed seed (the old rationale): retiring the unchosen rows is a PRIVACY
-// guarantee (Offline must never keep a cloud row), so a failed seed yields "no backend"
-// rather than a silent fallback — the honest, safe outcome.
-// Bound the seed like cad.ts bounds its converters (P2-1): if seed_image_endpoint.py
-// wedges (SQLite / app-key lock — likelier under Windows's mandatory file locks), the
-// awaiting IPC (byok:set/remove, capabilities:set*) would otherwise hang forever. A
-// wall-clock kill resolves it false; the next reconcile heals the transient DB state.
-const IMAGE_SEED_TIMEOUT_MS = Number(process.env.NIGHTJAR_IMAGE_SEED_TIMEOUT_MS) || 30000
-
-function runImageSeed(extraEnv: Record<string, string>): Promise<boolean> {
-  return new Promise((done) => {
-    const py = venvPython(join(REPO, "phase2-odysseus", "venv"))
-    const script = join(REPO, "phase2-odysseus", "seed_image_endpoint.py")
-    const child = spawn(py, [script], {
-      env: { ...process.env, NIGHTJAR_ROOT: REPO, ODYSSEUS_DATA_DIR, ...extraEnv },
-      stdio: "ignore",
-      timeout: IMAGE_SEED_TIMEOUT_MS, // wall-clock kill so a wedged seed can't hang the IPC (P2-1)
-      killSignal: "SIGKILL",
-      windowsHide: true,
-    })
-    child.on("error", (e) => {
-      console.warn("[byok] image-endpoint seed failed:", e)
-      done(false)
-    })
-    // A timeout kill surfaces here as exit(null, 'SIGKILL') → done(false), same as a non-zero exit.
-    child.on("exit", (code) => done(code === 0))
-  })
-}
-// Image generation resolves ONE active image endpoint. We keep exactly one seeded —
-// the one the user EXPLICITLY chose for the image capability (Offline local, or a
-// specific Online provider); see applyImageEndpoint. Distinct endpoint names let us
-// seed one and remove the others without collision. dall-e-3 works with any paid
-// OpenAI key (gpt-image-1 needs OpenAI org verification); OpenRouter defaults to
-// openai/gpt-image-1 via its Unified Image API.
-const IMAGE_OPENAI_NAME = "OpenAI (image)"
-const IMAGE_OPENROUTER_NAME = "OpenRouter (image)"
-const seedOpenAIImage = (key: string): Promise<boolean> =>
-  runImageSeed({
-    NIGHTJAR_IMAGE_API_KEY: key,
-    NIGHTJAR_IMAGE_BASE_URL: "https://api.openai.com/v1",
-    NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_MODEL || "dall-e-3",
-    NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_OPENAI_NAME,
-  })
-const seedOpenRouterImage = (key: string): Promise<boolean> =>
-  runImageSeed({
-    NIGHTJAR_IMAGE_API_KEY: key,
-    NIGHTJAR_IMAGE_BASE_URL: "https://openrouter.ai/api/v1",
-    NIGHTJAR_IMAGE_MODEL: process.env.NIGHTJAR_IMAGE_OPENROUTER_MODEL || "openai/gpt-image-1",
-    NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_OPENROUTER_NAME,
-  })
-const unseedImage = (name: string): Promise<boolean> =>
-  runImageSeed({ NIGHTJAR_IMAGE_UNSEED: "1", NIGHTJAR_IMAGE_ENDPOINT_NAME: name })
-
-// Offline image gen (NJ-6): an endpoint pointing at the local diffusion sidecar,
-// activated when the image capability is set to Offline. modelId = basename of the
-// model dir so it matches the server's own _model_id.
-const IMAGE_LOCAL_NAME = "Local (image)"
-const DIFFUSION_PORT = process.env.NIGHTJAR_DIFFUSION_PORT || "8100"
-const seedLocalImage = (modelId: string): Promise<boolean> =>
-  runImageSeed({
-    NIGHTJAR_IMAGE_API_KEY: "",
-    NIGHTJAR_IMAGE_BASE_URL: `http://127.0.0.1:${DIFFUSION_PORT}/v1`,
-    NIGHTJAR_IMAGE_MODEL: modelId,
-    NIGHTJAR_IMAGE_ENDPOINT_NAME: IMAGE_LOCAL_NAME,
-  })
-// Is the local diffusion sidecar actually serving? Disk presence alone isn't enough —
-// a slow ~6GB GPU load may not be ready yet — so gate local-first on /health, giving
-// graceful degradation to a cloud key when the sidecar is down. Short timeout so
-// reconcile stays snappy.
-async function localImageHealthy(): Promise<boolean> {
-  try {
-    const r = await fetch(`http://127.0.0.1:${DIFFUSION_PORT}/health`, { signal: AbortSignal.timeout(1500) })
-    return r.ok && (await r.text()).includes("ok")
-  } catch {
-    return false
-  }
-}
-
-// One reconcile pass: seed the single active image endpoint to match the user's
-// EXPLICIT image-capability choice (PR3 — replaces the old implicit local-first +
-// OpenAI>OpenRouter precedence). Offline → the local diffusion sidecar (only when
-// serving); Online → exactly the chosen provider (only when its key is present).
-// No cross-provider or cloud↔local fallback: a missing key / down sidecar leaves NO
-// endpoint, so image gen surfaces a clear "no backend" instead of silently routing
-// somewhere the user didn't pick. Reads the pref + keys + health at call time.
-async function applyImageEndpoint(): Promise<void> {
-  const pref = capabilities.getPref("image")
-  const localDir = findImageModel()
-  // Only probe the sidecar's /health when Offline actually needs it (keeps online
-  // reconciles snappy — no 1.5s health wait to seed a cloud endpoint).
-  const localReady = pref.mode === "offline" && !!localDir && (await localImageHealthy())
-  const target = resolveImageBackend(pref, localReady, !!byok.getKey("openai"), !!byok.getKey("openrouter"))
-
-  // Seed the chosen backend. A transient seed failure leaves any existing row of the
-  // same name in place (we never delete the TARGET below); we log it so the transient
-  // no-backend window is diagnosable (a later reconcile re-seeds).
-  let seeded = true
-  if (target === "local" && localDir) seeded = await seedLocalImage(basename(localDir))
-  else if (target === "openai") {
-    const key = byok.getKey("openai")
-    seeded = key ? await seedOpenAIImage(key) : false
-  } else if (target === "openrouter") {
-    const key = byok.getKey("openrouter")
-    seeded = key ? await seedOpenRouterImage(key) : false
-  }
-  if (target !== "none" && !seeded) console.warn(`[image] seed of "${target}" failed — image gen has no backend until the next reconcile`)
-
-  // Retire every backend the user did NOT choose, so EXACTLY the chosen one stays enabled
-  // (and NONE when target === "none"). This is where the old precedence lived; there is
-  // no silent fallback to a non-chosen provider or to local — retiring the unchosen rows
-  // is the PRIVACY guarantee (Offline never keeps a cloud row), which is why we retire
-  // even when the chosen seed failed. A failed unseed (logged) could rarely leave a stale
-  // row that the next reconcile clears.
-  const rows: Array<[ImageBackend, string]> = [
-    ["local", IMAGE_LOCAL_NAME],
-    ["openai", IMAGE_OPENAI_NAME],
-    ["openrouter", IMAGE_OPENROUTER_NAME],
-  ]
-  for (const [kind, name] of rows) {
-    if (kind !== target && !(await unseedImage(name))) console.warn(`[image] unseed of "${name}" failed — a stale endpoint may persist until the next reconcile`)
-  }
-}
-
-// Reconcile the one active image endpoint to the current image pref + BYOK keys.
-// Single-flight + coalesced: each pass runs the seed/unseed subprocesses to
-// completion before the next starts (they must not interleave), and if any newer
-// request lands mid-run we run ONE more pass afterward so the latest state
-// always wins. Without this, a fire-and-forget startup reconcile could finish
-// AFTER a newer byok:set/remove or capabilities:set and re-apply a stale decision.
-let reconcileInFlight: Promise<void> | null = null
-let reconcilePending = false
-function reconcileImageEndpoint(): Promise<void> {
-  if (reconcileInFlight) {
-    // A pass is running; its snapshot may predate this call — queue exactly one
-    // more pass (which re-reads keys) and share the in-flight chain.
-    reconcilePending = true
-    return reconcileInFlight
-  }
-  reconcileInFlight = (async () => {
-    do {
-      reconcilePending = false
-      await applyImageEndpoint()
-    } while (reconcilePending) // a request arrived mid-pass → reconcile again with fresh keys
-  })().finally(() => {
-    reconcileInFlight = null
-  })
-  return reconcileInFlight
-}
+// Image generation (Odysseus removal, PR E): the Odysseus-DB seed/reconcile
+// machinery that lived here (runImageSeed + applyImageEndpoint + the
+// single-flight reconcile, ~190 lines) is gone. The image capability now flows
+// like research/vision/browser: capabilities.envForOpencode() injects
+// NIGHTJAR_IMAGE_PROVIDER into opencode-serve's env, phase2-mcp's
+// imagegen_backend.py resolves it against the BYOK key, and applying a change
+// is just an engine restart (same path the other capabilities use).
 
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
@@ -233,20 +79,9 @@ function sendToRenderer(channel: string, ...args: unknown[]): void {
   }
 }
 
-let lastDiffusionHealthy = false
 const supervisor = new Supervisor(nightjarServices(), (statuses) => {
   latestStatus = statuses
   sendToRenderer("nightjar:status", statuses)
-  // The diffusion sidecar can reach (or lose) health AFTER the startup/post-start
-  // reconcile passes — a slow ~6GB cold load finishing past the readyTimeout, or a
-  // crash-restart. Re-reconcile on either transition so an Offline image capability
-  // activates its local endpoint once serving, and tears it down if it dies. (No cloud
-  // fallback now — Offline stays Offline; the user picks Online explicitly.) NJ-6.
-  const diffHealthy = statuses.some((s) => s.name === "diffusion-server" && s.state === "healthy")
-  if (diffHealthy !== lastDiffusionHealthy) {
-    lastDiffusionHealthy = diffHealthy
-    reconcileImageEndpoint().catch((e) => console.warn("[image] diffusion-transition reconcile:", e))
-  }
 })
 
 function createWindow(): void {
@@ -320,7 +155,9 @@ ipcMain.handle("nightjar:serviceLogs", (_e, name: string): string[] => superviso
 // images are also saved to disk so the local vision tool (nightjar_analyze_image,
 // which takes a path) can reach them. Generated images are read back for inline display.
 const ATTACHMENTS_DIR = join(homedir(), ".nightjar", "attachments")
-const GENERATED_IMAGES_DIR = join(ODYSSEUS_DATA_DIR, "generated_images")
+// Where phase2-mcp/imagegen_server.py writes generated PNGs (PR E — was
+// Odysseus's generated_images dir before the Odysseus removal).
+const GENERATED_IMAGES_DIR = join(homedir(), ".nightjar", "images")
 const MIME_BY_EXT: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
   ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml",
@@ -453,8 +290,8 @@ ipcMain.handle("nightjar:readWindowsClipboardImage", async (): Promise<string | 
   })
 })
 
-// Read a generated image (by filename) from Odysseus's generated_images dir → data
-// URL, so chat can render it inline (the tool returns a web path not served here).
+// Read a generated image (by filename) from the image tool's output dir → data
+// URL, so chat can render it inline (the tool returns a filesystem path).
 ipcMain.handle("nightjar:readGeneratedImage", async (_e, filename: string): Promise<string | null> => {
   const abs = join(GENERATED_IMAGES_DIR, basename(String(filename))) // basename → no traversal
   try {
@@ -525,19 +362,14 @@ ipcMain.handle("byok:list", () =>
 )
 ipcMain.handle("byok:set", async (_e, providerId: string, key: string) => {
   byok.setKey(providerId, key) // throws (→ rejects to renderer) if no OS keychain
-  // If the image capability is Online with THIS provider, storing the key lets its
-  // endpoint seed — re-apply the explicit image pref (no precedence; applyImageEndpoint
-  // seeds only the chosen backend). A key for a provider the user hasn't selected for
-  // image gen changes nothing.
-  if (providerId === "openai" || providerId === "openrouter") await reconcileImageEndpoint()
+  // The engine restart below re-injects NIGHTJAR_BYOK_* and the capability
+  // provider vars — image gen (PR E) rides this exactly like research/vision.
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 ipcMain.handle("byok:remove", async (_e, providerId: string) => {
   byok.removeKey(providerId)
-  // Re-apply the explicit image pref: if the removed key was the one the image
-  // capability points at, its endpoint is torn down (NO silent fallback to the other
-  // provider — the UI flags the missing key and the user re-picks).
-  if (providerId === "openai" || providerId === "openrouter") await reconcileImageEndpoint()
+  // A removed key disappears from the engine env on the restart below; the image
+  // tool then reports "not configured" (no silent fallback to another provider).
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
 })
 
@@ -551,11 +383,10 @@ ipcMain.handle("capabilities:catalog", () => ({ capabilities: capabilities.CAPAB
 ipcMain.handle("capabilities:list", () => capabilities.listPrefs())
 ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.CapabilityPref) => {
   const saved = capabilities.setPref(id, pref)
-  if (id === "image") await reconcileImageEndpoint() // seed the newly-chosen image backend
-  // Browser, research, and vision are resolved from engine env at MCP-spawn time, so
-  // applying their choice needs an opencode-serve restart to re-inject the
-  // NIGHTJAR_{BROWSERUSE,RESEARCH,VISION}_PROVIDER vars.
-  if (id === "browser" || id === "research" || id === "vision")
+  // Browser, research, vision, and (since PR E) image are all resolved from
+  // engine env at MCP-spawn time, so applying the choice needs an
+  // opencode-serve restart to re-inject the NIGHTJAR_*_PROVIDER vars.
+  if (id === "browser" || id === "research" || id === "vision" || id === "image")
     await supervisor.restartService("opencode-serve", opencodeServeEnv())
   return saved
 })
@@ -563,14 +394,11 @@ ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.Cap
 // The global Local/Cloud toggle flips several capability prefs at once. Persist them in
 // ONE store write, then apply with exactly ONE image reconcile + ONE engine restart —
 // instead of up to four (one per changed capability) if the renderer looped setPref. The
-// restart re-injects NIGHTJAR_{BROWSERUSE,RESEARCH,VISION}_PROVIDER; the reconcile seeds
-// the image endpoint. We run both unconditionally here rather than diffing which ids
-// changed: the toggle already touches image + at least one env-applied capability on every
-// switch, so the "did anything relevant change" check would essentially always be true, and
-// a redundant reconcile/restart is cheap and safe next to the alternative (a stale backend).
+// restart re-injects NIGHTJAR_{BROWSERUSE,RESEARCH,VISION,IMAGE}_PROVIDER (image joined
+// the env-applied capabilities in PR E). Run unconditionally rather than diffing which
+// ids changed — a redundant restart is cheap next to a stale backend.
 ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabilities.CapabilityPref>) => {
   const saved = capabilities.setBulk(prefs) // throws on any unknown id → no partial write
-  await reconcileImageEndpoint()
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
   return saved
 })
@@ -650,23 +478,12 @@ app.whenReady().then(() => {
   startLocalScheduler(pushScheduler)
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
   supervisor.setEnv("opencode-serve", opencodeServeEnv())
-  // Seed the image endpoint to match the persisted image-capability choice (Offline
-  // local, or the chosen Online provider), so it's active from launch. Fire-and-forget:
-  // never blocks the window/stack coming up.
-  reconcileImageEndpoint().catch((e) => console.warn("[image] endpoint reconcile:", e))
   // fire-and-forget: bring up the stack; the health strip reflects progress. Once
   // the stack (incl. the ollama service) is up, ensure the local vision model.
   if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") {
     supervisor
       .start()
-      .then(() => {
-        ensureVision()
-        // The startup reconcile above was fire-and-forget before the diffusion sidecar
-        // was healthy; re-reconcile now so an Offline image capability activates its
-        // local endpoint once the sidecar is serving (NJ-6). No-op when Online or when
-        // there's no local model.
-        reconcileImageEndpoint().catch((e) => console.warn("[image] post-start reconcile:", e))
-      })
+      .then(() => ensureVision())
       .catch((e) => console.error("supervisor:", e))
   } else {
     ensureVision().catch(() => {})

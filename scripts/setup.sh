@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Nightjar one-shot setup for a fresh clone.
-#   - fetches the submodules (Odysseus + the OpenCode ENGINE; the Odysseus patch is retired)
+#   - fetches the submodule (the OpenCode ENGINE)
 #   - installs the engine's deps (bun install)
 #   - creates the Python venvs (phase2-mcp, browser-use) + the phase-cad venv + deps
 #   - installs the UI's node modules
@@ -32,7 +32,7 @@ else PYLAUNCH="python"; fi
 
 # 1) Submodules: Odysseus (RAG/PIM) + OpenCode (the ENGINE — the only agent loop) --------
 echo "-- [1/10] git submodules (odysseus + opencode engine) --"
-git submodule update --init research/odysseus research/opencode
+git submodule update --init research/opencode
 
 # 2) OpenCode engine deps — bun install (audit1.md P0-1: the engine is a submodule now, but
 # it still needs its node_modules). Put bun on PATH so dependency postinstalls that call
@@ -52,11 +52,7 @@ else
   echo "   WARNING: bun not found — the engine will not start. Install: curl -fsSL https://bun.sh/install | bash" >&2
 fi
 
-# 3) Odysseus integration patch — RETIRED (Odysseus removal, PR G) --------------------
-# The patch served the odysseus rag/docs/pim/email tiers, all removed or rebuilt
-# Nightjar-side. Revert an existing checkout's submodule to pristine.
-echo "-- [3/10] Odysseus patch: retired (reverting if present) --"
-if [ -e research/odysseus/.git ]; then git -C research/odysseus checkout -- . 2>/dev/null || true; fi
+# 3) (retired) the Odysseus patch step — the submodule itself was removed in PR E
 
 # 4) Python venvs + deps ---------------------------------------------------------------
 make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)

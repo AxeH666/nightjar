@@ -156,5 +156,12 @@ export function envForOpencode(): Record<string, string> {
   // NIGHTJAR_VISION_PROVIDER + that provider's NIGHTJAR_BYOK_* key).
   const vision = getPref("vision")
   out.NIGHTJAR_VISION_PROVIDER = vision.mode === "online" && vision.providerId ? vision.providerId : "local"
+  // Image generation (Odysseus removal PR E): same shape — the old Odysseus-DB
+  // seed/reconcile machinery is gone; imagegen_backend.py reads
+  // NIGHTJAR_IMAGE_PROVIDER + that provider's NIGHTJAR_BYOK_* key. "local" means
+  // NO backend today (the local diffusion path went with PR G; a diffusers
+  // backend can return as an additive provider) — the tool says so plainly.
+  const image = getPref("image")
+  out.NIGHTJAR_IMAGE_PROVIDER = image.mode === "online" && image.providerId ? image.providerId : "local"
   return out
 }

@@ -45,18 +45,8 @@ const LLAMA_BIN =
   process.env.NIGHTJAR_LLAMA_BIN ||
   join(HOME, IS_WIN ? "llama.cpp/build/bin/Release/llama-server.exe" : "llama.cpp/build-cuda/bin/llama-server")
 const MODEL = process.env.NIGHTJAR_MODEL_GGUF || join(HOME, "models/qwen3-4b-instruct-2507/Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
-// Local IMAGE generation (NJ-6): the diffusers GPU venv + the Z-Image-Turbo model dir.
-const DIFFUSION_PY = process.env.NIGHTJAR_DIFFUSION_PY || venvPython(join(REPO, "diffusion-mcp/venv"))
-const DIFFUSION_PORT = process.env.NIGHTJAR_DIFFUSION_PORT || "8100"
-
-// The local image-model directory (Z-Image-Turbo), present only if it exists AND
-// holds a model_index.json (a real diffusers checkpoint). Returns null otherwise, so
-// the diffusion sidecar + the local-first image endpoint are wired ONLY when there is
-// actually a model to serve. Mirrors findOllama()'s "add only if installed" gate.
-export function findImageModel(): string | null {
-  const dir = process.env.NIGHTJAR_IMAGE_MODEL_DIR || join(HOME, "models/Z-Image-Turbo")
-  return existsSync(join(dir, "model_index.json")) ? dir : null
-}
+// (findImageModel + the diffusion sidecar launch were removed in PR E — image gen
+// is a BYOK cloud call via phase2-mcp/imagegen_server.py; research/odysseus is gone.)
 // Exported so the preview/artifact layer can compute tidy relative mirror paths
 // (relative(WORKSPACE, filePath)) for files the coding agent writes.
 export const WORKSPACE = process.env.NIGHTJAR_WORKSPACE || join(REPO, "engine-workspace")
@@ -186,29 +176,6 @@ export function nightjarServices(): ServiceDef[] {
       args: ["serve"],
       ready: () => httpOk(`${OLLAMA_HOST}/api/tags`),
       readyTimeoutMs: 20000,
-    })
-  }
-  // Local IMAGE generation (Z-Image-Turbo via diffusers) — added ONLY when the model
-  // dir + the GPU venv both exist. Placed LAST + best-effort, like ollama: a slow
-  // ~6GB GPU load must never block the core stack. Its absence means the Offline image
-  // backend simply isn't available — image gen then has NO backend unless the user has
-  // explicitly set Image Online with a provider (there is NO automatic cloud fallback on
-  // mere key presence; see applyImageEndpoint / image-endpoint.ts). The supervisor's
-  // readyTimeout wall-clock-gates the load (rule 3 at the process level).
-  const imageModel = findImageModel()
-  if (imageModel && existsSync(DIFFUSION_PY)) {
-    services.push({
-      name: "diffusion-server",
-      command: DIFFUSION_PY,
-      args: [
-        join(REPO, "research/odysseus/scripts/diffusion_server.py"),
-        "--model", imageModel,
-        "--host", "127.0.0.1",
-        "--port", DIFFUSION_PORT,
-        "--dtype", "bfloat16",
-      ],
-      ready: () => httpOk(`http://127.0.0.1:${DIFFUSION_PORT}/health`, (b) => b.includes("ok")),
-      readyTimeoutMs: 180000, // cold ~6GB model load on GPU
     })
   }
   return services

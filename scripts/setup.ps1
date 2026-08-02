@@ -3,7 +3,7 @@ Nightjar one-shot setup for NATIVE WINDOWS (the PowerShell equivalent of scripts
 which is bash-only and hardcodes POSIX venv paths - see audit1.md P1-5).
 
 Provisions a fresh clone to a runnable app:
-  - fetches the git submodules (research/odysseus + research/opencode - the ENGINE)
+  - fetches the git submodule (research/opencode - the ENGINE)
   - `bun install` for the OpenCode engine (the only agent loop)
   - applies Nightjar's Odysseus integration patch (embedded ChromaDB, no Docker)
   - creates the Python 3.12 venvs (phase2-mcp, browser-use) + installs deps
@@ -85,8 +85,8 @@ function New-Venv([string]$Dir, [string[]]$Py) {
 }
 
 # ---- 1) Submodules: Odysseus (RAG/PIM) + OpenCode (the engine) --------------------
-Write-Host "-- [1/8] git submodules (odysseus + opencode engine) --"
-& git submodule update --init research/odysseus research/opencode
+Write-Host "-- [1/8] git submodule (opencode engine) --"
+& git submodule update --init research/opencode
 if ($LASTEXITCODE -ne 0) { throw "git submodule update failed (need network + git access to the fork)" }
 
 # ---- 2) Engine deps: bun install in research/opencode ------------------------------
@@ -107,14 +107,7 @@ try {
   }
 } finally { Pop-Location }
 
-# ---- 3) Odysseus integration patch — RETIRED (Odysseus removal, PR G) ----------
-# The patch (embedded ChromaDB, docs-RAG fix) served the odysseus rag/docs/pim/email
-# tiers, all now removed or rebuilt Nightjar-side. If it was applied in an existing
-# checkout, revert the submodule to pristine so future submodule updates stay clean.
-Write-Host "-- [3/8] Odysseus patch: retired (reverting if present) --"
-if (Test-Path (Join-Path $Root 'research\odysseus\.git')) {
-  & git -C research/odysseus checkout -- . 2>$null
-}
+# ---- 3) (retired) the Odysseus patch step — the submodule itself was removed in PR E
 
 # ---- 4) UI node modules -----------------------------------------------------------
 Write-Host "-- [4/8] phase3-ui npm install --"

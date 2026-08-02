@@ -55,7 +55,7 @@ together over **MCP** rather than merged. See `NIGHTJAR_LICENSE_AND_ATTRIBUTION.
     ├─ cad-build123d      → phase-cad/.venv     (build123d / OCCT)  ⭐ the CAD lab
     ├─ nightjar           → phase2-mcp/venv     (voice/vision/memory/browser)
     ├─ browser-use        → browser-use-mcp/venv
-    └─ (odysseus tiers removed — email/rag/docs deleted; research/pim/websearch rebuilt Nightjar-side in phase2-mcp; image returns in PR E)
+    └─ (odysseus fully removed — email/rag/docs deleted; research/pim/websearch/image rebuilt Nightjar-side in phase2-mcp)
 
   Model layer:  llama-server (:8085, CUDA)  ←  inference-proxy (:8086, bun)
   Side-channel: sidechannel.py (:8765 WS) + wake_daemon.py (:8766)
@@ -179,10 +179,9 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 inspect/cross_sections/…) + 5 `ask` (execute/export/import_cad_file/load_part/install_skill);
 the other 18 (incl. the destructive `reset`) are **unreachable**.
 
-**MCP servers (6):** `nightjar`, `nightjar-websearch`, `nightjar-research`, `nightjar-pim`,
-`browser-use`, `cad-build123d`.
-(Image generation is offline until the image-gen follow-up (PR E) — `odysseus-image` was
-removed with `phase2-odysseus/` in PR G, since the venv it ran in no longer exists.)
+**MCP servers (7):** `nightjar`, `nightjar-image`, `nightjar-websearch`, `nightjar-research`,
+`nightjar-pim`, `browser-use`, `cad-build123d`. All Nightjar-authored (plus browser-use, MIT);
+the Odysseus submodule is gone (PR E) — image gen is a BYOK cloud call.
 (Odysseus removal: `odysseus-email` / `odysseus-rag` / `odysseus-docs` were deleted in PR C —
 see KNOWN_ISSUES NJ-49 for the reachability audit that justified it.)
 (`nightjar-websearch` was split out of `odysseus-research` in the Odysseus-removal PR B — it is
