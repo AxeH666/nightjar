@@ -11,7 +11,9 @@ import asyncio
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# modules under test live one level up, in phase2-mcp/ (moved there in PR B
+# when web_search was split out of the Odysseus deep-research server)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from research_backend import RESEARCH_PROVIDERS  # noqa: E402 — the cloud provider ids we must not break
 from web_search_backend import (  # noqa: E402
     DEFAULT_MAX_TIME,

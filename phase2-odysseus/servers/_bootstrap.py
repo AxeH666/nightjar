@@ -39,6 +39,14 @@ Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 if ODYSSEUS_REPO not in sys.path:
     sys.path.insert(0, ODYSSEUS_REPO)
 
+# PR B (Odysseus removal): `research_backend` (the pure Local/Cloud research-LLM
+# selector) moved to phase2-mcp/ with the web-search split. It is Nightjar-authored
+# and Odysseus-free; deep_research_server still needs it, so make it importable
+# until PR F replaces that server outright.
+_PHASE2_MCP = str(_REPO_ROOT / "phase2-mcp")
+if _PHASE2_MCP not in sys.path:
+    sys.path.insert(0, _PHASE2_MCP)
+
 # local model endpoint for LLM-backed capabilities (research), OpenAI-compatible
 LLM_ENDPOINT = os.environ.get("NIGHTJAR_LLM_ENDPOINT", "http://127.0.0.1:8086/v1")
 LLM_MODEL = os.environ.get("NIGHTJAR_LLM_MODEL", "qwen3-4b-instruct-2507")
