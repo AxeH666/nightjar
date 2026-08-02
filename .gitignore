@@ -92,9 +92,9 @@ tts_out.wav
 # sst/opencode@7a8e7c8 via the AxeH666/opencode fork for durability) and
 # research/odysseus (a runtime dependency AND the AGPL source-availability
 # obligation). Both are tracked as gitlinks and fetched via `git submodule
-# update --init`. Nightjar's changes to odysseus live as a patch in
-# phase2-odysseus/odysseus-patches/ (that submodule stays a clean upstream
-# mirror). Row-Bot's shipped code is vendored under
+# update --init`. The Odysseus integration patch was RETIRED in the Odysseus
+# removal (PR G) — the submodule is a clean upstream mirror, kept only until the
+# image-gen follow-up (PR E) removes the last runtime use. Row-Bot's shipped code is vendored under
 # phase2-mcp/nightjar_capabilities/_vendor/ (+ NOTICE + LICENSE.row-bot).
 research/*
 !research/odysseus
@@ -139,7 +139,7 @@ engine-workspace/*.step
 engine-workspace/*.stl
 engine-workspace/*.glb
 
-# The workspace's previous home (phase2-odysseus/workspace/). Kept ignored so
-# leftover generated artifacts in an existing checkout don't show up as
-# untracked noise after the move. Remove once that directory is gone (PR G).
-phase2-odysseus/workspace/
+# phase2-odysseus/ was deleted in the Odysseus removal (PR G), but an existing
+# checkout still holds untracked leftovers there (venv/, workspace artifacts).
+# Ignore the whole directory so they never show up as noise.
+phase2-odysseus/

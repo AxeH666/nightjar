@@ -60,7 +60,6 @@
         "nightjar-pim_calendar_create_event": "allow", "nightjar-pim_calendar_list_events": "allow",
         "nightjar_save_memory": "allow", "nightjar_search_memory": "allow",
         "nightjar_analyze_image": "ask",
-        "odysseus-image_generate_image": "ask",
         "browser-use_run_browser_task": "ask"
       }
     },
@@ -126,13 +125,6 @@
       "enabled": true,
       "timeout": 300000
     },
-    "odysseus-image": {
-      "type": "local",
-      "command": ["{env:NIGHTJAR_ROOT}/phase2-odysseus/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/research/odysseus/mcp_servers/image_gen_server.py"],
-      "environment": { "PYTHONPATH": "{env:NIGHTJAR_ROOT}/research/odysseus", "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "{env:HOME}/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
-      "enabled": true,
-      "timeout": 120000
-    },
     "nightjar-websearch": {
       "type": "local",
       "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/websearch_server.py"],
@@ -150,7 +142,7 @@
     "nightjar-pim": {
       "type": "local",
       "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/pim_server.py"],
-      "environment": { "ODYSSEUS_REPO": "{env:NIGHTJAR_ROOT}/research/odysseus", "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "CHROMADB_PERSIST_DIR": "{env:HOME}/.nightjar/odysseus/chroma", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "environment": { "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
       "enabled": true,
       "timeout": 120000
     },

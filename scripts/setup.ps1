@@ -6,7 +6,7 @@ Provisions a fresh clone to a runnable app:
   - fetches the git submodules (research/odysseus + research/opencode - the ENGINE)
   - `bun install` for the OpenCode engine (the only agent loop)
   - applies Nightjar's Odysseus integration patch (embedded ChromaDB, no Docker)
-  - creates the Python 3.12 venvs (phase2-mcp, phase2-odysseus, browser-use) + installs deps
+  - creates the Python 3.12 venvs (phase2-mcp, browser-use) + installs deps
   - phase-cad venv via `uv` (build123d / OCP) + smoke test
   - installs the UI's node modules
   - (optional, best-effort) Ollama gemma3:4b vision model, diffusion venv + Z-Image-Turbo
@@ -107,17 +107,13 @@ try {
   }
 } finally { Pop-Location }
 
-# ---- 3) Odysseus integration patch (idempotent) -----------------------------------
-Write-Host "-- [3/8] Odysseus integration patch --"
-$patch = Join-Path $Root 'phase2-odysseus\odysseus-patches\nightjar-odysseus.patch'
-if ((Invoke-GitCode @('-C','research/odysseus','apply','--reverse','--check',$patch)) -eq 0) {
-  Write-Host "   already applied - skipping"
-} elseif ((Invoke-GitCode @('-C','research/odysseus','apply','--check',$patch)) -eq 0) {
-  & git -C research/odysseus apply $patch
-  if ($LASTEXITCODE -ne 0) { throw "Odysseus patch failed to apply (after passing --check)." }
-  Write-Host "   applied ($patch)"
-} else {
-  throw "Odysseus patch does not apply cleanly and is not already applied. The Odysseus tier would be MISSING embedded ChromaDB (no-docker). Inspect the submodule commit vs the patch: $patch"
+# ---- 3) Odysseus integration patch — RETIRED (Odysseus removal, PR G) ----------
+# The patch (embedded ChromaDB, docs-RAG fix) served the odysseus rag/docs/pim/email
+# tiers, all now removed or rebuilt Nightjar-side. If it was applied in an existing
+# checkout, revert the submodule to pristine so future submodule updates stay clean.
+Write-Host "-- [3/8] Odysseus patch: retired (reverting if present) --"
+if (Test-Path (Join-Path $Root 'research\odysseus\.git')) {
+  & git -C research/odysseus checkout -- . 2>$null
 }
 
 # ---- 4) UI node modules -----------------------------------------------------------
@@ -138,14 +134,14 @@ Write-Host "   smoke test..."
 if ($LASTEXITCODE -ne 0) { throw "phase-cad smoke_test.py failed - CAD lab would be non-functional" }
 
 if ($CoreOnly) {
-  Write-Host "`n== -CoreOnly: skipping phase2-mcp/odysseus/browser-use venvs + optional models ==" -ForegroundColor Yellow
+  Write-Host "`n== -CoreOnly: skipping phase2-mcp/browser-use venvs + optional models ==" -ForegroundColor Yellow
   Write-Host "== setup complete (engine + phase-cad + UI). Add a BYOK key in the app for chat/CAD. =="
   Write-Host "== Run the app:  cd phase3-ui; npm run dev =="
   return
 }
 
-# ---- 6) Backend Python venvs (phase2-mcp / phase2-odysseus / browser-use) ----------
-Write-Host "-- [6/8] backend venvs (phase2-mcp, phase2-odysseus, browser-use) --"
+# ---- 6) Backend Python venvs (phase2-mcp / browser-use) ----------
+Write-Host "-- [6/8] backend venvs (phase2-mcp, browser-use) --"
 $py312 = Get-Py312
 New-Venv (Join-Path $Root 'phase2-mcp') $py312
 # TTS moved from kokoro-onnx's GPL espeak tokenizer to misaki (Apache-2.0).
@@ -156,7 +152,6 @@ $mcpPy = Join-Path $Root 'phase2-mcp\venv\Scripts\python.exe'
 if (Test-Path $mcpPy) {
   & $mcpPy -m pip uninstall -y -q kokoro-onnx phonemizer-fork espeakng-loader 2>$null | Out-Null
 }
-New-Venv (Join-Path $Root 'phase2-odysseus') $py312
 New-Venv (Join-Path $Root 'browser-use-mcp') $py312
 # browser-use needs a Chrome/Chromium; verify later:  browser-use-mcp\venv\Scripts\browser-use --doctor
 
