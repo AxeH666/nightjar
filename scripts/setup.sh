@@ -86,6 +86,14 @@ make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)
   "$d/venv/$VBIN/$PYEXE" -m pip install -q -r "$d/requirements.txt"
 }
 echo "-- [4/10] phase2-mcp venv --";      make_venv phase2-mcp
+# TTS moved from kokoro-onnx's GPL espeak tokenizer to misaki (Apache-2.0).
+# Dropping them from requirements.txt does NOT remove them from an existing
+# venv, so purge explicitly — otherwise upgraded installs keep a GPL espeak-ng
+# binary on disk. Idempotent; never fatal.
+if [ -x "phase2-mcp/venv/$VBIN/$PYEXE" ]; then
+  "phase2-mcp/venv/$VBIN/$PYEXE" -m pip uninstall -y -q \
+    kokoro-onnx phonemizer-fork espeakng-loader >/dev/null 2>&1 || true
+fi
 echo "-- [5/10] phase2-odysseus venv --"; make_venv phase2-odysseus
 # Browser Use (autonomous form-filling) — isolated venv so its heavy deps
 # (openai/anthropic/google-genai/…) never destabilize phase2-mcp/venv.

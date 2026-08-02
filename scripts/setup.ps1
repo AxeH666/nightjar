@@ -148,6 +148,14 @@ if ($CoreOnly) {
 Write-Host "-- [6/8] backend venvs (phase2-mcp, phase2-odysseus, browser-use) --"
 $py312 = Get-Py312
 New-Venv (Join-Path $Root 'phase2-mcp') $py312
+# TTS moved from kokoro-onnx's GPL espeak tokenizer to misaki (Apache-2.0).
+# Dropping them from requirements.txt does NOT remove them from an existing
+# venv, so purge explicitly — otherwise upgraded installs keep a GPL espeak-ng
+# binary on disk. Idempotent; never fatal.
+$mcpPy = Join-Path $Root 'phase2-mcp\venv\Scripts\python.exe'
+if (Test-Path $mcpPy) {
+  & $mcpPy -m pip uninstall -y -q kokoro-onnx phonemizer-fork espeakng-loader 2>$null | Out-Null
+}
 New-Venv (Join-Path $Root 'phase2-odysseus') $py312
 New-Venv (Join-Path $Root 'browser-use-mcp') $py312
 # browser-use needs a Chrome/Chromium; verify later:  browser-use-mcp\venv\Scripts\browser-use --doctor

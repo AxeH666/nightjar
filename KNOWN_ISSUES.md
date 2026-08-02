@@ -61,6 +61,113 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-47 — `tests/test_vision.py` crashes on a default Windows console (cp1252) — OPEN 2026-08-02
+
+- **Severity:** low — the *test* is unrunnable on a stock Windows terminal; the
+  feature under test is fine.
+- **Found:** incidentally, while adding `tests/test_tts_no_gpl.py` (CLAUDE.md
+  rule 7 — recorded rather than fixed as a drive-by, since it is unrelated to
+  the TTS/GPL work).
+- **Symptom:** `phase2-mcp/venv/Scripts/python tests/test_vision.py` →
+  `UnicodeEncodeError: 'charmap' codec can't encode character '→'` (the `→`
+  in its own progress output). The test **passes** when run with
+  `PYTHONIOENCODING=utf-8`, so this is purely a console-encoding bug in the test
+  harness, not in `vision.analyze_image`.
+- **Confirmed:** re-ran with `PYTHONIOENCODING=utf-8` → `RESULT: PASS ✅ —
+  gemma3:4b analyzed the image offline`. File untouched by this PR.
+- **Fix (one line, deferred to whoever next touches that file):** the same
+  `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` guard now at the
+  top of `tests/test_tts_no_gpl.py`. Any future test that prints non-ASCII on
+  Windows needs it.
+
+## NJ-46 — spaCy model would auto-download on first speech (offline-posture violation) — FIXED 2026-08-02
+
+- **Severity:** medium — offline-first posture; a silent network fetch on first TTS use.
+- **Symptom:** `misaki/en.py` (the new G2P) does, at `G2P.__init__`:
+  `if not spacy.util.is_package("en_core_web_sm"): spacy.cli.download(name)`.
+  On a machine without the model, the first `speak()` would reach out to GitHub
+  and pull 12.8 MB — the **same posture violation already flagged for the gemma3
+  auto-pull**, and exactly the kind of thing an offline-first assistant must not do.
+- **Fix:** two layers. (1) `nightjar_capabilities/tts_g2p.py::build_g2p()` checks
+  `spacy.util.is_package()` itself and **raises with install instructions** rather
+  than letting misaki reach for the network. (2) the model is provisioned at
+  *install* time — `requirements.txt` pins the MIT wheel by direct URL, so
+  `pip install -r requirements.txt` fetches it during setup, where a download is
+  expected and visible.
+- **Verified:** in a clean venv with the model pre-installed, `socket.socket` and
+  `socket.create_connection` were monkeypatched to raise, then `build_g2p()` was
+  constructed and used to phonemize — no network access attempted, G2P works.
+- **Residual:** setup still downloads the wheel *from the network at install time*.
+  A fully air-gapped installer must vendor the 12.8 MB wheel locally. Not done here.
+
+## NJ-45 — `typer` ≥ 0.27 dropped `click`, breaking spaCy's CLI import — FIXED 2026-08-02
+
+- **Severity:** low — install-time breakage, but a hard failure when it hits.
+- **Symptom:** `import spacy` → `ModuleNotFoundError: No module named 'click'`.
+- **Root cause:** spaCy declares only `typer<1.0.0,>=0.3.0` but
+  `spacy/cli/_util.py` does `from click import NoSuchOption` directly. `typer`
+  0.27.0's requires list is `shellingham, rich, annotated-doc, colorama` — `click`
+  is gone. So a fresh resolve installs spaCy with no `click`, and `import spacy`
+  fails at module scope. Independent of this PR's subject matter; found while
+  building the clean-room venv.
+- **Fix:** pin `click==8.4.2` explicitly in `phase2-mcp/requirements.txt` rather
+  than relying on it arriving transitively.
+- **Verified:** reproduced the exact `ModuleNotFoundError` in a fresh venv with
+  `misaki num2words spacy` only; after adding the pin, `import spacy` and the full
+  G2P path succeed.
+
+## NJ-44 — `misaki.espeak` ships on disk and would become live if phonemizer is ever reinstalled — OPEN (guarded) 2026-08-02
+
+- **Severity:** low — currently inert; it is a *re-entry* risk, not a live defect.
+- **What:** the misaki wheel installs `misaki/espeak.py`, which does
+  `from phonemizer.backend.espeak.wrapper import EspeakWrapper` and
+  `import espeakng_loader` at module scope. It is misaki's **own Apache-2.0**
+  source, not GPL code, and it is currently unimportable —
+  `ModuleNotFoundError: No module named 'phonemizer'`. `misaki.en` never imports
+  it, and we pass our own `fallback=`.
+- **Why it's recorded:** if anyone later adds `phonemizer` for an unrelated
+  reason, that module silently becomes importable and a future contributor could
+  wire `EspeakFallback` back in, reintroducing GPL without an obvious signal.
+- **Guard:** `phase2-mcp/tests/test_tts_no_gpl.py` asserts `misaki.espeak` is not
+  in `sys.modules` after a real synthesis, arms a `ctypes` trap that raises on any
+  espeak/phonemizer library load, and asserts the three GPL distributions are
+  absent from `requirements.txt`.
+- **Verified:** the guard passes in a venv where phonemizer/espeakng-loader are
+  **still installed** — i.e. the DLL was available and nothing loaded it. That is
+  a stricter result than a clean venv can give.
+
+## NJ-43 — `en_core_web_sm` is MIT, but its training corpus is commercially licensed — OPEN (note only) 2026-08-02
+
+- **Severity:** informational — no action believed necessary.
+- **What:** the spaCy pipeline misaki uses for POS tagging is MIT, but its
+  `LICENSES_SOURCES` (read per CLAUDE.md rule 5, not trusted from metadata)
+  records OntoNotes 5 as "**commercial (licensed by Explosion)**", plus ClearNLP
+  (citation only) and WordNet 3.0 (permissive).
+- **Assessment:** the artifact Nightjar redistributes is the MIT-licensed model;
+  Explosion holds the corpus license and shipped the result under MIT. Recorded
+  because "MIT model, commercially-licensed training data" is exactly the kind of
+  gap rule 5 exists to surface, and a future relicense review should see it
+  rather than rediscover it.
+
+## NJ-42 — `num2words` is LGPL-2.1 — the last copyleft in the TTS runtime graph — OPEN 2026-08-02
+
+- **Severity:** low today, **blocking for a strict relicense**.
+- **What:** removing phonemizer/espeak took all **GPL** out of the TTS path, but
+  `num2words` — a *mandatory* misaki dependency — is **LGPL-2.1**, confirmed by
+  reading its `COPYING` file directly (its PyPI metadata just says "LGPL"; rule 5).
+- **Impact:** fine under the current AGPL-3.0-or-later combined work, and weak
+  copyleft rather than strong — it is pure Python, so it is trivially replaceable
+  by the user, which is what LGPL §5 is about. But the stated goal was **zero
+  copyleft in the runtime graph**, and this does not meet that bar literally.
+- **Scope if it must go:** `num2words` is used only to expand numbers into words
+  ("42" → "forty two"). misaki calls it from `misaki/en.py`. Replacing it means
+  either an English-only number-speller of our own (~150 lines, no external dep)
+  plus a small patch/shim so misaki uses it, or upstreaming a pluggable
+  number-expander into misaki. **Not attempted in this PR** — flagged as a
+  separate decision, since it trades a small license nit for carrying a patch.
+- **Decision needed from the maintainer:** accept LGPL-2.1 in the graph, or
+  schedule the replacement before any relicense.
+
 ## NJ-41 — `useProjects` is per-component state, not a shared store — the root cause behind the PR-#125 whack-a-mole — OPEN (refactor deferred to its own PR) 2026-07-20
 
 - **What:** `useProjects(scope)` holds the projects list in `useState`, loaded from localStorage on

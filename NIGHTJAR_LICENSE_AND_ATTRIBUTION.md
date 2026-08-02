@@ -42,6 +42,10 @@ adding networked access.
 | Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
 | marked | markdown→HTML in the live-preview panel | MIT | `phase3-ui/node_modules/marked/LICENSE` (npm dep) |
 | gemma-chat (© 2026 ammaar) | live-preview "Canvas" **pattern reference only** — reimplemented, **no code copied** (`phase3-ui/src/main/preview-server.ts` + `components/ArtifactPanel.tsx` are original AGPL) | MIT | pattern documented in `research/AUDIT_REPORT.md` §5; no gemma-chat files vendored |
+| Kokoro-82M (© 2024 hexgrad) | TTS model weights (downloaded to the user's model cache, not vendored) | Apache-2.0 | `phase2-mcp/NOTICE` |
+| misaki (© 2025 hexgrad) | TTS grapheme-to-phoneme — the reference G2P Kokoro was trained with | Apache-2.0 | `phase2-mcp/NOTICE` (pip dep) |
+| kokoro-onnx (© 2024 thewh1teagle) | **data only** — the 114-entry phoneme→id table, vendored to `phase2-mcp/nightjar_capabilities/kokoro_vocab.json`; the package itself is **no longer a dependency** | MIT | `phase2-mcp/NOTICE` |
+| en_core_web_sm (© 2016 ExplosionAI GmbH) | spaCy English pipeline misaki uses for POS tagging | MIT | `phase2-mcp/NOTICE` (pip dep, install-time) |
 
 Odysseus's own `ACKNOWLEDGMENTS.md` and `licenses/` directory (opencode-MIT,
 llmfit-MIT, DeepResearch-Apache-2.0, OpenDyslexic-OFL) are carried forward
@@ -55,6 +59,24 @@ verbatim and must ship with any Nightjar distribution.
   provider instead — no extra service). If SearXNG is ever used, it's a separate
   AGPL service.
 - **caldav** — dual GPL-3.0-or-later / Apache-2.0; used under Apache-2.0. Fine.
+
+### Copyleft watch-items in the TTS path
+- **phonemizer-fork (GPL-3.0-or-later) + espeakng-loader (compiled espeak-ng,
+  notices stripped)** — **REMOVED.** They arrived transitively via `kokoro-onnx`,
+  whose `Tokenizer` is constructed unconditionally by `Kokoro.__init__` and
+  `ctypes.cdll.LoadLibrary()`s the espeak DLL in-process. GPL-3.0 is compatible
+  *into* AGPL-3.0, so this was never a license violation — it was removed
+  because it would block a future relicense. Replaced by misaki (Apache-2.0).
+  `phase2-mcp/tests/test_tts_no_gpl.py` fails the build if either returns.
+- **num2words — LGPL-2.1** (verified from its `COPYING`, not metadata; CLAUDE.md
+  rule 5). A *mandatory* misaki dependency, used only to expand numbers to words.
+  Weak copyleft and pure Python (relinkable, so §5-conformant in practice), and
+  fine under today's AGPL combined work — but it is **not** "zero copyleft". If
+  the relicense target is strict, this is the one remaining item to replace; it
+  is small and self-contained. Tracked as **NJ-42**.
+- **en_core_web_sm** — the distributed model is MIT, but its `LICENSES_SOURCES`
+  records that OntoNotes 5 training data is "commercial (licensed by Explosion)".
+  The shipped artifact is MIT; noted for completeness. Tracked as **NJ-43**.
 
 ## Nightjar's own additions
 Nightjar's integration code (MCP wrappers, side-channel, safety plugins, the
