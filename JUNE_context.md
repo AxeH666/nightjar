@@ -179,8 +179,10 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 inspect/cross_sections/…) + 5 `ask` (execute/export/import_cad_file/load_part/install_skill);
 the other 18 (incl. the destructive `reset`) are **unreachable**.
 
-**MCP servers (9):** `nightjar`, `browser-use`, `odysseus-email` *(disabled)*, `odysseus-image`,
-`odysseus-rag`, `odysseus-research`, `odysseus-docs`, `odysseus-pim`, `cad-build123d`.
+**MCP servers (10):** `nightjar`, `nightjar-websearch`, `browser-use`, `odysseus-email` *(disabled)*,
+`odysseus-image`, `odysseus-rag`, `odysseus-research`, `odysseus-docs`, `odysseus-pim`, `cad-build123d`.
+(`nightjar-websearch` was split out of `odysseus-research` in the Odysseus-removal PR B — it is
+Odysseus-free and runs in the `phase2-mcp` venv; `odysseus-research` now serves `deep_research` only.)
 Each command = that phase's venv python + a thin launcher shim, resolved off `{env:NIGHTJAR_ROOT}`
 and `{env:NJ_VENV_PY}` (the cross-platform bit — see §9).
 
