@@ -97,23 +97,27 @@ set via `--augmentation-impulse-dataset`.
 
 ```sh
 conda env create -f heybuddy_vendor/environment.yml && conda activate heybuddy
-pip install -e heybuddy_vendor
-# then: patch the sample source (see below), and
-heybuddy train "hey june" --augmentation-no-default-impulse-dataset  # until the IR licence is resolved
+pip install -e heybuddy_vendor    # the PATCHED vendored tree — see below
+heybuddy train "hey june" \
+  --positive-audio-dir /data/pos --adversarial-audio-dir /data/adv \
+  --training-medium-default-dataset \
+  --augmentation-no-default-impulse-dataset \
+  --augmentation-impulse-dataset /data/irs/simulated_rirs_16k
 heybuddy convert checkpoints/hey_june_final.pt
 ```
 
-⚠ **One small vendored patch is required at this step, by design.** Verified by
-reading the vendored code (`dataset/features.py`, `dataset/training.py`): the
-trainer's positives come ONLY from its internal `PiperSpeechGenerator` — there is
-no CLI flag to feed pregenerated WAVs. The training-PR task is to swap that class
-for a directory-reading generator pointed at Step 1's output (the class's
-interface is "yield 16 kHz sample batches", so the patch is small and contained in
-`TrainingFeaturesGenerator`). Everything downstream — augmentation, embedding
-extraction, the 3-stage trainer, ONNX export — is untouched. Record the patch in
-`heybuddy_vendor/VENDOR.md` and push it to the fork, per the vendor policy there.
-Do NOT "just let it use Piper for a first run": that first run's model would carry
-the NJ-59 lineage and someone WILL ship it.
+The `--*-audio-dir` flags are the **vendored patch** (recorded in
+`heybuddy_vendor/VENDOR.md` § Local modifications, mirrored on the fork): the
+trainer had no seam for pregenerated samples — positives came only from its
+internal Piper generator, whose default voice is the NJ-59 lineage. The patch
+adds `WavDirectorySpeechGenerator` (disjoint 80/10/10 train/test/validation
+partitions by filename hash), makes the Piper import lazy so `piper-phonemize`
+(GPL espeak-ng chain) need never be installed, and enforces both-dirs-or-neither
+at the CLI. The impulse-dataset flags substitute **OpenSLR-26 simulated RIRs
+(Apache-2.0)** for the licence-blocked MIT IR set (NJ-60).
+
+**The full pod recipe — sizing, costs, exact commands, acceptance run — is
+`RUNPOD.md` in this directory.**
 
 ### Step 4 — deploy (zero code change)
 

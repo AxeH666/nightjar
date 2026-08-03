@@ -16,16 +16,43 @@ from concurrent.futures import ProcessPoolExecutor
 from heybuddy.util import safe_name, logger
 from heybuddy.constants import *
 from heybuddy.embeddings import SpeechEmbeddings, get_speech_embeddings
-from heybuddy.dataset.piper import PiperSpeechGenerator
+# NIGHTJAR PATCH: the Piper import is LAZY (see get_tts_generator). At module level
+# it pulls heybuddy.piper.pretrained, which hard-raises without piper-phonemize —
+# a Linux-only wheel wrapping GPL espeak-ng, and the head of the lessac/Blizzard
+# licence chain (NJ-59). With pregenerated audio (tts_audio_dir) the Piper path is
+# never imported, so a training box need not install it at all.
 from heybuddy.dataset.augmented import AugmentedAudioGenerator
 from heybuddy.dataset.precalculated import PrecalculatedDatasetIterator
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
 SupplementalDatasetType = Optional[Union[str, List[str], Tuple[str, ...]]]
 
+
+def _audio_dir_fingerprint(audio_dir: str) -> str:
+    """NIGHTJAR PATCH: 8-hex content fingerprint of a sample directory (sorted
+    filename:size pairs). Appended to precalculated-cache names so a cache built
+    from one corpus can never satisfy `use_cache` for another — without this,
+    caches were keyed by wake phrase alone, and a prior Piper or stale-corpus run
+    would be silently reused for a Kokoro run (Bugbot, PR #155). Name+size rather
+    than content hashes: it must stay cheap over 100k files, and regenerating a
+    corpus changes sizes in practice (different voices/speeds/phrases)."""
+    import hashlib
+    h = hashlib.sha1()
+    try:
+        entries = sorted(
+            (e.name, e.stat().st_size)
+            for e in os.scandir(audio_dir) if e.is_file()
+        )
+    except OSError:
+        entries = []
+    for name, size in entries:
+        h.update(f"{name}:{size}\n".encode("utf-8"))
+    return h.hexdigest()[:8]
+
 if TYPE_CHECKING:
     import torch
     from datasets import Dataset # type: ignore[import-untyped]
+    from heybuddy.dataset.generator import AudioDatasetGenerator  # NIGHTJAR PATCH
 
 class TrainingFeaturesGenerator:
     """
@@ -48,6 +75,10 @@ class TrainingFeaturesGenerator:
         tts_batch_size: int=DEFAULT_TTS_BATCH_SIZE,
         tts_phrase_augment_prob: float=DEFAULT_AUGMENT_PHRASE_PROB,
         tts_phrase_augment_words: List[str]=DEFAULT_AUGMENT_PHRASE_WORDS,
+        # NIGHTJAR PATCH: pregenerated-audio source. When set, samples come from
+        # this directory (WavDirectorySpeechGenerator) and the Piper TTS path is
+        # never imported (NJ-59).
+        tts_audio_dir: Optional[str]=None,
         # Augmentation parameters
         augment_target_length: float=1.44,
         augment_batch_size: int=DEFAULT_AUGMENT_BATCH_SIZE,
@@ -131,6 +162,7 @@ class TrainingFeaturesGenerator:
         self.tts_batch_size = tts_batch_size
         self.tts_phrase_augment_prob = tts_phrase_augment_prob
         self.tts_phrase_augment_words = tts_phrase_augment_words
+        self.tts_audio_dir = tts_audio_dir  # NIGHTJAR PATCH
         self.augment_target_length = augment_target_length
         self.augment_sample_ratio = augment_sample_ratio
         self.augment_batch_size = augment_batch_size
@@ -223,10 +255,22 @@ class TrainingFeaturesGenerator:
         """
         return get_speech_embeddings(device_id=self.device_id)
 
-    def get_tts_generator(self) -> PiperSpeechGenerator:
+    def get_tts_generator(self) -> "AudioDatasetGenerator":
         """
         Returns a generator for TTS.
+
+        NIGHTJAR PATCH: with tts_audio_dir set, samples come from pregenerated WAVs
+        and the Piper module is never imported (its import chain hard-requires
+        piper-phonemize, and its default voice is licence-encumbered — NJ-59).
         """
+        if self.tts_audio_dir is not None:
+            from heybuddy.dataset.wav_directory import WavDirectorySpeechGenerator
+            return WavDirectorySpeechGenerator(
+                audio_dir=self.tts_audio_dir,
+                target_sample_rate=self.sample_rate,
+                device_id=self.device_id,
+            )
+        from heybuddy.dataset.piper import PiperSpeechGenerator
         return PiperSpeechGenerator(
             phrase=self.tts_text,
             adversarial=self.tts_adversarial,
@@ -382,7 +426,11 @@ class TrainingFeaturesGenerator:
                 tts_num_samples = max(1, min(num_samples, tts_num_samples))
 
             type_label = f"{'adversarial ' if self.tts_adversarial else ''}{'validation ' if validation else 'testing ' if testing else ''}"
-            tts_generator = self.get_tts_generator()(tts_num_samples)
+            # NIGHTJAR PATCH: pass the role so a finite WAV directory can serve
+            # DISJOINT train/testing/validation partitions (Piper synthesizes fresh
+            # samples per call and simply ignores the kwarg via **kwargs).
+            tts_role = "validation" if validation else "testing" if testing else "training"
+            tts_generator = self.get_tts_generator()(tts_num_samples, role=tts_role)
 
             if self.use_tqdm:
                 tts_iterator = tqdm.tqdm(
@@ -544,6 +592,7 @@ class TrainingFeaturesGenerator:
         custom_adversarial_phrases: List[str]=[],
         dataset_streaming: bool=False,
         tts_batch_size: int=DEFAULT_TTS_BATCH_SIZE,
+        tts_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         phrase_augment_prob: float=DEFAULT_AUGMENT_PHRASE_PROB,
         phrase_augment_words: List[str]=DEFAULT_AUGMENT_PHRASE_WORDS,
         # Augmentation parameters
@@ -582,6 +631,7 @@ class TrainingFeaturesGenerator:
             use_autoconfigure=True,
             tts_text=wake_phrase,
             tts_adversarial=adversarial,
+            tts_audio_dir=tts_audio_dir,  # NIGHTJAR PATCH
             tts_batch_size=tts_batch_size,
             tts_adversarial_num_phrases=num_adversarial_phrases,
             tts_adversarial_custom_phrases=custom_adversarial_phrases,
@@ -639,6 +689,8 @@ class TrainingFeaturesGenerator:
         keep_in_memory: bool=False,
         dataset_streaming: bool=False,
         tts_batch_size: int=DEFAULT_TTS_BATCH_SIZE,
+        positive_audio_dir: Optional[str]=None,     # NIGHTJAR PATCH
+        adversarial_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         phrase_augment_prob: float=DEFAULT_AUGMENT_PHRASE_PROB,
         phrase_augment_words: List[str]=DEFAULT_AUGMENT_PHRASE_WORDS,
         # Augmentation parameters
@@ -679,6 +731,12 @@ class TrainingFeaturesGenerator:
         """
         name = cls.get_wake_phrase_file_name(wake_phrase, testing=testing)
         adversarial_name = f"{name}_adv"
+        # NIGHTJAR PATCH: key caches by sample SOURCE, not phrase alone — a cache
+        # from a prior Piper/stale-corpus run must never satisfy a WAV-corpus run.
+        if positive_audio_dir:
+            name = f"{name}_wav{_audio_dir_fingerprint(positive_audio_dir)}"
+        if adversarial_audio_dir:
+            adversarial_name = f"{adversarial_name}_wav{_audio_dir_fingerprint(adversarial_audio_dir)}"
 
         existing_embeddings = 0
         existing_adversarial_embeddings = 0
@@ -709,6 +767,7 @@ class TrainingFeaturesGenerator:
                 dataset_streaming=dataset_streaming,
                 phrase_augment_prob=phrase_augment_prob,
                 phrase_augment_words=phrase_augment_words,
+                tts_audio_dir=positive_audio_dir,  # NIGHTJAR PATCH
                 tts_batch_size=tts_batch_size,
                 augment_background_dataset=augment_background_dataset,
                 augment_impulse_dataset=augment_impulse_dataset,
@@ -778,6 +837,7 @@ class TrainingFeaturesGenerator:
                 dataset_streaming=dataset_streaming,
                 phrase_augment_prob=phrase_augment_prob,
                 phrase_augment_words=phrase_augment_words,
+                tts_audio_dir=adversarial_audio_dir,  # NIGHTJAR PATCH
                 tts_batch_size=tts_batch_size,
                 augment_background_dataset=augment_background_dataset,
                 augment_impulse_dataset=augment_impulse_dataset,
@@ -842,6 +902,7 @@ class TrainingFeaturesGenerator:
         wake_phrase: str,
         num_positive_samples: int,
         tts_batch_size: int=DEFAULT_TTS_BATCH_SIZE,
+        positive_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         phrase_augment_prob: float=DEFAULT_AUGMENT_PHRASE_PROB,
         phrase_augment_words: List[str]=DEFAULT_AUGMENT_PHRASE_WORDS,
         use_cache: bool=True,
@@ -854,6 +915,9 @@ class TrainingFeaturesGenerator:
         """
         name = cls.get_wake_phrase_file_name(wake_phrase, testing=False)
         name = f"{name}_val"
+        # NIGHTJAR PATCH: same source-keyed caching as get_training_features.
+        if positive_audio_dir:
+            name = f"{name}_wav{_audio_dir_fingerprint(positive_audio_dir)}"
 
         existing_embeddings = 0
 
@@ -874,6 +938,7 @@ class TrainingFeaturesGenerator:
                 wake_phrase,
                 phrase_augment_prob=phrase_augment_prob,
                 phrase_augment_words=phrase_augment_words,
+                tts_audio_dir=positive_audio_dir,  # NIGHTJAR PATCH
                 tts_batch_size=tts_batch_size,
                 augment_target_length=augment_target_length,
             )

@@ -65,6 +65,12 @@ SOURCES: List[Dict[str, str]] = [
     {"repo": "benjamin-paine/hey-buddy", "type": "model",
      "license_entry": "speech-embedding.onnx",
      "role": "pretrained backbone + upstream wake models"},
+    # Direct-URL source (not a HF repo): the NJ-60 reverb substitute. The MIT IR
+    # set above stays licence-blocked; this is what training actually uses.
+    {"repo": "openslr-26-simulated-rirs", "type": "url",
+     "url": "https://www.openslr.org/resources/26/sim_rir_16k.zip",
+     "license_entry": "openslr-26-simulated-rirs",
+     "role": "augmentation: simulated room impulse responses (Apache-2.0)"},
 ]
 
 TIMEOUT = 60
@@ -81,7 +87,14 @@ def _license_ok(entry_id: str) -> tuple[bool, str]:
     return False, f"{entry_id} has NO entry in model_licenses.json — add one first"
 
 
-def _repo_files(repo: str, rtype: str) -> List[Dict[str, Any]]:
+def _repo_files(repo: str, rtype: str, url: str = "") -> List[Dict[str, Any]]:
+    if rtype == "url":
+        # A single direct file (e.g. OpenSLR): HEAD for the size; no per-shard sha
+        # available server-side, so the size is the integrity check at fetch time.
+        r = requests.head(url, allow_redirects=True, timeout=TIMEOUT)
+        r.raise_for_status()
+        size = int(r.headers.get("Content-Length", 0)) or None
+        return [{"path": url.rsplit("/", 1)[-1], "size": size, "sha": None, "url": url}]
     api = f"https://huggingface.co/api/{'datasets' if rtype == 'dataset' else 'models'}/{repo}"
     r = requests.get(api, params={"blobs": "true"}, timeout=TIMEOUT)
     r.raise_for_status()
@@ -110,7 +123,7 @@ def plan() -> int:
             blocked.append(src["repo"])
             manifest["sources"].append(entry)
             continue
-        files = _repo_files(src["repo"], src["type"])
+        files = _repo_files(src["repo"], src["type"], src.get("url", ""))
         total = sum(f["size"] or 0 for f in files)
         entry.update(files=files, total_bytes=total)
         manifest["sources"].append(entry)

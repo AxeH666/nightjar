@@ -285,6 +285,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
         num_adversarial_phrases: int=DEFAULT_ADVERSARIAL_PHRASES,
         custom_adversarial_phrases: List[str]=[],
         num_adversarial_samples: int=DEFAULT_ADVERSARIAL_SAMPLES,
+        positive_audio_dir: Optional[str]=None,     # NIGHTJAR PATCH
+        adversarial_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         positive_per_batch: int=DEFAULT_POSITIVE_BATCH_SIZE,
         negative_per_batch: int=DEFAULT_NEGATIVE_BATCH_SIZE,
         adversarial_per_batch: int=DEFAULT_ADVERSARIAL_BATCH_SIZE,
@@ -368,6 +370,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
             num_adversarial_samples=num_adversarial_samples,
             num_adversarial_phrases=num_adversarial_phrases,
             custom_adversarial_phrases=custom_adversarial_phrases,
+            positive_audio_dir=positive_audio_dir,        # NIGHTJAR PATCH
+            adversarial_audio_dir=adversarial_audio_dir,  # NIGHTJAR PATCH
             use_cache=use_cache,
             dataset_streaming=dataset_streaming,
             phrase_augment_prob=phrase_augment_prob,
@@ -477,6 +481,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
         num_adversarial_samples: int=1000,
         num_adversarial_phrases: int=10,
         custom_adversarial_phrases: List[str]=[],
+        positive_audio_dir: Optional[str]=None,     # NIGHTJAR PATCH
+        adversarial_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         positive_per_batch: int=50,
         adversarial_per_batch: int=50,
         use_cache: bool=True,
@@ -551,6 +557,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
             num_adversarial_samples=num_adversarial_samples,
             num_adversarial_phrases=num_adversarial_phrases,
             custom_adversarial_phrases=custom_adversarial_phrases,
+            positive_audio_dir=positive_audio_dir,        # NIGHTJAR PATCH
+            adversarial_audio_dir=adversarial_audio_dir,  # NIGHTJAR PATCH
             use_cache=use_cache,
             dataset_streaming=dataset_streaming,
             testing=True,
@@ -641,6 +649,7 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
         start: bool=True,
         precalculated_validation: bool=True,
         custom_validation: Optional[str]=None,
+        positive_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         phrase_augment_prob: float=DEFAULT_AUGMENT_PHRASE_PROB,
         phrase_augment_words: List[str]=DEFAULT_AUGMENT_PHRASE_WORDS,
     ) -> TrainingDatasetIterator:
@@ -677,6 +686,7 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
         validation_positive_features = TrainingFeaturesGenerator.get_validation_features(
             wake_phrase=wake_phrase,
             num_positive_samples=num_samples,
+            positive_audio_dir=positive_audio_dir,  # NIGHTJAR PATCH
         )
         positive_list = [(validation_positive_features, positive_batch_size)]
 
@@ -710,6 +720,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
         num_adversarial_samples: int=50000,
         num_adversarial_phrases: int=10,
         custom_adversarial_phrases: List[str]=[],
+        positive_audio_dir: Optional[str]=None,     # NIGHTJAR PATCH
+        adversarial_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
         positive_per_batch: int=50,
         negative_per_batch: int=1000,
         adversarial_per_batch: int=50,
@@ -818,6 +830,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
             num_adversarial_samples=num_adversarial_samples,
             num_adversarial_phrases=num_adversarial_phrases,
             custom_adversarial_phrases=custom_adversarial_phrases,
+            positive_audio_dir=positive_audio_dir,        # NIGHTJAR PATCH
+            adversarial_audio_dir=adversarial_audio_dir,  # NIGHTJAR PATCH
             positive_per_batch=positive_per_batch,
             negative_per_batch=negative_per_batch,
             adversarial_per_batch=adversarial_per_batch,
@@ -858,6 +872,8 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
             num_adversarial_samples=testing_num_adversarial_samples,
             num_adversarial_phrases=testing_num_adversarial_phrases,
             custom_adversarial_phrases=testing_custom_adversarial_phrases,
+            positive_audio_dir=positive_audio_dir,        # NIGHTJAR PATCH
+            adversarial_audio_dir=adversarial_audio_dir,  # NIGHTJAR PATCH
             positive_per_batch=testing_positive_per_batch or positive_per_batch,
             adversarial_per_batch=testing_adversarial_per_batch or adversarial_per_batch,
             dataset_streaming=dataset_streaming,
@@ -890,6 +906,7 @@ class WakeWordTrainingDatasetIterator(TrainingDatasetIterator):
         validation = cls.validation(
             wake_phrase=wake_phrase,
             additional_wake_phrases=additional_wake_phrases,
+            positive_audio_dir=positive_audio_dir,  # NIGHTJAR PATCH
             positive_batch_size=validation_positive_batch_size,
             negative_batch_size=validation_negative_batch_size,
             num_batch_threads=validation_num_batch_threads,

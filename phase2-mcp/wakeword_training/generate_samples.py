@@ -53,8 +53,15 @@ Together that is ~4,500 distinct (timbre, rate) combinations before phrase
 variants, which is the same order as the Piper pipeline it replaces.
 
 Usage:
-  python generate_samples.py positives  <out_dir> [count]
-  python generate_samples.py adversarial <out_dir> [count]
+  python generate_samples.py positives   <out_dir> [count] [--shard i/N] [--accents]
+  python generate_samples.py adversarial <out_dir> [count] [--shard i/N] [--accents]
+  python generate_samples.py holdout     <out_dir> [count]
+
+`--shard i/N` lets N parallel processes split one corpus deterministically (same
+seed/count; each writes the global indices ≡ i mod N — filenames carry the global
+index, so the union is exactly the unsharded corpus). `holdout` generates the
+evaluation set from the four HELD-OUT voices, which are code-banned from the
+training kinds — see HOLDOUT_VOICES below.
 """
 from __future__ import annotations
 
@@ -102,7 +109,7 @@ ADVERSARIAL_SUFFIXES: Tuple[str, ...] = ("", " please", " now", " again", " toda
 # Kokoro's English voices: af_/am_ are American, bf_/bm_ are British; f/m is the
 # voice's gender. The old generator used five af_* voices — all American, all
 # female — which is exactly the single-demographic overfit this module exists to
-# prevent. All 28 are used, and the mix is asserted by the tests.
+# prevent. All 28 are listed; 24 train, 4 are held out (below).
 ENGLISH_VOICES: Tuple[str, ...] = (
     "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore",
     "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
@@ -111,6 +118,17 @@ ENGLISH_VOICES: Tuple[str, ...] = (
     "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
     "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
 )
+
+# ── the holdout, enforced in CODE, not by flag discipline ────────────────────
+# These four voices (2 female + 2 male, 2 American + 2 British) may NEVER appear
+# in a training corpus — pure or inside a blend. They exist so the acceptance
+# bar's speaker-generalisation test (evaluate_hey_june.py test 1) measures voices
+# the model has genuinely never heard. If they leaked, the model would score
+# brilliantly on them and generalise badly, with no way to tell — so a leak is a
+# hard HoldoutLeakError here, and evaluate_hey_june.py independently re-checks
+# the training directories' filenames and fails loudly on overlap.
+HOLDOUT_VOICES: Tuple[str, ...] = ("af_sky", "am_puck", "bf_lily", "bm_lewis")
+TRAINING_VOICES: Tuple[str, ...] = tuple(v for v in ENGLISH_VOICES if v not in HOLDOUT_VOICES)
 
 # Non-native English accents. Kokoro's other-language voices still render English
 # phonemes, with an accent — useful diversity for a general-purpose model, but
@@ -131,6 +149,36 @@ TARGET_SR = 16000   # the wake pipeline's rate; Kokoro synthesizes at 24 kHz
 
 class SingleSpeakerError(RuntimeError):
     """Raised when a run would produce a corpus too narrow to generalise."""
+
+
+class HoldoutLeakError(RuntimeError):
+    """Raised when a held-out voice would enter a TRAINING corpus."""
+
+
+# ── canonical filename format + parser ───────────────────────────────────────
+# {kind}_{global_index:06d}_{voicetag}_{speed}.wav, voicetag = "af_heart" or
+# "af_heart+bm_george@0.5". evaluate_hey_june.py parses this to prove the
+# training dirs contain no holdout voice — keep format and parser in lockstep.
+
+def voice_tag(va: str, vb: str, weight: float) -> str:
+    return va if weight == 0.0 else f"{va}+{vb}@{weight}"
+
+
+def voices_in_filename(filename: str) -> Tuple[str, ...]:
+    """Every voice identity baked into a generated clip, parsed from its name.
+    Returns () for filenames not in the canonical format (caller decides how to
+    treat foreign files)."""
+    stem = filename.rsplit(".", 1)[0]
+    parts = stem.split("_")
+    if len(parts) < 5:
+        return ()
+    # voicetag spans parts[2:-1] (voice names themselves contain one underscore)
+    tag = "_".join(parts[2:-1])
+    if "+" in tag:
+        va, rest = tag.split("+", 1)
+        vb = rest.split("@", 1)[0]
+        return (va, vb)
+    return (tag,)
 
 
 def check_speaker_diversity(voices: Sequence[str]) -> None:
@@ -212,28 +260,74 @@ def speaker_plan(voices: Sequence[str], rng: random.Random) -> Iterator[Tuple[st
 
 
 def generate(kind: str, out_dir: Path, count: int, voices: Sequence[str],
-             seed: int = 0) -> int:
-    """Write `count` clips of `kind` ('positives'|'adversarial') into out_dir."""
-    if kind not in ("positives", "adversarial"):
-        raise ValueError(f"kind must be 'positives' or 'adversarial', got {kind!r}")
-    check_speaker_diversity(voices)
+             seed: int = 0, shard: Tuple[int, int] = (0, 1)) -> int:
+    """Write clips of `kind` ('positives'|'adversarial'|'holdout') into out_dir.
+
+    `count` is the GLOBAL corpus size; `shard=(i, N)` makes this process write only
+    the clips whose global index ≡ i (mod N), so N parallel invocations with the
+    same seed/count produce exactly the unsharded corpus, collision-free (the
+    global index is baked into each filename).
+
+    Holdout enforcement (in code, not by flag discipline):
+      * training kinds ('positives'/'adversarial') raise HoldoutLeakError if any
+        held-out voice appears in `voices` — pure or available for blending;
+      * kind 'holdout' generates the evaluation set: HOLDOUT_VOICES only, pure
+        voices only (no blends — a blend would dilute the never-heard property).
+    """
+    if kind not in ("positives", "adversarial", "holdout"):
+        raise ValueError(f"kind must be 'positives', 'adversarial' or 'holdout', got {kind!r}")
+    shard_i, shard_n = shard
+    if not (0 <= shard_i < shard_n):
+        raise ValueError(f"shard index {shard_i} out of range for {shard_n} shards")
+
+    if kind == "holdout":
+        bad = sorted(set(voices) - set(HOLDOUT_VOICES))
+        if bad:
+            raise HoldoutLeakError(
+                f"the holdout evaluation set may use ONLY {HOLDOUT_VOICES}; got {bad} — "
+                f"a training voice here would make the generalisation test meaningless")
+        # No diversity guard: 4 voices is the point. No blends either.
+    else:
+        leaked = sorted(set(voices) & set(HOLDOUT_VOICES))
+        if leaked:
+            raise HoldoutLeakError(
+                f"held-out voice(s) {leaked} may not enter a TRAINING corpus (kind={kind!r}). "
+                f"They exist so evaluate_hey_june.py can measure voices the model has never "
+                f"heard; use TRAINING_VOICES (or fix your voice list).")
+        check_speaker_diversity(voices)
 
     rng = random.Random(seed)
     session = voice._get_kokoro()          # noqa: SLF001 — style blending needs the session
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if kind == "positives":
-        texts = [p + f for p in POSITIVE_PHRASES for f in FOLLOW_UPS]
-    else:
+    if kind == "adversarial":
         texts = [p + s for p in ADVERSARIAL_PHRASES for s in ADVERSARIAL_SUFFIXES]
+    else:
+        texts = [p + f for p in POSITIVE_PHRASES for f in FOLLOW_UPS]
 
-    plan = speaker_plan(voices, rng)
+    if kind == "holdout":
+        idents: List[Tuple[str, str, float]] = [(v, v, 0.0) for v in voices]
+
+        def ident_at(g: int) -> Tuple[str, str, float]:
+            return idents[g % len(idents)]
+    else:
+        plan = speaker_plan(voices, rng)
+        cache: List[Tuple[str, str, float]] = []
+
+        def ident_at(g: int) -> Tuple[str, str, float]:
+            while len(cache) <= g:
+                cache.append(next(plan))
+            return cache[g]
+
     written = 0
-    while written < count:
-        va, vb, weight = next(plan)
+    for g in range(count):
+        if g % shard_n != shard_i:
+            ident_at(g)  # keep the plan advancing identically across shards
+            continue
+        va, vb, weight = ident_at(g)
         style = session.voices[va] if weight == 0.0 else blend_style(session, va, vb, weight)
-        text = texts[written % len(texts)]
-        speed = SPEEDS[written % len(SPEEDS)]
+        text = texts[g % len(texts)]
+        speed = SPEEDS[g % len(SPEEDS)]
 
         phonemes, _ = session.g2p(text)
         parts = [session._create_audio(p, style, speed)      # noqa: SLF001
@@ -243,31 +337,41 @@ def generate(kind: str, out_dir: Path, count: int, voices: Sequence[str],
             raise RuntimeError(f"Kokoro produced no audio for {text!r} — G2P returned nothing")
         pcm16 = _resample_to_16k(np.concatenate(parts), 24000)
 
-        tag = va if weight == 0.0 else f"{va}+{vb}@{weight}"
-        _write_wav(out_dir / f"{kind}_{written:06d}_{tag}_{speed}.wav", pcm16)
+        _write_wav(out_dir / f"{kind}_{g:06d}_{voice_tag(va, vb, weight)}_{speed}.wav", pcm16)
         written += 1
         if written % 500 == 0:
-            print(f"  {written}/{count}", flush=True)
+            print(f"  [shard {shard_i}/{shard_n}] {written} written (global {g}/{count})", flush=True)
 
     print(f"generated {written} {kind} clips in {out_dir} "
-          f"({len(set(voices))} base voices, blends enabled)")
+          f"(shard {shard_i}/{shard_n} of {count}; {len(set(voices))} base voices)")
     return written
 
 
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     use_accents = "--accents" in sys.argv
+    shard = (0, 1)
+    for a in sys.argv[1:]:
+        if a.startswith("--shard"):
+            spec = a.split("=", 1)[1] if "=" in a else sys.argv[sys.argv.index(a) + 1]
+            i, n = spec.split("/")
+            shard = (int(i), int(n))
     if not args:
         print(__doc__)
         return 2
     kind = args[0]
     out = Path(args[1]) if len(args) > 1 else Path("./wakeword_samples") / kind
-    count = int(args[2]) if len(args) > 2 else 24
+    # drop a positional that was actually --shard's value
+    pos = [a for a in args[2:] if "/" not in a]
+    count = int(pos[0]) if pos else 24
 
-    voices = list(ENGLISH_VOICES) + (list(ACCENT_VOICES) if use_accents else [])
+    if kind == "holdout":
+        voices: List[str] = list(HOLDOUT_VOICES)
+    else:
+        voices = list(TRAINING_VOICES) + (list(ACCENT_VOICES) if use_accents else [])
     try:
-        generate(kind, out, count, voices)
-    except SingleSpeakerError as e:
+        generate(kind, out, count, voices, shard=shard)
+    except (SingleSpeakerError, HoldoutLeakError) as e:
         print(f"REFUSED: {e}", file=sys.stderr)
         return 1
     return 0
