@@ -54,11 +54,14 @@ adding networked access.
 | Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
 | marked | markdown→HTML in the live-preview panel | MIT | `phase3-ui/node_modules/marked/LICENSE` (npm dep) |
 | gemma-chat (© 2026 ammaar) | live-preview "Canvas" **pattern reference only** — reimplemented, **no code copied** (`phase3-ui/src/main/preview-server.ts` + `components/ArtifactPanel.tsx` are original AGPL) | MIT | pattern documented in `research/AUDIT_REPORT.md` §5; no gemma-chat files vendored |
-| Kokoro-82M (© 2024 hexgrad) | TTS model weights (downloaded to the user's model cache, not vendored) | Apache-2.0 | `phase2-mcp/NOTICE` |
+| Kokoro-82M (© 2024 hexgrad) | TTS model weights (downloaded to the user's model cache, not vendored); since voice-phase PR 5 also the wake-word **training-positive generator** (the Apache-2.0 replacement for the NJ-59-tainted Piper voice) | Apache-2.0 | `phase2-mcp/NOTICE` |
 | misaki (© 2025 hexgrad) | TTS grapheme-to-phoneme — the reference G2P Kokoro was trained with | Apache-2.0 | `phase2-mcp/NOTICE` (pip dep) |
 | kokoro-onnx (© 2024 thewh1teagle) | **data only** — the 114-entry phoneme→id table, vendored to `phase2-mcp/nightjar_capabilities/kokoro_vocab.json`; the package itself is **no longer a dependency** | MIT | `phase2-mcp/NOTICE` |
 | en_core_web_sm (© 2016 ExplosionAI GmbH) | spaCy English pipeline misaki uses for POS tagging | MIT | `phase2-mcp/NOTICE` (pip dep, install-time) |
-| openWakeWord (© dscripka) | wake-word detection engine | ⚠ **split**: code Apache-2.0; bundled pretrained **models CC-BY-NC-SA 4.0 (non-commercial)** — incl. the `hey_jarvis` stand-in currently used as fallback. See **NJ-58**; the PR-5 custom `hey_june.onnx` is the commercial path | package LICENSE + README license section (read from the installed wheel, rule 5) |
+| openWakeWord (© dscripka) | **REMOVED (voice-phase PR 5)** — was the wake-word engine; replaced by hey-buddy because its bundled pretrained models are CC-BY-NC-SA (non-commercial, NJ-58 — resolved by the removal). Purged from requirements + venv + both setup scripts; `tests/test_model_licenses.py` fails if it returns | split: code Apache-2.0; models CC-BY-NC-SA 4.0 (historical) | package LICENSE + README license section (was read from the installed wheel, rule 5) |
+| hey-buddy (© benjamin-paine) | wake-word engine: training pipeline + JS reference implementation (vendored at `phase2-mcp/wakeword_training/heybuddy_vendor/`, pinned `6e78d26`, fork `AxeH666/hey-buddy`); runtime is a Nightjar-authored onnxruntime port of its JS path | Apache-2.0 (LICENSE read, full text, rule 5). ⚠ its GitHub README says the **pretrained models** are Apache-2.0 while its HF repo card says CC-BY-4.0 — conflict recorded as **NJ-60**; we comply with the stricter. Its shipped models also carry the NJ-59 Piper lineage — see the `hey-buddy.onnx` manifest entry | `heybuddy_vendor/LICENSE` + `heybuddy_vendor/VENDOR.md`; `phase2-mcp/NOTICE` |
+| speech_embedding (© Google LLC) | the frozen wake-word backbone: `speech-embedding.onnx` (96-d embeddings), vendored + sha256-pinned at `phase2-mcp/nightjar_capabilities/models/wakeword/` | Apache-2.0 — **primary-source verified 2026-08-03** at https://www.kaggle.com/models/google/speech-embedding (model card: LICENSE Apache 2.0), and weight-identity-proven against openWakeWord's copy by running both (NJ-58 resolution) | `phase2-mcp/model_licenses.json` (checksummed entry) |
+| mel-spectrogram.onnx (torchlibrosa lineage, © Qiuqiang Kong; ONNX export by benjamin-paine) | wake-word mel front end, vendored + sha256-pinned; **byte-identical** to the copy openWakeWord shipped | Apache-2.0 per hey-buddy's licence statement | `phase2-mcp/model_licenses.json` |
 | sounddevice (© 2015-2025 Matthias Geier) | cross-platform mic capture for the wake daemon (voice-phase PR 3) | MIT | `venv/.../sounddevice-*.dist-info/licenses/LICENSE` (pip dep) |
 | PortAudio (© Ross Bencina, Phil Burk) | audio I/O library the sounddevice wheel bundles as DLLs | MIT (per the wheel's `portaudio-binaries` README). ASIO-enabled variant embeds the proprietary Steinberg ASIO SDK — **never loaded** (`SD_ENABLE_ASIO` unset); wheel fetched by the user's pip at setup, not vendored | `venv/.../_sounddevice_data/portaudio-binaries/README.md` |
 
@@ -128,17 +131,24 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
   by the rename. (Runtime verification of the redesign branches is pending a live-stack run.)
 - **Step 10 — Odysseus fork. RETIRED (PR E)** — the submodule was removed instead of
   re-hosted; there is no Odysseus code left to attribute.
-- **Step 12 — wake word ("Hey June").** Decision (voice-phase, 2026-08-03): **openWakeWord
-  ships**; local-wake is the recorded fallback, not built. ⚠ **Split licensing, verified from
-  the installed package per rule 5 (NJ-58):** openWakeWord **code** is Apache-2.0 (LICENSE
-  file read), but its **bundled pretrained models — including the `hey_jarvis_v0.1.onnx`
-  stand-in Nightjar currently falls back to — are CC-BY-NC-SA 4.0 (NON-commercial)** per the
-  package's own README/METADATA ("All of the included pre-trained models are licensed under
-  the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International license").
-  **No paid/commercial build may ship the stock fallback.** The custom synthetic
-  `hey_june.onnx` (PR 5) is the commercial path; before it ships, rule-5-verify the shared
-  embedding backbone (claimed Apache-2.0, re-implemented from Google's speech_embedding
-  TFHub module), the negative-feature datasets, and piper-sample-generator + its voices.
+- **Step 12 — wake word ("Hey June").** ✅ **Engine decided and licence-closed (voice-phase
+  PR 5, 2026-08-03): hey-buddy replaces openWakeWord.** History: openWakeWord shipped first,
+  then its bundled pretrained models — including the `hey_jarvis_v0.1.onnx` stand-in Nightjar
+  fell back to — turned out to be **CC-BY-NC-SA 4.0 (NON-commercial)** per its own
+  README/METADATA (NJ-58), and upstream never answered the backbone question (issues
+  #313/#338). PR 5 removed openWakeWord entirely (requirements + venv + setup-script purge,
+  guard-tested) and moved to **hey-buddy** (Apache-2.0; vendored fork, pinned). The
+  rule-5 verifications that entry demanded are now done and recorded in
+  `phase2-mcp/model_licenses.json`: the **embedding backbone is Google's speech_embedding,
+  Apache-2.0 at the primary source** (kaggle.com/models/google/speech-embedding,
+  maintainer-verified in a browser 2026-08-03, screenshot archived) **and**
+  weight-identity-proven by running both ONNX files side by side; the **negative datasets**
+  are CC-BY-4.0 over CC0/CC-BY/MIT/CDLA/Apache sources; and **piper-sample-generator's
+  voice is REJECTED** — its default checkpoint is lessac/Blizzard-2013-derived, whose
+  licence forbids commercial speech products (NJ-59), so training positives come from
+  **Kokoro-82M** instead. Interim runtime stand-in: hey-buddy's own `hey-buddy.onnx`
+  (phrase "hey buddy"), flagged non-shippable-in-paid-builds until the Kokoro-trained
+  `hey_june.onnx` lands. Open licence residuals live in **NJ-60**.
   **PR 3 additions (LICENSE files read from the installed wheels):** `sounddevice` 0.5.5 —
   MIT (© Matthias Geier); bundled **PortAudio** DLLs — MIT per the wheel's binaries README
   (© Ross Bencina / Phil Burk). The wheel also carries an ASIO-enabled DLL embedding the

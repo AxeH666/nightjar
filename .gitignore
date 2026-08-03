@@ -48,6 +48,16 @@ Modelfile.*
 # Ollama blobs (normally ~/.ollama — ignore defensively if ever copied in)
 .ollama/
 
+# EXCEPTION — the wake-word ONNX artifacts are vendored IN-TREE on purpose.
+# Everything else above lives in ~/.nightjar/models and is fetched at setup; these
+# three (3.6 MB total) do not, because the brief for the hey-buddy move was
+# explicitly "self-host the model artifacts in our own storage, do NOT hot-link
+# upstream" — insurance against a ~44-star single-maintainer project disappearing.
+# A fetch-at-setup path would still be a hot link, and we have no object storage
+# to mirror to yet, so the repo IS the storage. Checksums are pinned and enforced
+# by phase2-mcp/tests/test_model_licenses.py against phase2-mcp/model_licenses.json.
+!phase2-mcp/nightjar_capabilities/models/wakeword/*.onnx
+
 # ── Python ───────────────────────────────────────────────────────────────────
 venv/
 .venv/

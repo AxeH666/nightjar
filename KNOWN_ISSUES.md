@@ -61,7 +61,74 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
-## NJ-58 — openWakeWord's pretrained MODELS (incl. the shipped `hey_jarvis` fallback) are CC-BY-NC-SA — NON-commercial; the code's Apache-2.0 does NOT cover them — OPEN (blocks any paid build until PR 5's custom model ships) 2026-08-03
+## NJ-60 — hey-buddy's licence statements conflict, and one augmentation dataset is licence-untagged — OPEN (blocks nothing at runtime; blocks default-augmentation training) 2026-08-03
+
+- **Found during PR 5's rule-5 sweep of the hey-buddy move (rule 7 — filed, not folded in).**
+- **(a) Apache-2.0 vs CC-BY-4.0, unresolved upstream:** hey-buddy's GitHub README § License
+  says *"HeyBuddy source code and pretrained models are released under the Apache License
+  2.0"*; the HuggingFace repo that actually serves those artifacts
+  (`benjamin-paine/hey-buddy` — hard-coded as `pretrained_model_url` in the vendored
+  `embeddings.py`) declares `license: cc-by-4.0` in its card frontmatter. Both permit
+  commercial use, so nothing is blocked; Nightjar complies with the stricter reading
+  (attribution kept in `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md` + `phase2-mcp/NOTICE`). Only
+  the maintainer can reconcile it; recorded in `model_licenses.json` and
+  `heybuddy_vendor/VENDOR.md`.
+- **(b) `mit-impulse-response-survey-16khz` has NO licence tag on HF.** hey-buddy's README
+  claims CC-BY and the underlying data is the MIT Acoustical Reverberation Scene Statistics
+  Survey (Traer & McDermott, PNAS 2016), but neither a claim nor a citation is a licence
+  grant we have read. Its `model_licenses.json` entry is `UNVERIFIED`/`commercial_ok:false`,
+  which makes `mirror_datasets.py plan` **refuse to mirror it** (verified by running: it
+  blocks) and the training README instruct `--augmentation-no-default-impulse-dataset`.
+  **To close:** read the actual terms at the McDermott lab's distribution page (or an
+  equivalent primary source) and update the manifest entry — or substitute a
+  licence-verified IR set.
+- **(c) Residual, stated:** the 18 constituent corpora of the precalculated negatives are
+  permissive *per upstream's own licence table* (spot-checked against their HF cards); a
+  full primary-source read of all 18 licence files is outstanding and belongs with the
+  mirroring work in the training PR.
+
+## NJ-59 — the default Piper training voice (openWakeWord's recommended generator AND hey-buddy's built-in default) is lessac/Blizzard-2013-derived — its licence FORBIDS commercial speech products — RESOLVED for Nightjar (Kokoro-82M replaces Piper end-to-end; the interim stand-in still carries the taint, flagged) 2026-08-03
+
+- **The chain, each link read at its primary source (rule 5), voice-phase PR 5:**
+  - hey-buddy's `piper/pretrained.py` pins `piper-libritts-en-r-medium.safetensors`
+    (`num_speakers=904` — i.e. Piper's `en_US-libritts_r-medium`); piper-sample-generator's
+    default checkpoint is the same voice.
+  - `rhasspy/piper-voices` → `en/en_US/libritts_r/medium/MODEL_CARD`: *"Fine-tuned from
+    English lessac medium on train-clean-360."*
+  - → `en/en_US/lessac/medium/MODEL_CARD`: trained from scratch on Lessac Blizzard 2013.
+  - → the Blizzard 2013 licence (cstr.ed.ac.uk), verbatim: *"Research Purposes" … "excludes
+    … developing, adapting, amending or otherwise using the Materials for any commercial
+    purpose, including the development, marketing, commercialisation, sale or licencing of
+    voice synthesis or **speech recognition products or services**"* — Nightjar's exact use
+    case. Note LibriTTS-R itself is CC-BY-4.0: the encumbrance is the lessac **checkpoint**
+    the voice was fine-tuned *from*, which a dataset-only licence read would have missed.
+  - Consequence: hey-buddy's *"Verified for commercial use"* claim is true of its negatives
+    and augmentation data and **false of its positives** — and its own pretrained
+    `models/*.onnx` inherit the lineage regardless of their Apache-2.0/CC-BY-4.0 label.
+- **Resolution — move off Piper entirely, not work around it:**
+  - `wakeword_training/generate_samples.py` rewritten: positives AND adversarials come from
+    **Kokoro-82M (Apache-2.0, already Nightjar's TTS)**. All 28 English voices (the old
+    generator used 5, all same-gender — and still said "Hey Nightjar"), style-vector
+    blending (378 pairs × 3 weights, mirroring hey-buddy's Piper SLERP) + speed variation
+    ≈ 4,500 distinct timbre/rate identities. Verified by running: blended styles score the
+    same as pure voices through the wake pipeline (mean 0.69 vs 0.59) — blends are speech,
+    not noise.
+  - Single-speaker/single-demographic corpora are a **hard `SingleSpeakerError`**, the
+    generator has no audio-capture code path, and `tests/test_wakeword_samples.py` asserts
+    both (it specifically asserts the guard refuses the exact pre-PR-5 5-voice set).
+  - The rejections are machine-checked: `model_licenses.json` carries
+    `REJECTED-piper-libritts-en-r-medium` and `REJECTED-piper-sample-generator-default`,
+    and `tests/test_model_licenses.py` fails if they disappear.
+  - **Recorded fallback** if 28 voices prove insufficient for the shipped model: a
+    from-scratch LibriTTS voice (CC-BY-4.0, 2,456 speakers) — never anything lessac-derived.
+- **Residual (why this stays visible rather than fully closed):** the interim
+  `hey-buddy.onnx` stand-in the runtime ships **today** was trained by upstream with the
+  tainted positives. It is flagged `commercial_ok:false` in the manifest with this NJ as
+  the recorded reason, `is_custom=False` keeps the loud startup warning, and it must be
+  retired the moment our Kokoro-trained `hey_june.onnx` lands. Free/AGPL distribution
+  meanwhile is fine.
+
+## NJ-58 — openWakeWord's pretrained MODELS (incl. the shipped `hey_jarvis` fallback) are CC-BY-NC-SA — NON-commercial — RESOLVED (voice-phase PR 5: engine moved to hey-buddy; no NC artifact remains in the tree; backbone licence primary-source-verified AND weight-identity-proven) 2026-08-03
 
 - **Verified from the actual installed package (rule 5), voice-phase PR 3:**
   `openwakeword-0.4.0.dist-info/METADATA` (the package's own README) states: code is
@@ -107,6 +174,40 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
     different engine with permissive WEIGHTS (evaluation pending; the integration
     surface is small — `WakeWordDetector.process_frame(int16[1280]) -> score` plus a
     model path — so a swap is contained).
+- **RESOLUTION (voice-phase PR 5, 2026-08-03) — the predicted engine swap happened;
+  upstream clarification was never needed:**
+  - **The engine is now [hey-buddy](https://github.com/painebenjamin/hey-buddy)**
+    (Apache-2.0 code, permissive artifacts; fork `AxeH666/hey-buddy`, vendored at
+    `phase2-mcp/wakeword_training/heybuddy_vendor/` @ `6e78d26`, models sha256-pinned
+    in `phase2-mcp/model_licenses.json`). The `openwakeword` pin is out of
+    requirements.txt, the package is purged from the venv AND by both setup scripts
+    (the #146 lesson: pip never removes on requirement removal), and
+    `tests/test_model_licenses.py` fails the build if it, or any un-manifested model
+    binary, ever returns. **No CC-BY-NC-SA artifact remains in Nightjar's tree.**
+  - **The backbone question closed with BOTH a primary source and a run (rule 6):**
+    (a) the Kaggle model card for `google/speech-embedding` states **Apache-2.0**
+    (maintainer-verified in a browser, 2026-08-03, screenshot archived:
+    https://www.kaggle.com/models/google/speech-embedding); (b) loading hey-buddy's
+    `speech-embedding.onnx` beside openWakeWord's `embedding_model.onnx` shows **all 37
+    shared weight initializers numerically identical** — two tf2onnx conversions
+    (1.12.1 vs 1.9.3) of the same Google network, and the mel front-ends are
+    **byte-identical** (same sha256). openWakeWord's blanket NC sentence cannot reach
+    weights that are bit-for-bit Google's Apache-2.0 release. Caveat from the same
+    experiment: the two embedding **graphs** are NOT interchangeable (openWakeWord's
+    adds Pad + Relu + BatchNormalization; cosine ~0.977 on identical input), so
+    Nightjar ships hey-buddy's copy — an empirical constraint, not a preference.
+  - **Runtime proven by re-triggering the real path, not by config-reading (rule 6):**
+    the new onnxruntime-only `wakeword.py` (hey-buddy geometry: 1.08 s window / 120 ms
+    hop / 76×32 mel windows / 16×96 embedding sequence) scores a Kokoro-synthesized
+    "hey buddy" at **0.991** on the vendored stand-in model, "hey June" at 0.23, and
+    unrelated speech at 0.001; measured gain-invariant from 3e-5× to 100× input scale.
+    `FRAME` changed 1280→1920 (80→120 ms) — wake_daemon, mcp_server and
+    test_wake_capture updated and green.
+  - **What is deliberately NOT closed here:** the interim stand-in's own lineage
+    (→ **NJ-59**, flagged `commercial_ok:false`); hey-buddy's Apache-vs-CC-BY label
+    conflict and the untagged IR dataset (→ **NJ-60**); real-mic acoustic verification
+    on hardware (→ NJ-57's PR-6 item, rule 8). The two openWakeWord issues (#313/#338)
+    no longer gate anything.
 
 ## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — BOTH HALVES FIXED (voice-phase PRs 2 + 4); acoustic + OS-indicator confirmation pending on hardware (PR 6) 2026-08-03
 

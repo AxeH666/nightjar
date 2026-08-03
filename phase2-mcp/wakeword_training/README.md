@@ -1,85 +1,140 @@
-# Custom "Hey June" wake word — training recipe
+# Custom "Hey June" wake word — training recipe (hey-buddy + Kokoro)
 
-**Status: pipeline built + validated; the custom base model is NOT yet trained
-(see hazard below). Nightjar runs today with a stock stand-in model; drop in a
-trained `hey_june.onnx` and set `NIGHTJAR_WAKEWORD_MODEL` to activate the
-real phrase — no code changes.**
+**Status: pipeline built + runtime verified end-to-end against a real model
+(voice-phase PR 5); the custom `hey_june.onnx` is NOT yet trained — that is an
+offline GPU-box task. Nightjar runs today on the flagged `hey-buddy.onnx`
+stand-in (wake phrase: "hey buddy"); drop a trained `hey_june.onnx` into
+`nightjar_capabilities/models/wakeword/` (or point `NIGHTJAR_WAKEWORD_MODEL` at
+one) to activate the real phrase — no code changes.**
 
-## PRODUCT REQUIREMENTS (voice-phase PR 5 — read before training)
+## What changed in PR 5 (and why the old recipe is void)
 
-1. **The model must be trained SYNTHETICALLY, on thousands of generated voices**
-   (openWakeWord's recommended piper-sample-generator pipeline), **never on
-   recordings of one person**. A model trained on the maintainer's voice
-   recognises the maintainer and fails for customers — this is a product, not a
-   personal tool. The kokoro generator below (5 same-engine, all-female voices ×
-   3 speeds) is NOT sufficient diversity for the shipped model; treat it as a
-   smoke-test source only.
-2. **Licensing is why this model exists (NJ-58):** the stock openWakeWord models
-   (incl. the `hey_jarvis` stand-in Nightjar currently falls back to) are
-   **CC-BY-NC-SA 4.0 — non-commercial** per the package's own license statement.
-   No paid build may ship the stock fallback. Before shipping `hey_june.onnx`,
-   also verify (rule 5) the licenses of: the shared embedding backbone
-   (claimed Apache-2.0, re-implemented from Google's speech_embedding), the
-   negative-feature datasets (ACAV100M etc.), and piper-sample-generator + its
-   voices — the trained model's license follows its training inputs.
+The previous recipe here said: train with openWakeWord's GitHub pipeline and
+generate positives with piper-sample-generator. **Both halves are dead**:
 
-## Why this isn't trained in-repo (hazard)
+1. **openWakeWord is gone (NJ-58).** Its pretrained models — including the
+   `hey_jarvis` fallback Nightjar used to ship — are CC-BY-NC-SA 4.0
+   (non-commercial) per its own README, and upstream never answered the
+   backbone-licence question (issues #313/#338, 0 comments, 6+ months). Nightjar
+   now uses [hey-buddy](https://github.com/painebenjamin/hey-buddy) (Apache-2.0,
+   fork: [AxeH666/hey-buddy](https://github.com/AxeH666/hey-buddy), vendored at
+   `heybuddy_vendor/` at pinned commit `6e78d26`).
+2. **Piper positives are poison (NJ-59).** Both piper-sample-generator's and
+   hey-buddy's default TTS checkpoint is `en_US-libritts_r-medium`, fine-tuned
+   from the lessac voice, whose Blizzard-2013 licence forbids "the development…
+   commercialisation, sale or licencing of voice synthesis or speech recognition
+   products or services" — Nightjar's exact use case. Positives (and
+   adversarials) come from **Kokoro-82M (Apache-2.0)** instead, via
+   `generate_samples.py`.
 
-openWakeWord's pip package (`openwakeword==0.4.0`) ships **inference only** — no
-`train` module. Training a brand-new wake *phrase* (not refining an existing one)
-requires the openWakeWord **GitHub** training pipeline, which needs:
+The backbone is settled (it was NJ-58's last open question): Google's
+`speech_embedding` is **Apache-2.0 at the primary source**
+(kaggle.com/models/google/speech-embedding, maintainer-verified 2026-08-03), and
+PR 5 additionally proved by running both files that hey-buddy's
+`speech-embedding.onnx` and openWakeWord's `embedding_model.onnx` carry
+numerically identical weights — two tf2onnx conversions of the same Google
+network. Full licence ledger: `../model_licenses.json`.
 
-- **PyTorch + TensorFlow** (heavy; contradicts Nightjar's deliberately torch-free
-  runtime — inference here is onnxruntime/CTranslate2 only),
-- a **large negative speech corpus** (e.g. ACAV100M precomputed features, multi-GB),
-- room-impulse-response + noise augmentation data,
-- a GPU and ~1–several hours.
+## PRODUCT REQUIREMENTS (unchanged, now enforced by tests)
 
-That's an offline, build-farm task, not something to run inside the runtime
-environment. So this directory ships the **positive-sample generator** (done) and
-the exact **recipe** to finish on a training-capable machine.
+1. **Synthetic, multi-speaker, always.** Thousands of generated voices, never
+   recordings of one person — a model trained on the maintainer recognises the
+   maintainer and fails for customers. `generate_samples.py` refuses narrow voice
+   sets (`SingleSpeakerError`), has no audio-capture code path, and
+   `tests/test_wakeword_samples.py` asserts both.
+2. **Licensing is why this model exists.** Every training input must be an entry
+   in `../model_licenses.json` with a rule-5-verified licence.
+   `tests/test_model_licenses.py` enforces the manifest;
+   `mirror_datasets.py` refuses to even mirror an unverified dataset.
 
-(openWakeWord *does* offer a lightweight `custom_verifier_model` — scikit-learn,
-torch-free — but it only *refines* an existing base phrase for a specific speaker;
-it cannot create the new "Hey Nightjar" phrase. Hence full training is required.)
+## The pipeline
 
-## Steps
+```
+generate_samples.py (Kokoro, THIS repo, any OS)        heybuddy_vendor (Linux+GPU)
+┌──────────────────────────────────┐                  ┌──────────────────────────┐
+│ positives:  "Hey June" x 28 EN   │   16 kHz WAVs    │ augment (noise/music/IR) │
+│   voices x style blends x speeds │ ───────────────► │ extract embeddings       │
+│ adversarial: "Hey Jane/Dune/..." │                  │ 3-stage trainer          │
+└──────────────────────────────────┘                  │ convert -> hey_june.onnx │
+                                                      └──────────────────────────┘
+                 negatives: precalculated dataset (CC-BY-4.0, up to 72 GB)
+```
 
-1. **Generate positives (local, done here):**
-   ```
-   python wakeword_training/generate_samples.py /path/to/positives 2000
-   ```
-   These use the same kokoro-onnx TTS Nightjar ships — smoke-test positives only
-   (see PRODUCT REQUIREMENTS above): the shipped model's positives must come from
-   the piper-sample-generator pipeline (thousands of distinct synthetic voices).
-   Do NOT train on recordings of a single real person — that overfits the model
-   to that speaker.
+### Step 1 — positives + adversarials (local, any OS, done in-repo)
 
-2. **On a training machine (GPU, torch/TF ok):**
-   ```
-   git clone https://github.com/dscripka/openWakeWord
-   pip install -r openWakeWord/requirements.txt   # torch, tensorflow, etc.
-   # download the negative-feature datasets per their notebooks/README
-   ```
+```sh
+# from phase2-mcp/
+venv/Scripts/python wakeword_training/generate_samples.py positives  /data/hey_june/positives  100000
+venv/Scripts/python wakeword_training/generate_samples.py adversarial /data/hey_june/adversarial 100000
+```
 
-3. **Run the automatic training** using openWakeWord's
-   `notebooks/automatic_model_training.ipynb` (or `train.py`), pointing the
-   positive set at the clips from step 1. It computes melspectrogram+embedding
-   features (shared `embedding_model.onnx`) and trains the classifier, exporting
-   **`hey_nightjar.onnx`**.
+Kokoro has 28 English voices — far short of Piper's 904 speakers — so the
+generator multiplies identities by **style-vector blending** (378 voice pairs x 3
+weights, mirroring hey-buddy's Piper SLERP trick) and speed variation: ~4,500
+distinct (timbre, rate) combinations. PR 5 measured that blended styles score the
+same as pure voices through the wake pipeline (mean 0.69 vs 0.59 on the stand-in
+model), i.e. blends are real speech, not noise. `--accents` adds 9 non-native
+English voices if broader coverage is wanted.
 
-4. **Deploy into Nightjar (zero code change):**
-   ```
-   cp hey_nightjar.onnx ~/.nightjar/models/
-   export NIGHTJAR_WAKEWORD_MODEL=~/.nightjar/models/hey_nightjar.onnx
-   ```
-   `wakeword.resolve_model_path()` picks it up; `is_custom=True`; the stock-model
-   warning disappears; the exact same detection pipeline now triggers on
-   "Hey Nightjar" instead of the stand-in phrase.
+### Step 2 — datasets (self-hosted, licence-gated)
 
-## Validation already done (phase 2)
+```sh
+venv/Scripts/python wakeword_training/mirror_datasets.py plan    # writes mirror_manifest.json
+venv/Scripts/python wakeword_training/mirror_datasets.py fetch /data/mirror
+```
 
-- Detection pipeline exercised end-to-end (openWakeWord onnx inference on WAV
-  frames): fires at score 0.999 on its trained phrase, rejects a non-trained
-  phrase at 0.06 — so quality of the *model* is the only open variable; the
-  plumbing (wake → hand off to faster-whisper → command) is proven.
+`plan` enumerates every shard (repo, path, size, sha256) of the negatives
+(~72 GB) + augmentation sets and is the durable bill of materials;
+`fetch`/`verify` populate and check a staging directory. Copying to real object
+storage is a maintainer action once a target exists (deliberately not hardcoded).
+⚠ The MIT impulse-response set is currently **licence-blocked** in the manifest
+(no licence tag on HF; hey-buddy's CC-BY claim unverified — see the
+`mit-impulse-response-survey-16khz` entry in `../model_licenses.json`). Read its
+actual terms before training with default augmentation, or swap in a verified IR
+set via `--augmentation-impulse-dataset`.
+
+### Step 3 — train (Linux + GPU; torch/TF acceptable there)
+
+```sh
+conda env create -f heybuddy_vendor/environment.yml && conda activate heybuddy
+pip install -e heybuddy_vendor
+# then: patch the sample source (see below), and
+heybuddy train "hey june" --augmentation-no-default-impulse-dataset  # until the IR licence is resolved
+heybuddy convert checkpoints/hey_june_final.pt
+```
+
+⚠ **One small vendored patch is required at this step, by design.** Verified by
+reading the vendored code (`dataset/features.py`, `dataset/training.py`): the
+trainer's positives come ONLY from its internal `PiperSpeechGenerator` — there is
+no CLI flag to feed pregenerated WAVs. The training-PR task is to swap that class
+for a directory-reading generator pointed at Step 1's output (the class's
+interface is "yield 16 kHz sample batches", so the patch is small and contained in
+`TrainingFeaturesGenerator`). Everything downstream — augmentation, embedding
+extraction, the 3-stage trainer, ONNX export — is untouched. Record the patch in
+`heybuddy_vendor/VENDOR.md` and push it to the fork, per the vendor policy there.
+Do NOT "just let it use Piper for a first run": that first run's model would carry
+the NJ-59 lineage and someone WILL ship it.
+
+### Step 4 — deploy (zero code change)
+
+```sh
+cp hey_june.onnx <repo>/phase2-mcp/nightjar_capabilities/models/wakeword/
+# then record its sha256 in ../model_licenses.json (the guard requires it)
+```
+
+`wakeword.resolve_model_path()` picks it up; `is_custom=True`; the stand-in
+warning disappears; "Hey June" wakes the daemon.
+
+## Validation already done (PR 5) — and what is NOT
+
+Verified by running, on this machine:
+- The onnxruntime shim reproduces hey-buddy's scoring: Kokoro-synthesized
+  "hey buddy" scores **0.991** on the stand-in model, "hey June" 0.23,
+  unrelated speech 0.001. The plumbing (wake → transcribe → OpenCode turn → TTS)
+  is unchanged from PRs 2–4 and its tests pass at the new 120 ms hop.
+- The pipeline is gain-invariant (scores stable from 3e-5x to 100x input scale),
+  so mic level differences won't break detection.
+
+NOT yet verified (rule 8 — stated, not implied): real-mic acoustic detection on
+hardware, false-accept rate over hours of ambient audio, and everything about the
+actual `hey_june.onnx` — which does not exist until someone runs Step 3.

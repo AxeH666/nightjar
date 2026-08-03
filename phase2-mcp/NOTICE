@@ -57,3 +57,31 @@ Nightjar previously depended on phonemizer-fork (GPL-3.0-or-later) and
 espeakng-loader (a compiled espeak-ng binary shipped with its license notices
 stripped) via kokoro-onnx. Both have been removed; see
 `tests/test_tts_no_gpl.py` for the regression guard that keeps them out.
+
+------------------------------------------------------------------------
+Wake-word components (voice-phase PR 5)
+------------------------------------------------------------------------
+
+hey-buddy — wake-word training pipeline + JS reference implementation
+    Copyright benjamin-paine (https://github.com/painebenjamin/hey-buddy)
+    Apache License 2.0. Vendored at `wakeword_training/heybuddy_vendor/`
+    (pinned commit, unmodified; see VENDOR.md there). The runtime detector
+    (`nightjar_capabilities/wakeword.py`) is a Nightjar-authored onnxruntime
+    port of its JavaScript inference path.
+
+Wake-word ONNX artifacts (`nightjar_capabilities/models/wakeword/`)
+    mel-spectrogram.onnx — torchlibrosa lineage (Copyright Qiuqiang Kong),
+        ONNX export by benjamin-paine — Apache License 2.0.
+    speech-embedding.onnx — Google's speech_embedding model, Copyright
+        Google LLC — Apache License 2.0
+        (https://www.kaggle.com/models/google/speech-embedding); ONNX
+        conversion distributed by benjamin-paine. The distributing
+        HuggingFace repo is tagged CC-BY-4.0 — attribution herewith.
+    hey-buddy.onnx — Copyright benjamin-paine, Apache-2.0/CC-BY-4.0 per
+        upstream; INTERIM stand-in only (see KNOWN_ISSUES.md NJ-59 and
+        `model_licenses.json` for why it must not ship in a paid build).
+
+Nightjar previously depended on openwakeword (code Apache-2.0), whose bundled
+pretrained models are CC-BY-NC-SA 4.0 (non-commercial). The package and its
+models have been removed (KNOWN_ISSUES.md NJ-58); see
+`tests/test_model_licenses.py` for the regression guard that keeps them out.

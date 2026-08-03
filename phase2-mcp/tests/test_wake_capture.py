@@ -88,13 +88,17 @@ check("'hey june' listed first", wd.WAKE_PHRASES[0] == "hey june", wd.WAKE_PHRAS
 check("Hey June stripped", strip("Hey June, what's the time") == "what's the time")
 check("hey june lowercase stripped", strip("hey june turn on the lab") == "turn on the lab")
 check("legacy hey nightjar still stripped", strip("Hey Nightjar do a thing") == "do a thing")
-check("stock hey jarvis still stripped", strip("hey jarvis. status") == "status")
+# PR 5: the interim stand-in model answers to "hey buddy"; "hey jarvis" left with
+# openWakeWord — nothing responds to it, so stripping it would hide a mis-detect.
+check("interim hey buddy stripped", strip("Hey buddy, status") == "status")
+check("hey jarvis NO LONGER stripped", strip("hey jarvis. status") == "hey jarvis. status")
 check("no phrase → transcript unchanged", strip("what's the weather") == "what's the weather")
 check("phrase mid-sentence NOT stripped", strip("I said hey june earlier") == "I said hey june earlier")
 
-print("\n== 5. frame math (sounddevice blocksize == openWakeWord frame) ==")
-check("FRAME is 80ms @ 16k", wd.FRAME == 1280 and wd.SR == 16000)
-check("BYTES_PER_FRAME is int16 mono", wd.BYTES_PER_FRAME == 2560)
+print("\n== 5. frame math (sounddevice blocksize == the wake pipeline's hop) ==")
+# PR 5: hey-buddy hops 120ms (1920 samples), not openWakeWord's 80ms/1280.
+check("FRAME is 120ms @ 16k", wd.FRAME == 1920 and wd.SR == 16000)
+check("BYTES_PER_FRAME is int16 mono", wd.BYTES_PER_FRAME == 3840)
 raw = (np.arange(wd.FRAME) % 251).astype(np.int16).tobytes()
 frame = np.frombuffer(raw, dtype=np.int16)
 check("bytes→frame roundtrip preserves length", frame.size == wd.FRAME)

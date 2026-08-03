@@ -10,8 +10,8 @@ prompt -> a spoken reply together. This script is that missing piece.
 
 Loop: capture the live microphone (sounddevice/PortAudio — the cross-platform
 path, REQUIRED on native Windows; `parec` remains as the PulseAudio fallback
-where PortAudio is absent — voice-phase PR 3) -> score every 80ms frame with
-openWakeWord -> on wake, publish `wake`, record a fixed follow-up window,
+where PortAudio is absent — voice-phase PR 3) -> score every 120ms hop with the
+onnxruntime wake pipeline -> on wake, publish `wake`, record a fixed follow-up window,
 transcribe with faster-whisper, publish `transcription` -> POST the command to
 a persistent OpenCode session (agent=NIGHTJAR_AGENT, default "assistant") and
 collect the reply off the real SSE event stream -> synthesize the reply with
@@ -27,11 +27,13 @@ Known, explicitly-accepted limitations (not silently hidden):
   events, with a wall-clock backstop), so the daemon can't hear its own TTS
   through the speakers and re-trigger on it — but it also means you cannot
   barge in over a reply. Barge-in is explicitly out of scope.
-- Uses the STOCK wake-word model unless NIGHTJAR_WAKEWORD_MODEL points at a
-  trained hey_june.onnx (none exists yet — see wakeword_training/README.md).
-  The stock openWakeWord models are CC-BY-NC-SA — NON-commercial (NJ-58); the
-  custom synthetic model in voice-phase PR 5 is what makes shipping legal, not
-  a cosmetic rename.
+- Uses the INTERIM stand-in wake model unless NIGHTJAR_WAKEWORD_MODEL points at a
+  trained hey_june.onnx (none exists yet — see wakeword_training/README.md), so
+  the phrase is "hey buddy", not "hey june". Voice-phase PR 5 moved the engine
+  from openWakeWord to hey-buddy, which removed the CC-BY-NC-SA (non-commercial)
+  artifacts entirely (NJ-58); the stand-in's remaining encumbrance is narrower and
+  named (NJ-59). The custom synthetic model is still what makes a paid build
+  legal — it is not a cosmetic rename.
 
 Run: python wake_daemon.py
 Env: NIGHTJAR_OPENCODE_URL (default http://127.0.0.1:4096), NIGHTJAR_AGENT
@@ -61,7 +63,8 @@ from nightjar_capabilities import config, voice as _voice, wakeword as _wakeword
 import sidechannel
 
 SR = _wakeword.SR              # 16000
-FRAME = _wakeword.FRAME        # 1280 samples = 80ms @ 16kHz
+FRAME = _wakeword.FRAME        # 1920 samples = 120ms @ 16kHz (hey-buddy's hop; was
+                               # 1280/80ms under openWakeWord — voice-phase PR 5)
 BYTES_PER_FRAME = FRAME * 2    # int16 mono
 
 COMMAND_WINDOW_S = float(os.environ.get("NIGHTJAR_COMMAND_WINDOW_S", "4.0"))
@@ -77,10 +80,12 @@ TTS_VOICE = os.environ.get("NIGHTJAR_TTS_VOICE", "af_heart")
 PLAY_TTS_LOCALLY = os.environ.get("NIGHTJAR_PLAY_TTS", "0") == "1"
 HEALTH_PORT = int(os.environ.get("NIGHTJAR_WAKE_HEALTH_PORT", "8766"))
 
-# Stripped if the transcript leads with one. "hey june" is the product phrase (the
-# trained model lands in voice-phase PR 5); the others cover the legacy name and the
-# stock stand-in model. Keep in sync with mcp_server.py's copy.
-WAKE_PHRASES = ("hey june", "hey nightjar", "hey jarvis")
+# Stripped if the transcript leads with one. "hey june" is the product phrase (its
+# trained model is still pending); "hey buddy" is what the interim stand-in actually
+# responds to; "hey nightjar" is the legacy product name. "hey jarvis" was dropped in
+# voice-phase PR 5 along with openWakeWord — nothing answers to it any more.
+# Keep in sync with mcp_server.py's copy.
+WAKE_PHRASES = ("hey june", "hey buddy", "hey nightjar")
 
 
 def log(msg: str) -> None:
@@ -632,11 +637,12 @@ def main() -> None:
 
     detector = _wakeword.WakeWordDetector()
     if not detector.is_custom:
-        log(f"⚠️  STOCK wake model in use ('{detector.model_key}') — say the stock phrase, "
-            f"not 'Hey June', until a trained hey_june.onnx is deployed "
-            f"(see wakeword_training/README.md). Licensing note: the stock openWakeWord "
-            f"models are CC-BY-NC-SA (non-commercial) — a commercial build must NOT ship "
-            f"this fallback (NJ-58).")
+        log(f"⚠️  INTERIM stand-in wake model in use ('{detector.model_key}') — say "
+            f"'Hey buddy', NOT 'Hey June', until a trained hey_june.onnx is deployed "
+            f"(see wakeword_training/README.md). Licensing note: the non-commercial "
+            f"openWakeWord models are gone as of voice-phase PR 5 (NJ-58 resolved), but "
+            f"this stand-in's training positives are still Piper/Blizzard-derived — a "
+            f"paid build must NOT ship it (NJ-59).")
 
     # Echo suppression (NJ-57): consume the renderer's real playback events.
     mute = PlaybackMute(
