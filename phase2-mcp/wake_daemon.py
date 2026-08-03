@@ -329,8 +329,15 @@ class PlaybackMute:
     """Tracks whether our TTS is currently audible. Pure + clock-injectable so the
     whole state machine is testable offline (no hub, no sound card).
 
-    on_event() consumes side-channel events; muted() answers 'skip wake scoring?'
-    and self-expires via the backstop. Only `state` matters — `source` is NOT
+    TWO INDEPENDENT SOURCES, deliberately not one shared flag (Bugbot, PR #153):
+    the renderer's playback (driven by side-channel `playing`/`ended`) and the
+    daemon's own NIGHTJAR_PLAY_TTS=1 paplay. With both enabled they start from the
+    same `tts ready` and finish at different times — a single flag let whichever
+    ENDED FIRST unmute while the other was still audible, re-opening the exact
+    self-wake path this class exists to close. Muted while EITHER is active; the
+    wall-clock backstop applies to each track separately.
+
+    on_event() consumes side-channel events; only `state` matters — `source` is NOT
     filtered: the renderer is the authority on real playback, and the daemon never
     publishes playing/ended itself, so any producer reporting audible TTS should
     mute us (a stricter source filter would silently miss a future player)."""
@@ -341,36 +348,42 @@ class PlaybackMute:
         self._max_s = max_s
         self._clock = clock
         self._on_backstop = on_backstop
-        self._since: Optional[float] = None
+        self._renderer_since: Optional[float] = None
+        self._local_since: Optional[float] = None
 
     def on_event(self, ev: dict) -> None:
         if (ev or {}).get("kind") != "tts":
             return
         state = ev.get("state")
         if state == "playing":
-            self._since = self._clock()
+            self._renderer_since = self._clock()
         elif state in ("ended", "error"):
-            self._since = None
+            self._renderer_since = None
         # 'ready' deliberately ignored: synthesis finishing is not playback starting.
 
     def begin_local_playback(self) -> None:
         """Mute for the daemon's own NIGHTJAR_PLAY_TTS=1 paplay path, which produces
         no side-channel playing/ended pair."""
-        self._since = self._clock()
+        self._local_since = self._clock()
 
     def end_local_playback(self) -> None:
-        self._since = None
+        """Clears ONLY the local track — the renderer may still be mid-clip."""
+        self._local_since = None
 
     def muted(self) -> bool:
-        if self._since is None:
-            return False
-        if self._clock() - self._since >= self._max_s:
-            # Backstop: a lost `ended` must not deafen the daemon permanently.
-            self._since = None
-            if self._on_backstop:
-                self._on_backstop()
-            return False
-        return True
+        now = self._clock()
+        expired = False
+        # Backstop per track: a lost `ended` (renderer crash, side-channel drop)
+        # must not deafen the daemon permanently.
+        if self._renderer_since is not None and now - self._renderer_since >= self._max_s:
+            self._renderer_since = None
+            expired = True
+        if self._local_since is not None and now - self._local_since >= self._max_s:
+            self._local_since = None
+            expired = True
+        if expired and self._on_backstop:
+            self._on_backstop()
+        return self._renderer_since is not None or self._local_since is not None
 
 
 # ─── OpenCode turn: persistent session + SSE listener thread ─────────────────
