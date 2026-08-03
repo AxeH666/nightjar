@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir } from "fs/promises"
 import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { Supervisor, type ServiceStatus } from "./supervisor"
+import { Supervisor, STILL_LISTENING_MARKER, type ServiceStatus } from "./supervisor"
 import { nightjarServices, wakeDaemonEnv, REPO, REPO_POSIX, HOME_POSIX, WORKSPACE, isWSL, VENV_PY, venvPython } from "./services"
 import * as byok from "./byok"
 import * as capabilities from "./capabilities"
@@ -420,7 +420,19 @@ ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabili
 // an explicit user IPC, never automatic). Disabling KILLS the daemon process —
 // never a soft-mute — so the OS mic-in-use indicator is the source of truth that
 // listening ended. State is pushed so the orb's indication can't go stale.
-ipcMain.handle("voice:get", () => ({ enabled: voice.getVoiceEnabled() }))
+//
+// `stillListening` is the honesty bit (Bugbot, PR #151): the pref alone must never
+// drive a "voice off" UI while the daemon's port still answers (stopService could
+// not kill an unmanaged listener). It comes from the SUPERVISOR's actual status —
+// the renderer shows a stuck-mic warning instead of a false "off".
+function voiceStatusNow(): { enabled: boolean; stillListening: boolean } {
+  const s = supervisor.status().find((x) => x.name === "wake-daemon")
+  return {
+    enabled: voice.getVoiceEnabled(),
+    stillListening: Boolean(s?.state === "stopped" && s.detail?.includes(STILL_LISTENING_MARKER)),
+  }
+}
+ipcMain.handle("voice:get", () => voiceStatusNow())
 ipcMain.handle("voice:set", async (_e, enabled: boolean) => {
   const saved = voice.setVoiceEnabled(Boolean(enabled))
   if (saved.enabled) {
@@ -429,8 +441,9 @@ ipcMain.handle("voice:set", async (_e, enabled: boolean) => {
   } else {
     await supervisor.stopService("wake-daemon")
   }
-  sendToRenderer("nightjar:voiceStatus", { enabled: saved.enabled })
-  return { enabled: saved.enabled }
+  const status = voiceStatusNow()
+  sendToRenderer("nightjar:voiceStatus", status)
+  return status
 })
 
 // ── Local vision (Ollama gemma3:4b) — status + auto-pull ──────────────────────

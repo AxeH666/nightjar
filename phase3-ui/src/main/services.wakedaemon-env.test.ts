@@ -11,9 +11,9 @@ describe("wakeDaemonEnv (voice-phase PR 2)", () => {
     else process.env.NIGHTJAR_WAKEWORD_MODEL = saved
   })
 
-  test("offline chat pref → no NIGHTJAR_MODEL (daemon's local default applies)", () => {
+  test("offline chat pref → the EXPLICIT local default (an ambient parent NIGHTJAR_MODEL must not leak through the spawn merge)", () => {
     const env = wakeDaemonEnv({ mode: "offline" })
-    expect(env.NIGHTJAR_MODEL).toBeUndefined()
+    expect(env.NIGHTJAR_MODEL).toBe("llamacpp/qwen3-4b-instruct-2507")
     expect(env.NIGHTJAR_DATA_DIR).toBeTruthy()
   })
 
@@ -22,14 +22,14 @@ describe("wakeDaemonEnv (voice-phase PR 2)", () => {
     expect(env.NIGHTJAR_MODEL).toBe("openrouter/meta-llama/llama-3.3-70b:free")
   })
 
-  test("a half-formed online pref (no model) falls back to the daemon default — never a guessed cloud route", () => {
+  test("a half-formed online pref (no model) falls back to the explicit local default — never a guessed cloud route", () => {
     const env = wakeDaemonEnv({ mode: "online", providerId: "openai" })
-    expect(env.NIGHTJAR_MODEL).toBeUndefined()
+    expect(env.NIGHTJAR_MODEL).toBe("llamacpp/qwen3-4b-instruct-2507")
   })
 
-  test("no pref at all → just the data dir (fresh install)", () => {
+  test("no pref at all → explicit local default + data dir (fresh install)", () => {
     const env = wakeDaemonEnv()
-    expect(env.NIGHTJAR_MODEL).toBeUndefined()
+    expect(env.NIGHTJAR_MODEL).toBe("llamacpp/qwen3-4b-instruct-2507")
     expect(env.NIGHTJAR_DATA_DIR).toBeTruthy()
   })
 

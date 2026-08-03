@@ -113,11 +113,14 @@ contextBridge.exposeInMainWorld("nightjar", {
   // Voice master switch (NJ-57): OFF by default; enabling is consent-gated in the
   // renderer; disabling kills the wake-daemon process (the OS mic indicator is the
   // source of truth). Status pushes keep the orb's mic indication live.
+  // `stillListening` = the pref says off but the daemon's port still answers (an
+  // unmanaged listener survived the kill) — the UI must warn, never claim "off".
   voice: {
-    get: (): Promise<{ enabled: boolean }> => ipcRenderer.invoke("voice:get"),
-    set: (enabled: boolean): Promise<{ enabled: boolean }> => ipcRenderer.invoke("voice:set", enabled),
-    onStatus: (cb: (s: { enabled: boolean }) => void) => {
-      const handler = (_e: unknown, s: { enabled: boolean }) => cb(s)
+    get: (): Promise<{ enabled: boolean; stillListening: boolean }> => ipcRenderer.invoke("voice:get"),
+    set: (enabled: boolean): Promise<{ enabled: boolean; stillListening: boolean }> =>
+      ipcRenderer.invoke("voice:set", enabled),
+    onStatus: (cb: (s: { enabled: boolean; stillListening: boolean }) => void) => {
+      const handler = (_e: unknown, s: { enabled: boolean; stillListening: boolean }) => cb(s)
       ipcRenderer.on("nightjar:voiceStatus", handler)
       return () => ipcRenderer.removeListener("nightjar:voiceStatus", handler)
     },

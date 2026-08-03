@@ -108,6 +108,11 @@ export async function pidOnPort(port: number): Promise<number | undefined> {
 export type ServiceState =
   | "pending" | "starting" | "healthy" | "unhealthy" | "restarting" | "stopped" | "failed" | "adopted"
 
+// Detail marker for "we wanted this service DEAD but its port still answers" (NJ-57).
+// index.ts matches on this to tell the renderer the mic may still be live — the UI must
+// never claim "voice off" from the pref alone while the port disagrees (Bugbot, PR #151).
+export const STILL_LISTENING_MARKER = "STILL listening"
+
 export interface ServiceDef {
   name: string
   command: string
@@ -210,7 +215,7 @@ export class Supervisor {
       if (await m.def.ready()) {
         await this.stopUnmanagedListener(m)
         if (await m.def.ready()) {
-          this.set(m, "stopped", "disabled, but something is STILL listening on its port — stop that process manually")
+          this.set(m, "stopped", `disabled, but something is ${STILL_LISTENING_MARKER} on its port — stop that process manually`)
           return
         }
       }
@@ -534,6 +539,13 @@ export class Supervisor {
     }
     m.intentionalStop = false
     m.status.restarts = 0
+    // For an opt-in gated service, enable must mean OUR process under the CURRENT env.
+    // bring() would ADOPT a stale instance still answering the port (spawned pre-consent
+    // with stale env — e.g. an old chat-model overlay; Bugbot, PR #151) — stop it first,
+    // NJ-5-style. If it won't die, bring() adopts and the status says so honestly.
+    if (m.def.enabled && (await m.def.ready())) {
+      await this.stopUnmanagedListener(m)
+    }
     await this.bring(m)
   }
 
@@ -568,7 +580,7 @@ export class Supervisor {
     }
     m.adoptedPid = undefined
     if (await m.def.ready()) {
-      this.set(m, "stopped", "stop requested, but something is STILL listening on its port — stop that process manually")
+      this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port — stop that process manually`)
     } else {
       this.set(m, "stopped", "disabled")
     }

@@ -22,14 +22,22 @@ export const VOICE_CONSENT_POINTS: string[] = [
 
 export function VoiceSettings() {
   const [enabled, setEnabled] = useState<boolean | null>(null) // null = loading
+  // Stuck mic (Bugbot, PR #151): off was requested but the daemon's port still
+  // answers — the UI must warn rather than present a clean "off".
+  const [stillListening, setStillListening] = useState(false)
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
-    voice.get().then((s) => mounted && setEnabled(s.enabled))
-    const off = voice.onStatus((s) => mounted && setEnabled(s.enabled))
+    const applyStatus = (s: { enabled: boolean; stillListening?: boolean }) => {
+      if (!mounted) return
+      setEnabled(s.enabled)
+      setStillListening(!s.enabled && Boolean(s.stillListening))
+    }
+    voice.get().then(applyStatus)
+    const off = voice.onStatus(applyStatus)
     return () => {
       mounted = false
       off()
@@ -42,6 +50,7 @@ export function VoiceSettings() {
     try {
       const s = await voice.set(next)
       setEnabled(s.enabled)
+      setStillListening(!s.enabled && Boolean(s.stillListening))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -82,6 +91,14 @@ export function VoiceSettings() {
       )}
 
       {error && <p className="text-[11px] text-nightjar-alert">{error}</p>}
+
+      {stillListening && (
+        <p className="text-[11px] text-nightjar-alert">
+          ⚠ Voice is off, but something is <b>still listening</b> on the voice port — the previous listener could not
+          be stopped, so the mic may still be live. Check the health strip (wake-daemon) or stop that process manually;
+          your OS mic indicator tells the truth.
+        </p>
+      )}
 
       {asking && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">

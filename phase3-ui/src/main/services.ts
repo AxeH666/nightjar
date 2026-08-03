@@ -83,20 +83,28 @@ function tcpOpen(host: string, port: number, timeoutMs = 1500): Promise<boolean>
   })
 }
 
+// The daemon-side local default (wake_daemon.py's own MODEL fallback) — set EXPLICITLY
+// for the offline pref rather than omitted: the supervisor spawns with
+// {...process.env, ...def.env}, so an omitted key would let an ambient NIGHTJAR_MODEL
+// in the Electron parent env leak through and override the user's offline choice
+// (Bugbot, PR #151). The chat PREF is the single source of truth here.
+const LOCAL_CHAT_MODEL = "llamacpp/qwen3-4b-instruct-2507"
+
 // Env overlay for the wake daemon, pure so it's unit-testable. NIGHTJAR_MODEL is the
 // "provider/model" the daemon's persistent OpenCode session drives — derived from the
 // CHAT capability pref so a voice turn runs on the same model the user picked for chat
-// (before this, a Cloud user's voice turns silently ran on the local 4B). Offline (or a
-// half-formed pref) omits the var → the daemon's own local-qwen default applies.
-// NIGHTJAR_WAKEWORD_MODEL: an explicit env wins; else the PR-5 deploy path
-// (~/.nightjar/models/hey_june.onnx) is passed once it exists — zero code change on the
-// daemon side when the trained model lands.
+// (before this, a Cloud user's voice turns silently ran on the local 4B). Offline or a
+// half-formed pref → the explicit local default (never a guessed cloud route).
+// NIGHTJAR_WAKEWORD_MODEL: an explicit env wins (deliberate operator override); else
+// the PR-5 deploy path (~/.nightjar/models/hey_june.onnx) is passed once it exists —
+// zero code change on the daemon side when the trained model lands.
 export function wakeDaemonEnv(chatPref?: { mode: string; providerId?: string; modelId?: string }): Record<string, string> {
   const out: Record<string, string> = {
     NIGHTJAR_DATA_DIR: process.env.NIGHTJAR_DATA_DIR || join(HOME, ".nightjar"),
-  }
-  if (chatPref?.mode === "online" && chatPref.providerId && chatPref.modelId) {
-    out.NIGHTJAR_MODEL = `${chatPref.providerId}/${chatPref.modelId}`
+    NIGHTJAR_MODEL:
+      chatPref?.mode === "online" && chatPref.providerId && chatPref.modelId
+        ? `${chatPref.providerId}/${chatPref.modelId}`
+        : LOCAL_CHAT_MODEL,
   }
   const wakeModel =
     process.env.NIGHTJAR_WAKEWORD_MODEL ||

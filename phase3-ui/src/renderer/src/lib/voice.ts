@@ -4,6 +4,10 @@
 
 export interface VoiceStatus {
   enabled: boolean
+  // The pref says off but the daemon's port still answers (an unmanaged listener
+  // survived the kill attempt): the mic may still be LIVE. The UI must surface this
+  // as a stuck-mic warning — never render "voice off" from `enabled` alone.
+  stillListening?: boolean
 }
 
 interface VoiceBridge {
@@ -19,7 +23,7 @@ function bridge(): VoiceBridge | null {
 export const voice = {
   // Current state; disabled when the bridge is absent (renderer outside the app).
   async get(): Promise<VoiceStatus> {
-    return (await bridge()?.get()) ?? { enabled: false }
+    return (await bridge()?.get()) ?? { enabled: false, stillListening: false }
   },
   // Flip the switch. The caller is responsible for showing the consent modal BEFORE
   // enabling — this is the apply, not the ask.

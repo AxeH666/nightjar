@@ -1,5 +1,22 @@
 import { describe, test, expect } from "vitest"
+import { spawn } from "node:child_process"
+import net from "node:net"
 import { Supervisor, type ServiceDef } from "./supervisor"
+
+function tcpProbe(port: number, timeoutMs = 800): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = new net.Socket()
+    const done = (ok: boolean) => {
+      sock.destroy()
+      resolve(ok)
+    }
+    sock.setTimeout(timeoutMs)
+    sock.once("connect", () => done(true))
+    sock.once("timeout", () => done(false))
+    sock.once("error", () => done(false))
+    sock.connect(port, "127.0.0.1")
+  })
+}
 
 // NJ-57: the wake daemon (an open microphone) must be OPT-IN. These tests drive the
 // supervisor's `enabled()` gate + startService/stopService lifecycle headlessly — the
@@ -104,6 +121,53 @@ describe("Supervisor enabled() gate (NJ-57)", () => {
     }
     expect(alive).toBe(false)
   }, 20000)
+
+  test("startService stops a STALE listener first — enable means OUR process under the CURRENT env, not a stale adopt", async () => {
+    // Bugbot (PR #151): bring() would ADOPT a stale daemon still answering the port —
+    // spawned pre-consent with stale env. Enable must kill it and spawn fresh.
+    const PORT = 18766
+    const stale = spawn(
+      process.execPath,
+      ["-e", `require('net').createServer(() => {}).listen(${PORT}, '127.0.0.1'); setInterval(() => {}, 1000)`],
+      { stdio: "ignore" },
+    )
+    try {
+      const up = Date.now() + 5000
+      while (Date.now() < up && !(await tcpProbe(PORT))) await new Promise((r) => setTimeout(r, 100))
+      expect(await tcpProbe(PORT)).toBe(true) // stale listener is really up
+
+      const def: ServiceDef = {
+        name: "wake-daemon",
+        command: process.execPath,
+        args: ["-e", "setInterval(() => {}, 1000)"], // our fresh process (never listens)
+        ready: () => tcpProbe(PORT),
+        enabled: () => true,
+        port: PORT,
+        readyTimeoutMs: 300,
+        autoRestart: false,
+      }
+      const sup = new Supervisor([def])
+      await sup.startService("wake-daemon")
+
+      const s = sup.status()[0]
+      expect(s.pid).toBeGreaterThan(0) // a FRESH child was spawned...
+      expect(s.pid).not.toBe(stale.pid) // ...not the stale one adopted
+      let staleAlive = true
+      try {
+        process.kill(stale.pid!, 0)
+      } catch {
+        staleAlive = false
+      }
+      expect(staleAlive).toBe(false) // and the stale listener is dead
+      await sup.stopService("wake-daemon")
+    } finally {
+      try {
+        stale.kill("SIGKILL")
+      } catch {
+        /* already gone — the assertion above wants exactly this */
+      }
+    }
+  }, 30000)
 
   test("a disable that lands while running is honored at the spawn choke point (no respawn)", async () => {
     // Crash-restart path: the child exits on its own while the gate has flipped off —
