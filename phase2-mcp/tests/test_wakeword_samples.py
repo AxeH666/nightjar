@@ -115,6 +115,103 @@ def main() -> int:
     check("blends follow, with valid weights",
           all(w in g.BLEND_WEIGHTS and a != b for a, b, w in nxt))
 
+    print("\n== 5b. the holdout is enforced in CODE, not by flag discipline (training PR) ==")
+    check("HOLDOUT_VOICES spans both genders and both accent groups",
+          {v[1] for v in g.HOLDOUT_VOICES} == {"f", "m"}
+          and {v[0] for v in g.HOLDOUT_VOICES} == {"a", "b"}, str(g.HOLDOUT_VOICES))
+    check("TRAINING_VOICES excludes every held-out voice",
+          not set(g.TRAINING_VOICES) & set(g.HOLDOUT_VOICES))
+    check("TRAINING_VOICES still passes the diversity guard",
+          (g.check_speaker_diversity(g.TRAINING_VOICES) or True))
+    # The raise-paths. generate() checks voices BEFORE creating the Kokoro session,
+    # so these run without weights or synthesis.
+    from pathlib import Path as _P
+    for label, kind, voices in [
+        ("a held-out voice cannot enter a positives corpus", "positives",
+         list(g.TRAINING_VOICES) + ["af_sky"]),
+        ("a held-out voice cannot enter an adversarial corpus (even blended-in)",
+         "adversarial", list(g.TRAINING_VOICES) + ["bm_lewis"]),
+        ("ENGLISH_VOICES (which contains the holdout) is refused for training",
+         "positives", list(g.ENGLISH_VOICES)),
+        ("a training voice cannot enter the holdout eval set", "holdout",
+         ["af_sky", "af_heart"]),
+    ]:
+        try:
+            g.generate(kind, _P("nonexistent-never-created"), 1, voices)
+            check(label, False, "no exception raised")
+        except g.HoldoutLeakError:
+            check(label, True)
+    # The filename parser evaluate_hey_june.py relies on for its overlap check:
+    check("parser: pure voice", g.voices_in_filename("positives_000042_af_heart_1.0.wav")
+          == ("af_heart",))
+    check("parser: blended voices",
+          g.voices_in_filename("positives_000042_af_heart+bm_george@0.5_1.1.wav")
+          == ("af_heart", "bm_george"))
+    check("parser: foreign filename yields () (treated as unparseable, not ignored)",
+          g.voices_in_filename("random_recording.wav") == ())
+
+    print("\n== 5c. vendored WavDirectorySpeechGenerator: disjoint role partitions "
+          "(stubbed import — torch-free) ==")
+    # The vendored module only needs `heybuddy.dataset.generator` and `heybuddy.util`;
+    # stub the heavy package so the partition logic is exercised on THIS machine
+    # rather than first running on the pod.
+    import sys as _sys, types as _types, importlib.util as _ilu
+    vend = PHASE2 / "wakeword_training" / "heybuddy_vendor" / "src" / "python"
+    pkg = _types.ModuleType("heybuddy"); pkg.__path__ = []  # type: ignore[attr-defined]
+    util = _types.ModuleType("heybuddy.util")
+    import logging
+    util.logger = logging.getLogger("stub")  # type: ignore[attr-defined]
+    ds = _types.ModuleType("heybuddy.dataset"); ds.__path__ = []  # type: ignore[attr-defined]
+    gen = _types.ModuleType("heybuddy.dataset.generator")
+
+    class _StubBase:
+        def __init__(self, device_id=None):
+            self.device_id = device_id
+    gen.AudioDatasetGenerator = _StubBase  # type: ignore[attr-defined]
+    saved = {k: _sys.modules.get(k) for k in
+             ("heybuddy", "heybuddy.util", "heybuddy.dataset", "heybuddy.dataset.generator")}
+    _sys.modules.update({"heybuddy": pkg, "heybuddy.util": util,
+                         "heybuddy.dataset": ds, "heybuddy.dataset.generator": gen})
+    try:
+        spec = _ilu.spec_from_file_location(
+            "wav_directory_under_test", vend / "heybuddy" / "dataset" / "wav_directory.py")
+        wd_mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(wd_mod)  # type: ignore[union-attr]
+        import tempfile as _tf, wave as _wave
+        with _tf.TemporaryDirectory(prefix="wavdir-") as td:
+            # 60 tiny valid WAVs
+            for i in range(60):
+                p = _P(td) / f"clip_{i:03d}.wav"
+                with _wave.open(str(p), "wb") as w:
+                    w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+                    w.writeframes(np.full(1600, 100 + i, dtype=np.int16).tobytes())
+            wgen = wd_mod.WavDirectorySpeechGenerator(td)
+            parts = {r: set(wgen.files_for_role(r)) for r in ("training", "testing", "validation")}
+            check("partitions are pairwise DISJOINT",
+                  not (parts["training"] & parts["testing"])
+                  and not (parts["training"] & parts["validation"])
+                  and not (parts["testing"] & parts["validation"]))
+            check("partitions cover every file",
+                  parts["training"] | parts["testing"] | parts["validation"]
+                  == set(f"clip_{i:03d}.wav" for i in range(60)),
+                  f"sizes {[len(parts[r]) for r in ('training','testing','validation')]}")
+            got = list(wgen(3, role="training"))
+            check("yields the Piper dict shape",
+                  all(set(s) == {"audio", "phrase"}
+                      and set(s["audio"]) == {"array", "sampling_rate"}
+                      and s["audio"]["sampling_rate"] == 16000
+                      and s["audio"]["array"].dtype == np.float32 for s in got))
+            n_train = len(parts["training"])
+            wrapped = list(wgen(n_train + 5, role="training"))
+            check("over-request wraps around rather than truncating",
+                  len(wrapped) == n_train + 5)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                _sys.modules.pop(k, None)
+            else:
+                _sys.modules[k] = v
+
     print("\n== 6. synthesis smoke test (needs Kokoro weights; skipped if absent) ==")
     from nightjar_capabilities import config
     have_weights = (config.MODELS_DIR / "kokoro" / "kokoro-v1.0.fp16.onnx").exists()
@@ -124,7 +221,7 @@ def main() -> int:
     else:
         import tempfile
         with tempfile.TemporaryDirectory(prefix="wwsamples-") as td:
-            n = g.generate("positives", Path(td), 4, list(g.ENGLISH_VOICES), seed=1)
+            n = g.generate("positives", Path(td), 4, list(g.TRAINING_VOICES), seed=1)
             wavs = sorted(Path(td).glob("*.wav"))
             check("generate() wrote the requested count", n == 4 and len(wavs) == 4)
             with wave.open(str(wavs[0]), "rb") as wv:

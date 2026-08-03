@@ -47,13 +47,42 @@ Deliberately **not** copied:
 
 ## Local modifications
 
-**None.** This is an unmodified snapshot. Nightjar's divergence from upstream is
-expressed as *replacement*, not patches: the positive/adversarial sample
-generation stage is bypassed entirely and replaced by
-`../generate_samples.py` (Kokoro-82M). See the next section for why, and
-`../README.md` for how the two are wired together.
+**One patch (voice-phase training PR, 2026-08-03): pregenerated-audio injection.**
+The snapshot was unmodified until this patch; it exists because the trainer had
+NO seam for feeding it external samples — its positives/adversarials came only
+from the built-in `PiperSpeechGenerator`, whose default voice is
+lessac/Blizzard-2013-encumbered (NJ-59, next section). Every change is tagged
+`# NIGHTJAR PATCH` in-line, and the identical patch is pushed to the fork
+(`AxeH666/hey-buddy`, branch `nightjar-wav-injection`) so the trees stay
+reconcilable. The four touched files:
 
-If a patch ever does become necessary, add it here with the rationale, and push
+1. **`src/python/heybuddy/dataset/wav_directory.py` (NEW)** —
+   `WavDirectorySpeechGenerator`: yields samples from a directory of WAVs in the
+   exact dict shape `PiperSpeechGenerator` yields, so augmentation/embedding/
+   caching downstream are untouched. Files are hash-partitioned into DISJOINT
+   train/testing/validation buckets (80/10/10) — Piper gets fresh synthesis per
+   call, a finite directory does not, and sharing clips across splits would
+   silently inflate the validation metrics the trainer steers by. Undersized
+   partitions wrap around with a logged warning, never silently.
+2. **`dataset/features.py`** — the Piper import is now LAZY (its import chain
+   hard-requires `piper-phonemize`, a Linux-only wheel wrapping GPL espeak-ng;
+   with `tts_audio_dir` set the module is never imported, so a training box need
+   not install it at all); `TrainingFeaturesGenerator` gains `tts_audio_dir`;
+   `generate()` passes the split role to the sample generator (Piper ignores it
+   via `**kwargs`); `default()`/`get_training_features()`/
+   `get_validation_features()` thread the directory params.
+3. **`dataset/training.py`** — `default()`/`testing()`/`validation()`/`all()`
+   thread `positive_audio_dir`/`adversarial_audio_dir` to the feature calls.
+4. **`__main__.py`** — new `--positive-audio-dir`/`--adversarial-audio-dir`
+   options; both-or-neither enforced (mixing a pregenerated corpus with Piper
+   samples would reintroduce the encumbered voice), and mutually exclusive with
+   `--additional-phrase` (whose loops would re-embed the same directory once per
+   phrase).
+
+Deliberately NOT threaded: the `--additional-phrase` code paths (guarded off at
+the CLI instead — phrase variants belong in the WAV corpus itself).
+
+If further patches become necessary, add them here with the rationale, and push
 the same change to the fork so the two stay reconcilable.
 
 ## ⚠ The upstream pipeline's positives are NOT commercially clean (NJ-59)

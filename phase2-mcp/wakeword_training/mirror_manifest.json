@@ -1078,6 +1078,24 @@
         }
       ],
       "total_bytes": 136351903
+    },
+    {
+      "repo": "openslr-26-simulated-rirs",
+      "type": "url",
+      "url": "https://www.openslr.org/resources/26/sim_rir_16k.zip",
+      "license_entry": "openslr-26-simulated-rirs",
+      "role": "augmentation: simulated room impulse responses (Apache-2.0)",
+      "license": "Apache-2.0",
+      "license_blocked": false,
+      "files": [
+        {
+          "path": "sim_rir_16k.zip",
+          "size": 178818025,
+          "sha": null,
+          "url": "https://www.openslr.org/resources/26/sim_rir_16k.zip"
+        }
+      ],
+      "total_bytes": 178818025
     }
   ]
 }

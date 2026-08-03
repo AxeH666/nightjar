@@ -222,6 +222,8 @@ def combine(
 @click.option("--validation-steps", type=int, default=DEFAULT_VALIDATION_STEPS, help="How often to validate the model.", show_default=True)
 @click.option("--checkpoint-steps", type=int, default=DEFAULT_CHECKPOINT_STEPS, help="How often to save the model.", show_default=True)
 @click.option("--positive-samples", type=int, default=DEFAULT_POSITIVE_SAMPLES, help="Number of positive samples to use for training. Will synthetically generate more when needed.", show_default=True)
+@click.option("--positive-audio-dir", type=click.Path(exists=True, dir_okay=True, file_okay=False), default=None, help="NIGHTJAR PATCH: directory of pregenerated positive WAVs; bypasses the built-in Piper TTS entirely (NJ-59).", show_default=True)
+@click.option("--adversarial-audio-dir", type=click.Path(exists=True, dir_okay=True, file_okay=False), default=None, help="NIGHTJAR PATCH: directory of pregenerated adversarial WAVs; bypasses the built-in Piper TTS entirely (NJ-59).", show_default=True)
 @click.option("--adversarial-samples", type=int, default=DEFAULT_ADVERSARIAL_SAMPLES, help="Number of adversarial samples to use for training. Will synthetically generate more when needed.", show_default=True)
 @click.option("--adversarial-phrases", type=int, default=DEFAULT_ADVERSARIAL_PHRASES, help="Number of adversarial phrases to use for training. Will synthetically generate more when needed.", show_default=True)
 @click.option("--adversarial-phrase-custom", type=str, default=None, multiple=True, help="Custom adversarial phrases to use for training.", show_default=True)
@@ -292,6 +294,8 @@ def train(
     validation_steps: int=DEFAULT_VALIDATION_STEPS,
     checkpoint_steps: int=DEFAULT_CHECKPOINT_STEPS,
     positive_samples: int=DEFAULT_POSITIVE_SAMPLES,
+    positive_audio_dir: Optional[str]=None,     # NIGHTJAR PATCH
+    adversarial_audio_dir: Optional[str]=None,  # NIGHTJAR PATCH
     adversarial_samples: int=DEFAULT_ADVERSARIAL_SAMPLES,
     adversarial_phrases: int=DEFAULT_ADVERSARIAL_PHRASES,
     adversarial_phrase_custom: List[str]=[],
@@ -341,9 +345,26 @@ def train(
     if augmentation_impulse_dataset:
         augment_impulse_datasets.extend(augmentation_impulse_dataset)
 
+    # NIGHTJAR PATCH: pregenerated audio dirs and --additional-phrase are mutually
+    # exclusive — the additional-phrase loops would re-embed the SAME directory once
+    # per phrase, silently duplicating features instead of adding phrases.
+    if (positive_audio_dir or adversarial_audio_dir) and additional_phrase:
+        raise click.UsageError(
+            "--positive-audio-dir/--adversarial-audio-dir cannot be combined with "
+            "--additional-phrase: bake phrase variants into the WAV corpus instead."
+        )
+    if (positive_audio_dir is None) != (adversarial_audio_dir is None):
+        raise click.UsageError(
+            "provide BOTH --positive-audio-dir and --adversarial-audio-dir or neither — "
+            "mixing a pregenerated corpus with Piper-generated samples reintroduces the "
+            "licence-encumbered voice this option exists to avoid (NJ-59)."
+        )
+
     with logging_context(debug):
         training, validation, testing = WakeWordTrainingDatasetIterator.all(
             additional_wake_phrases=additional_phrase,
+            positive_audio_dir=positive_audio_dir,        # NIGHTJAR PATCH
+            adversarial_audio_dir=adversarial_audio_dir,  # NIGHTJAR PATCH
             adversarial_per_batch=adversarial_batch_size,
             augment_background_dataset=augment_background_datasets,
             augment_background_noise_max_snr_db=augmentation_background_noise_max_snr_db,
