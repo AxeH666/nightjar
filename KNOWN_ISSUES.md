@@ -664,18 +664,26 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   set actually is — the framed document itself is cross-origin and sandboxed, so a naive lock to the
   renderer origin needs checking against the real frame load first.
 
-## NJ-37 — orb TTS falls back to a `file://` URL that `media-src` refuses → silent silence — OPEN 2026-07-20
+## NJ-37 — orb TTS falls back to a `file://` URL that `media-src` refuses → silent silence — FIXED (voice-phase PR 1; audible-playback verify pending per rule 8) 2026-08-03
 
 - **What:** `NightjarOrb.tsx`'s `loadTtsAudio()` prefers the IPC path (`nightjar.readAudio` → bytes →
-  `blob:` URL, which is allowed). When that bridge is unavailable it falls back to
+  `blob:` URL, which is allowed). When that bridge is unavailable it fell back to
   `return path.startsWith("file:") ? path : \`file://${path}\`` — and the CSP's `media-src 'self' blob:`
-  refuses the `file:` scheme. The result is **no audio and no error surfaced to the user**.
-- **Why it matters (rule 8):** this is a textbook silent no-op — the degraded path was written *as* a
-  fallback but cannot work under the app's own CSP, so TTS just goes quiet with no visible signal.
-  A correct fallback either surfaces a visible "audio unavailable" state or is removed as dead code.
-- **Not fixed here** (rule 7): out of scope for the CSP/preview fix, and choosing between "surface a
-  fallback UI" and "delete the unreachable branch" needs a real run to see whether the IPC path is
-  ever actually absent in practice.
+  refuses the `file:` scheme. The result was **no audio and no error surfaced to the user**.
+- **Why it mattered (rule 8):** a textbook silent no-op — the degraded path was written *as* a
+  fallback but could not work under the app's own CSP, so TTS just went quiet with no visible signal.
+- **Fix (both halves of the entry's own decision):** the dead `file://` branch is DELETED — a missing
+  bridge now throws — and every TTS failure path (resolver throw, `<audio>` element error, refused
+  `play()`) routes through a new adapter `onTtsError` callback; the orb shows a transient
+  `nightjar-alert` "audio failed" label instead of silence. The adapter's own default resolver (which
+  had the same `file://` fallback) now rejects loudly. Superseded in-flight clips (B11) deliberately
+  do NOT report — supersession is normal turn flow.
+- **Verified (rule 6, code half):** the exact failure is re-triggered headlessly in
+  `src/renderer/src/lib/orbAdapter.ttsError.test.ts` (vitest) and `test-orb.ts` §2d: missing
+  resolver → onTtsError + idle; `<audio>` error → onTtsError + idle + published `ended`; superseded
+  load → no report. **Residual (rule 8):** the happy path — the WAV audibly playing on a real audio
+  device — and the label's real-UI appearance can only be confirmed on hardware; part of the
+  voice-phase PR-6 checklist.
 
 ## NJ-36 — stale `ArtifactContext` header docs + inconsistent `nonce` dep in `ArtifactPanel` — OPEN (docs/nit) 2026-07-20
 

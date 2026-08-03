@@ -317,6 +317,62 @@ async function testSpeakingWatchdog() {
   adapter.disconnect()
 }
 
+// ─── 2d. TTS failure visibility (NJ-37) ────────────────────────────────────────
+
+async function testTtsFailureVisibility() {
+  console.log("\n# 2d. TTS failure is VISIBLE, never silent silence (NJ-37)")
+  const level = { value: 0 }
+  const scheduler = new MockScheduler()
+  MockWS.instances = 0
+  const errors: unknown[] = []
+
+  // No loadTtsAudio injected: the default must REJECT (the old file:// fallback was
+  // CSP-dead — media-src 'self' blob: refuses the file: scheme) and reach onTtsError.
+  const adapter = createNightjarOrbAdapter({
+    WebSocketImpl: MockWS as unknown as typeof WebSocket,
+    createAudioContext: makeMockAudioContext(level),
+    getUserMedia: async () => makeMockStream(),
+    createAudioElement: () => new MockAudio() as unknown as HTMLAudioElement,
+    scheduler,
+    reconnectMs: 30,
+    onTtsError: (err) => errors.push(err),
+  })
+  adapter.subscribe({ onStateChange: () => {}, onVolumeChange: () => {} })
+  MockWS.last!._open()
+
+  MockWS.last!._event({ kind: "tts", state: "ready", path: "/home/x/.nightjar/tts_out.wav" })
+  await flush()
+  check("default resolver rejects (no file:// fallback)", errors.length === 1, `errors=${errors.length}`)
+  check("failure surfaced via onTtsError, state back to idle", adapter.getState() === "idle")
+
+  // A bad clip after a successful load: <audio> onerror must also surface.
+  errors.length = 0
+  let lastAudio: MockAudio | null = null
+  const adapter2 = createNightjarOrbAdapter({
+    WebSocketImpl: MockWS as unknown as typeof WebSocket,
+    createAudioContext: makeMockAudioContext(level),
+    getUserMedia: async () => makeMockStream(),
+    createAudioElement: () => (lastAudio = new MockAudio()) as unknown as HTMLAudioElement,
+    loadTtsAudio: async (p) => `mock://${p}`,
+    scheduler,
+    reconnectMs: 30,
+    onTtsError: (err) => errors.push(err),
+  })
+  adapter2.subscribe({ onStateChange: () => {}, onVolumeChange: () => {} })
+  MockWS.last!._open()
+  MockWS.last!._event({ kind: "tts", state: "ready", path: "/x.wav" })
+  await flush(0)
+  await flush(0)
+  check("clip loaded → speaking", adapter2.getState() === "speaking")
+  lastAudio!.onerror?.()
+  await flush()
+  check("<audio> error surfaces via onTtsError", errors.length === 1, `errors=${errors.length}`)
+  check("and lands back on idle", adapter2.getState() === "idle")
+
+  adapter.disconnect()
+  adapter2.disconnect()
+}
+
 // ─── 3. Live integration against the REAL :8765 hub ────────────────────────────
 
 function publishToHub(event: Record<string, unknown>): Promise<void> {
@@ -398,6 +454,7 @@ async function main() {
   testMonitor()
   await testStateMachine()
   await testSpeakingWatchdog()
+  await testTtsFailureVisibility()
   await testLiveHub()
   console.log(`\n${pass}/${pass + fail} checks passed`)
   process.exit(fail === 0 ? 0 : 1)

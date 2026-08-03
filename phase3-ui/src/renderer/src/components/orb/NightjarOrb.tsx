@@ -8,7 +8,7 @@
 // over during a voice turn. Both share this one adapter subscription (one
 // side-channel connection, one set of audio analysers) so they stay in sync.
 // (Stage 7: replaced the orb-ui circle-theme fork with the Three.js vortex.)
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createNightjarOrbAdapter } from "../../lib/orbAdapter"
 import { useOrbAdapter } from "../../lib/useOrbAdapter"
 import { CssMiniOrb } from "./CssMiniOrb"
@@ -21,15 +21,20 @@ const DEFAULT_WS =
 // The Kokoro TTS `speak` tool writes a WAV to a local path and the side-channel
 // carries that path. The renderer can't fetch an arbitrary local file, so the
 // Electron main process reads the bytes over IPC and we wrap them in a blob URL.
+// Deliberately NO file:// fallback: the CSP's `media-src 'self' blob:` refuses the
+// file: scheme, so that branch could only ever fail silently (NJ-37) — a missing
+// bridge must fail loudly and reach onTtsError instead.
 async function loadTtsAudio(path: string): Promise<string> {
   const nj = (window as unknown as { nightjar?: { readAudio?: (p: string) => Promise<ArrayBuffer> } })
     .nightjar
-  if (nj?.readAudio) {
-    const buf = await nj.readAudio(path)
-    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }))
-  }
-  return path.startsWith("file:") ? path : `file://${path}`
+  if (!nj?.readAudio) throw new Error("nightjar.readAudio bridge unavailable")
+  const buf = await nj.readAudio(path)
+  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }))
 }
+
+// How long the "audio failed" label stays up. Transient on purpose: the failure is
+// per-clip — the pipeline is still alive and the next voice turn may play fine.
+const TTS_ERROR_LABEL_MS = 6000
 
 const LABELS: Record<string, string> = {
   idle: "idle",
@@ -40,8 +45,10 @@ const LABELS: Record<string, string> = {
 }
 
 export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string; size?: number }) {
+  const [audioFailed, setAudioFailed] = useState(false)
   const adapter = useMemo(
-    () => createNightjarOrbAdapter({ url: wsUrl, loadTtsAudio }),
+    // setAudioFailed is a stable setState — safe to close over with [wsUrl] deps.
+    () => createNightjarOrbAdapter({ url: wsUrl, loadTtsAudio, onTtsError: () => setAudioFailed(true) }),
     [wsUrl],
   )
   const { state, volume } = useOrbAdapter(adapter)
@@ -49,17 +56,33 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
   // Tear the adapter fully down (WS + audio) when it's replaced or unmounted.
   useEffect(() => () => adapter.disconnect(), [adapter])
 
+  // Auto-clear the failure label; a repeat failure re-arms it.
+  useEffect(() => {
+    if (!audioFailed) return
+    const t = setTimeout(() => setAudioFailed(false), TTS_ERROR_LABEL_MS)
+    return () => clearTimeout(t)
+  }, [audioFailed])
+
   return (
     <>
       <div
         className="flex flex-col items-center gap-1"
         data-orb-state={state}
-        title={`Voice orb — ${LABELS[state] ?? state}`}
+        data-orb-audio-failed={audioFailed || undefined}
+        title={
+          audioFailed
+            ? "Voice orb — the reply's audio could not be played (details in the console)"
+            : `Voice orb — ${LABELS[state] ?? state}`
+        }
       >
         <CssMiniOrb state={state} volume={volume} size={size} />
-        <span className="text-[10px] uppercase tracking-wide text-nightjar-text/40">
-          {LABELS[state] ?? state}
-        </span>
+        {audioFailed ? (
+          <span className="text-[10px] uppercase tracking-wide text-nightjar-alert">audio failed</span>
+        ) : (
+          <span className="text-[10px] uppercase tracking-wide text-nightjar-text/40">
+            {LABELS[state] ?? state}
+          </span>
+        )}
       </div>
       {/* The full-screen overlay takes over only during a REAL voice turn
           (connecting/listening/speaking). "error" ("voice offline", e.g. the

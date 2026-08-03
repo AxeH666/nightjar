@@ -65,6 +65,11 @@ export interface NightjarOrbAdapterOptions {
   createAudioElement?: () => HTMLAudioElement
   /** Resolve a Kokoro WAV path (from the `tts` event) to a URL the <audio> can play. */
   loadTtsAudio?: (path: string) => Promise<string>
+  /** Called when a TTS clip fails to load or play (readAudio bridge missing, <audio>
+   *  element error, refused play()). Lets the UI surface the failure visibly —
+   *  swallowing it into silent silence was NJ-37. Never called for clips that were
+   *  superseded by a newer one (that's normal turn flow, not a failure). */
+  onTtsError?: (err: unknown) => void
   /** Frame scheduler for the analyser loops (default requestAnimationFrame). */
   scheduler?: FrameScheduler
   /** Reconnect backoff for the side-channel. Default 2000ms. */
@@ -112,9 +117,16 @@ export function createNightjarOrbAdapter(
     ((constraints: unknown) =>
       (navigator.mediaDevices.getUserMedia as (c: unknown) => Promise<unknown>)(constraints))
   const createAudioElement = options.createAudioElement ?? (() => new Audio())
+  // No file:// default: the renderer CSP (`media-src 'self' blob:`) refuses the file:
+  // scheme, so a file:// URL could only ever fail silently (NJ-37). A caller that
+  // doesn't inject a real resolver (the app wires readAudio IPC → blob: URL) gets a
+  // loud rejection routed through onTtsError instead of inaudible "playback".
   const loadTtsAudio =
     options.loadTtsAudio ??
-    (async (path: string) => (path.startsWith("file:") ? path : `file://${path}`))
+    (async (path: string): Promise<string> => {
+      throw new Error(`no loadTtsAudio resolver provided — cannot play ${path}`)
+    })
+  const onTtsError = options.onTtsError
 
   // ── subscriber fan-out (mirrors orb-ui's ElevenLabs adapter) ────────────────
   const subscribers = new Set<AdapterCallbacks>()
@@ -232,7 +244,10 @@ export function createNightjarOrbAdapter(
       url = await loadTtsAudio(path)
     } catch (err) {
       console.warn("[nightjar-orb] could not load TTS audio:", err)
-      if (myId === ttsPlayId) setState("idle") // only if we're still the active run
+      if (myId === ttsPlayId) {
+        onTtsError?.(err)
+        setState("idle") // only if we're still the active run
+      }
       return
     }
     // Superseded while loading (a second 'ready' event, enterListening, stop, …) →
@@ -264,12 +279,19 @@ export function createNightjarOrbAdapter(
       }, speakingTimeoutMs)
     }
     audio.onended = () => endTts("idle")
-    audio.onerror = () => endTts("idle")
+    // teardownTts nulls this handler, so only the ACTIVE clip can report a failure.
+    audio.onerror = () => {
+      onTtsError?.(new Error("TTS <audio> playback error"))
+      endTts("idle")
+    }
     try {
       await audio.play()
     } catch (err) {
       console.warn("[nightjar-orb] TTS playback failed:", err)
-      if (myId === ttsPlayId) endTts("idle") // don't let a superseded run tear down the winner
+      if (myId === ttsPlayId) {
+        onTtsError?.(err)
+        endTts("idle") // don't let a superseded run tear down the winner
+      }
     }
   }
 
