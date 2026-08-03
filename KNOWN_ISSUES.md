@@ -61,6 +61,27 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — OPEN (fix scheduled in the Hey-June voice phase) 2026-08-03
+
+- **Found during the Hey-June voice-phase scoping survey (rule 7 — filed, not drive-by fixed).**
+- **Hot mic without consent:** `phase3-ui/src/main/services.ts:154-165` includes `wake-daemon`
+  in `nightjarServices()` unconditionally, so the supervisor spawns `wake_daemon.py` at every
+  app start. On Linux/WSL its `parec` capture opens the microphone with no opt-in, no
+  indication, and no off switch. It is only *accidentally* inert on native Windows because
+  `parec` doesn't exist there — the privacy posture is an accident of a missing binary, not a
+  design. Fix: voice-phase PR 2 (voice pref OFF by default + supervisor `enabled()` gating +
+  consent modal + orb mic indication; disable = process dead, not muted).
+- **Self-wake echo loop:** the daemon's "wake-scoring pauses while a reply plays" note
+  (`wake_daemon.py:26-27`) only holds for the local `NIGHTJAR_PLAY_TTS=1` path. In the real
+  app the RENDERER plays the WAV; the daemon resumes scoring right after publishing
+  `tts ready` (`wake_daemon.py:335`) and can wake on June's own speech from the speakers.
+  The orb already publishes `tts playing/ended` (`orbAdapter.ts:220,256`) for exactly this,
+  but the daemon never subscribes — the NJ-56 producer-only pattern, inverted. Fix:
+  voice-phase PR 4 (daemon subscribes + mutes scoring during playback, with a wall-clock
+  un-mute backstop per rule 3).
+- **Rule 8:** both fixes need a real-mic/speaker verification on native Windows; the echo fix
+  specifically needs real speakers (not headphones) — recorded in the voice-phase checklist.
+
 ## NJ-56 — second post-removal hygiene sweep: setup.ps1 didn't PARSE (fixed); residual dead wiring + a shim defect remain — RESOLVED (fixed items in-tree; open items listed) 2026-08-03
 
 - **Context:** a four-agent sweep (phase2-mcp / phase3-ui / engine-scripts-config /
