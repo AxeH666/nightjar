@@ -102,7 +102,7 @@ heybuddy train "hey june" \
   --positive-audio-dir /data/pos --adversarial-audio-dir /data/adv \
   --training-medium-default-dataset \
   --augmentation-no-default-impulse-dataset \
-  --augmentation-impulse-dataset /data/irs/RIRS_NOISES/simulated_rirs
+  --augmentation-impulse-dataset /data/irs/simulated_rirs_16k
 heybuddy convert checkpoints/hey_june_final.pt
 ```
 

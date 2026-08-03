@@ -70,10 +70,18 @@ reconcilable. The four touched files:
    not install it at all); `TrainingFeaturesGenerator` gains `tts_audio_dir`;
    `generate()` passes the split role to the sample generator (Piper ignores it
    via `**kwargs`); `default()`/`get_training_features()`/
-   `get_validation_features()` thread the directory params.
-3. **`dataset/training.py`** — `default()`/`testing()`/`validation()`/`all()`
+   `get_validation_features()` thread the directory params. Precalculated-cache
+   names gain a content fingerprint of the source directory
+   (`_audio_dir_fingerprint`) whenever an audio dir is set — upstream keys caches
+   by wake phrase alone, so a prior Piper or stale-corpus run's cache would
+   silently satisfy `use_cache` for a Kokoro run (Bugbot, PR #155).
+3. **`dataset/__init__.py`** — the `from heybuddy.dataset.piper import *` line is
+   wrapped in `try/except ImportError`. Without this, importing the package (which
+   `heybuddy train` does before parsing options) defeated the lazy import at the
+   package boundary (Bugbot, PR #155). `wav_directory` is exported alongside.
+4. **`dataset/training.py`** — `default()`/`testing()`/`validation()`/`all()`
    thread `positive_audio_dir`/`adversarial_audio_dir` to the feature calls.
-4. **`__main__.py`** — new `--positive-audio-dir`/`--adversarial-audio-dir`
+5. **`__main__.py`** — new `--positive-audio-dir`/`--adversarial-audio-dir`
    options; both-or-neither enforced (mixing a pregenerated corpus with Piper
    samples would reintroduce the encumbered voice), and mutually exclusive with
    `--additional-phrase` (whose loops would re-embed the same directory once per

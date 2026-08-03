@@ -34,20 +34,26 @@ python3 -m venv /workspace/genv
 /workspace/genv/bin/pip install numpy onnxruntime "misaki[en]" requests soundfile
 /workspace/genv/bin/pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
-# env B — training (heavy; torch; NO piper-phonemize — the lazy-import patch means
-# the Piper path is never touched when --positive-audio-dir is used)
+# env B — training (heavy; torch). NOTE: the upstream environment.yml pip-installs
+# the piper-phonemize wheel (last line of its pip list) — remove it after env
+# creation. The vendored patch guards every piper import, so the tainted GPL/
+# lessac path (NJ-59) is then PHYSICALLY absent, not merely unused, and the
+# assert below proves it on the box that will actually train.
 cd phase2-mcp/wakeword_training
 conda env create -f heybuddy_vendor/environment.yml -n heybuddy || true
 conda activate heybuddy
+pip uninstall -y piper-phonemize
+pip install "numpy<2"   # upstream numpy_util.py does `import numpy.compat`, which
+                        # numpy 2.x REMOVED — found by import-simulating the pod
 pip install -e heybuddy_vendor          # installs the PATCHED vendored tree
-# piper-phonemize will be ABSENT — that is deliberate and correct (NJ-59):
-python -c "import importlib.util as u; assert u.find_spec('piper_phonemize') is None, 'remove piper-phonemize'; print('piper path uninstallable: OK')"
+python -c "import importlib.util as u; assert u.find_spec('piper_phonemize') is None, 'piper-phonemize still installed — uninstall it'; import heybuddy.dataset; print('piper absent AND heybuddy.dataset imports cleanly: OK')"
 
-# reverb IRs — OpenSLR-26 simulated set (Apache-2.0, 178 MB)
+# reverb IRs — OpenSLR-26 simulated set (Apache-2.0, 178 MB). The 16k zip
+# extracts to simulated_rirs_16k/ (verified from the zip's central directory —
+# NOT the RIRS_NOISES/simulated_rirs layout SLR28 uses).
 mkdir -p /data/irs && cd /data/irs
 wget https://www.openslr.org/resources/26/sim_rir_16k.zip && unzip -q sim_rir_16k.zip
-# spot-check the READMEs you are relying on (they travel inside SLR28's zip; SLR26
-# is the same simulated_rirs data standalone — see model_licenses.json entry)
+ls /data/irs/simulated_rirs_16k   # smallroom/ mediumroom/ largeroom/ — confirm before training
 ```
 
 ## 2. Generate the corpora (CPU, ~3–8 h — overlap with the dataset download)
@@ -82,7 +88,7 @@ heybuddy train "hey june" \
   --adversarial-audio-dir /data/adv \
   --training-medium-default-dataset \
   --augmentation-no-default-impulse-dataset \
-  --augmentation-impulse-dataset /data/irs/RIRS_NOISES/simulated_rirs
+  --augmentation-impulse-dataset /data/irs/simulated_rirs_16k
 heybuddy convert checkpoints/hey_june_final.pt   # -> hey_june.onnx (~1.2 MB)
 ```
 

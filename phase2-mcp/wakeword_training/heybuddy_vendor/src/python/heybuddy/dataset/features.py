@@ -27,6 +27,28 @@ from heybuddy.dataset.precalculated import PrecalculatedDatasetIterator
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
 SupplementalDatasetType = Optional[Union[str, List[str], Tuple[str, ...]]]
 
+
+def _audio_dir_fingerprint(audio_dir: str) -> str:
+    """NIGHTJAR PATCH: 8-hex content fingerprint of a sample directory (sorted
+    filename:size pairs). Appended to precalculated-cache names so a cache built
+    from one corpus can never satisfy `use_cache` for another — without this,
+    caches were keyed by wake phrase alone, and a prior Piper or stale-corpus run
+    would be silently reused for a Kokoro run (Bugbot, PR #155). Name+size rather
+    than content hashes: it must stay cheap over 100k files, and regenerating a
+    corpus changes sizes in practice (different voices/speeds/phrases)."""
+    import hashlib
+    h = hashlib.sha1()
+    try:
+        entries = sorted(
+            (e.name, e.stat().st_size)
+            for e in os.scandir(audio_dir) if e.is_file()
+        )
+    except OSError:
+        entries = []
+    for name, size in entries:
+        h.update(f"{name}:{size}\n".encode("utf-8"))
+    return h.hexdigest()[:8]
+
 if TYPE_CHECKING:
     import torch
     from datasets import Dataset # type: ignore[import-untyped]
@@ -709,6 +731,12 @@ class TrainingFeaturesGenerator:
         """
         name = cls.get_wake_phrase_file_name(wake_phrase, testing=testing)
         adversarial_name = f"{name}_adv"
+        # NIGHTJAR PATCH: key caches by sample SOURCE, not phrase alone — a cache
+        # from a prior Piper/stale-corpus run must never satisfy a WAV-corpus run.
+        if positive_audio_dir:
+            name = f"{name}_wav{_audio_dir_fingerprint(positive_audio_dir)}"
+        if adversarial_audio_dir:
+            adversarial_name = f"{adversarial_name}_wav{_audio_dir_fingerprint(adversarial_audio_dir)}"
 
         existing_embeddings = 0
         existing_adversarial_embeddings = 0
@@ -887,6 +915,9 @@ class TrainingFeaturesGenerator:
         """
         name = cls.get_wake_phrase_file_name(wake_phrase, testing=False)
         name = f"{name}_val"
+        # NIGHTJAR PATCH: same source-keyed caching as get_training_features.
+        if positive_audio_dir:
+            name = f"{name}_wav{_audio_dir_fingerprint(positive_audio_dir)}"
 
         existing_embeddings = 0
 

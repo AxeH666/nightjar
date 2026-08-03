@@ -73,28 +73,46 @@ def check(label: str, ok: bool, detail: str = "") -> None:
         FAILS.append(label)
 
 
+REQUIRED_OPTS = ("holdout_dir", "adversarial_dir", "training_dirs")
+KNOWN_VALUE_OPTS = REQUIRED_OPTS + ("validation_negatives", "validation_hours")
+FLAG_OPTS = ("runtime_shim", "allow_standin")
+
+
+def _usage_exit(problem: str) -> "SystemExit":
+    print(__doc__)
+    print(f"error: {problem}", file=sys.stderr)
+    return SystemExit(2)
+
+
 def parse_args(argv: List[str]) -> Dict[str, object]:
+    """Hardened by hand rather than argparse to keep the pod dependency surface at
+    zero — but hardened (Bugbot, PR #155): unknown flags, flags missing their
+    value, and absent required options all exit 2 with usage, never a traceback."""
     if not argv or argv[0].startswith("--"):
-        print(__doc__)
-        raise SystemExit(2)
+        raise _usage_exit("first argument must be the model .onnx path")
     opts: Dict[str, object] = {"model": argv[0], "validation_hours": 35.0}
     i = 1
     while i < len(argv):
         a = argv[i]
-        if a == "--runtime-shim":            # always on; kept for compatibility
-            i += 1
-            continue
-        if a == "--allow-standin":
-            # Calibration mode: lets the harness run against the interim stand-in
-            # so its failure detection can be demonstrated (the stand-in must FAIL
-            # tests 1/3/5 — it answers to the wrong phrase). NEVER a shipping path:
-            # the verdict still says FAIL unless the model is custom.
-            opts["allow_standin"] = True
-            i += 1
-            continue
+        if not a.startswith("--"):
+            raise _usage_exit(f"unexpected positional argument {a!r}")
         key = a.lstrip("-").replace("-", "_")
+        if key in FLAG_OPTS:
+            # --runtime-shim is always-on (kept for compatibility); --allow-standin
+            # is the calibration mode — the verdict still FAILs on a stand-in.
+            opts[key] = True
+            i += 1
+            continue
+        if key not in KNOWN_VALUE_OPTS:
+            raise _usage_exit(f"unknown option {a!r}")
+        if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+            raise _usage_exit(f"option {a!r} requires a value")
         opts[key] = argv[i + 1]
         i += 2
+    missing = [k for k in REQUIRED_OPTS if k not in opts]
+    if missing:
+        raise _usage_exit("missing required option(s): "
+                          + ", ".join("--" + k.replace("_", "-") for k in missing))
     return opts
 
 
@@ -144,6 +162,12 @@ def main() -> int:
     holdout_dir = Path(str(opts["holdout_dir"]))
     adv_dir = Path(str(opts["adversarial_dir"]))
     training_dirs = [Path(p) for p in str(opts["training_dirs"]).split(",")]
+    # A mistyped path must be a clean exit, not a traceback halfway through
+    # scoring (found the hard way: an evicted temp dir produced exactly that).
+    missing_paths = [str(p) for p in [Path(model), holdout_dir, adv_dir, *training_dirs]
+                     if not p.exists()]
+    if missing_paths:
+        raise _usage_exit("path(s) do not exist: " + "; ".join(missing_paths))
     val_npy: Optional[str] = opts.get("validation_negatives")  # type: ignore[assignment]
     val_hours = float(opts.get("validation_hours", 35.0))      # type: ignore[arg-type]
 
