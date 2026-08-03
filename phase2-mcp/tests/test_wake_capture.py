@@ -109,5 +109,39 @@ m = re.search(r'for w in \(([^)]*)\)', mcp_src)
 mcp_phrases = tuple(s.strip().strip("\"'") for s in m.group(1).split(",") if s.strip()) if m else ()
 check("mcp_server strips the same phrases", mcp_phrases == wd.WAKE_PHRASES, mcp_phrases)
 
+print("\n== 7. is_custom is content-derived — no path smuggles the stand-in past the "
+      "NJ-59 warning (Bugbot, PR #154) ==")
+# The historical bug: NIGHTJAR_WAKEWORD_MODEL pointing at the bundled stand-in (or an
+# explicit model_path, or a copy renamed hey_june.onnx) reported is_custom=True and
+# silently suppressed the licence warning. is_standin() classifies by CONTENT.
+import shutil
+import tempfile
+ww = wd._wakeword
+standin = ww._FALLBACK_MODEL
+check("bundled stand-in classified as stand-in", ww.is_standin(standin))
+mel = ww._MEL_MODEL  # a real ONNX file that is NOT the wake stand-in
+check("a different model file is NOT the stand-in", not ww.is_standin(mel))
+check("a nonexistent path is NOT the stand-in", not ww.is_standin(Path("no/such/model.onnx")))
+with tempfile.TemporaryDirectory(prefix="wwstandin-") as td:
+    copy = Path(td) / "hey_june.onnx"   # the sneakiest rename
+    shutil.copyfile(standin, copy)
+    check("a COPY renamed hey_june.onnx is still the stand-in (content, not name)",
+          ww.is_standin(copy))
+    _env_key = "NIGHTJAR_WAKEWORD_MODEL"
+    _prev = os.environ.get(_env_key)
+    try:
+        os.environ[_env_key] = str(copy)
+        _, is_custom = ww.resolve_model_path()
+        check("resolve_model_path: env pointing at a stand-in copy -> is_custom=False",
+              not is_custom)
+    finally:
+        if _prev is None:
+            os.environ.pop(_env_key, None)
+        else:
+            os.environ[_env_key] = _prev
+    det = ww.WakeWordDetector(model_path=str(copy))
+    check("explicit model_path to a stand-in copy -> is_custom=False (warning fires)",
+          not det.is_custom)
+
 print("\n" + ("FAILED: " + "; ".join(FAILS) if FAILS else "ALL CHECKS PASSED"))
 sys.exit(1 if FAILS else 0)

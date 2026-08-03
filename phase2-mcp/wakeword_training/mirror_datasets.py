@@ -144,10 +144,12 @@ def fetch(staging: Path, only_repo: str | None = None) -> int:
                 with open(tmp, "wb") as fh:
                     for chunk in r.iter_content(chunk_size=1 << 22):
                         fh.write(chunk)
-                if f["size"] is not None and tmp.stat().st_size != f["size"]:
-                    tmp.unlink()
+                got = tmp.stat().st_size
+                if f["size"] is not None and got != f["size"]:
+                    tmp.unlink()  # size captured first — stat after unlink would
+                    #               raise FileNotFoundError and mask this error (Bugbot)
                     raise RuntimeError(f"size mismatch for {f['path']}: "
-                                       f"got {tmp.stat().st_size}, want {f['size']}")
+                                       f"got {got}, want {f['size']}")
                 tmp.rename(dest)
     print("fetch complete")
     return 0

@@ -33,7 +33,10 @@ Copied at the pinned commit:
   streaming geometry in `hey-buddy.js` + `models/*.js` is what our
   `wakeword.py` must match frame-for-frame or a trained model's scores will not
   transfer. Keep it; it is the spec.
-- `LICENSE`, `README.upstream.md`, `setup.py`, `environment.yml`.
+- `LICENSE`, `README.md`, `setup.py`, `environment.yml`. (The README keeps its
+  upstream name — `setup.py` reads it for `long_description`, so renaming it
+  breaks `pip install -e`; the one in this directory is upstream's, ours is
+  this file.)
 
 Deliberately **not** copied:
 

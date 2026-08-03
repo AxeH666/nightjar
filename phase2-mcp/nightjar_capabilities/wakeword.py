@@ -106,14 +106,47 @@ _STOCK_WARNING = (
 )
 
 
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def is_standin(path: Path) -> bool:
+    """True if `path` IS the bundled interim stand-in — by content, not by name.
+
+    is_custom must be decided by what the file is, not by which path handed it to
+    us (Bugbot, PR #154): pointing NIGHTJAR_WAKEWORD_MODEL at the stand-in — or
+    copying it to hey_june.onnx, or passing it explicitly — used to report
+    is_custom=True and silently suppress the NJ-59 warning. Size gate first so the
+    common case (a genuinely different model) costs one stat, not a hash."""
+    try:
+        p = Path(path)
+        if not _FALLBACK_MODEL.exists() or not p.exists():
+            return False
+        if p.resolve() == _FALLBACK_MODEL.resolve():
+            return True
+        if p.stat().st_size != _FALLBACK_MODEL.stat().st_size:
+            return False
+        return _sha256(p) == _sha256(_FALLBACK_MODEL)
+    except OSError:
+        return False  # unreadable candidate: treat as not-the-stand-in; loading will error
+
+
 def resolve_model_path() -> Tuple[str, bool]:
     """Return (path, is_custom). Prefers a trained Hey-June model; falls back to the
-    bundled hey-buddy stand-in (is_custom=False — different phrase, and NJ-59)."""
+    bundled hey-buddy stand-in (is_custom=False — different phrase, and NJ-59).
+    is_custom is content-derived via `is_standin`, so no path can smuggle the
+    stand-in past the warning."""
     env = os.environ.get("NIGHTJAR_WAKEWORD_MODEL")
     if env and Path(env).exists():
-        return env, True
+        return env, not is_standin(Path(env))
     if _CUSTOM_MODEL.exists():
-        return str(_CUSTOM_MODEL), True
+        return str(_CUSTOM_MODEL), not is_standin(_CUSTOM_MODEL)
     return str(_FALLBACK_MODEL), False
 
 
@@ -162,7 +195,9 @@ class WakeWordDetector:
         if model_path is None:
             model_path, is_custom = resolve_model_path()
         else:
-            is_custom = True
+            # An explicit path gets the same content check as the resolver: passing
+            # the stand-in directly must not skip the NJ-59 warning (Bugbot).
+            is_custom = not is_standin(Path(model_path))
         self.is_custom = is_custom
         self.threshold = threshold
         self.model_key = Path(model_path).stem
