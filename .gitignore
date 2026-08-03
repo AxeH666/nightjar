@@ -5,8 +5,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Secrets / credentials / accounts (defensive — NONE are committed today) ──
-# Real email/CalDAV creds are Fernet-encrypted into ~/.nightjar/odysseus (OUTSIDE
-# this repo); these patterns make sure a stray copy never lands in git.
+# Legacy note: the removed Odysseus email tier once Fernet-encrypted creds into
+# ~/.nightjar/odysseus. The patterns stay as generic defense — a stray copy of
+# any credential file must never land in git.
 .env
 .env.*
 !.env.example
@@ -17,7 +18,7 @@ secrets.json
 credentials.json
 *.credentials
 *secret*.json
-# Odysseus key material (normally ~/.nightjar/odysseus/.app_key & .key)
+# key material (legacy Odysseus wrote ~/.nightjar/odysseus/.app_key & .key; kept as defense)
 .app_key
 .key
 # Keys / certs
@@ -101,6 +102,7 @@ research/*
 # links to them as the master plan) — these ARE part of the repo; only the
 # upstream CLONE directories above are ignored.
 !research/AUDIT_REPORT.md
+!research/PHASE2B_REPORT.md
 !research/ODYSSEUS_INTEGRATION_PLAN.md
 !research/PROVIDER_SELECTION_PLAN.md
 !research/5b_PLAN.md

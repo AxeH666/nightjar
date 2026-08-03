@@ -61,6 +61,36 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-55 — post-removal hygiene sweep: inline image render was dead; sync guard was dead; browser-use venv gap remains — RESOLVED (2 fixed, 1 open) 2026-08-03
+
+- **Context:** a six-dimension hygiene sweep after the Odysseus removal (branches pruned:
+  42 stale locals, all verified against their merged PR heads; local submodule config +
+  .git/modules leftovers cleaned; leftover phase2-odysseus/ + research/odysseus/ dirs deleted).
+- **FIXED — inline generated-image display was dead (PR-E delivery gap):**
+  `SessionsContext.tsx` still matched the old Odysseus `generated-image/<file>` URL shape;
+  the new tool returns `{"path": "...img_<stamp>.png"}`, so the regex never matched and
+  generated images never rendered inline. Now parses the path field's basename; verified
+  against the exact serialized output from the PR-E e2e (old regex: no match; new: file
+  extracted). The PR-E e2e validated tool → PNG-on-disk but not the renderer's inline
+  display — that last hop needs a live-UI check at the maintainer's real-key confirmation.
+- **FIXED — the P3-17 anti-drift guard was silently dead:** telegram-scheduler's
+  `test_nl_intent_sync.py` pointed AUTHORITATIVE at the deleted
+  `phase2-odysseus/servers/nl_intent.py`, so its skip branch fired unconditionally.
+  Repointed to `phase2-mcp/nl_intent.py` (where PR #143 moved it) and RUN: copies are in
+  sync. Lesson: a guard whose precondition dies skips forever — silent-skip guards need a
+  hard-fail mode or a reachability check of their own.
+- **OPEN — browser-use MCP enabled but venv absent on this box:** `opencode.json` enables
+  `browser-use` and the assistant grants its tool, but `browser-use-mcp/venv` does not
+  exist here (pre-existing, audit1.md P1-5 — setup builds it on managed installs; this
+  box never ran that step). Not a repo defect; provision the venv or expect the tool to
+  fail at call time.
+- Also in this sweep: 5 agent prompts no longer claim odysseus-/row-bot namespaces; the
+  diffusion install step in both setup scripts is now OPT-IN (nothing consumes it since
+  PR E); `!research/PHASE2B_REPORT.md` gitignore exception added (it was tracked-but-
+  ignored); README/WINDOWS_SETUP/JUNE_context/CLAUDE.md purged of Odysseus-as-present
+  claims; stale scheduler "odysseus venv" log wording fixed; tracked Phase-2 demo
+  scratch (workspace/project/) removed.
+
 ## NJ-54 — Odysseus submodule REMOVED; image gen is BYOK cloud; relicensing now unblocked — RESOLVED 2026-08-03
 
 - **What (PR E):** `research/odysseus` (the AGPL submodule, and the last reason the

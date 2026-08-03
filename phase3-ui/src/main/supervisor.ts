@@ -265,11 +265,10 @@ export class Supervisor {
     }
     this.set(m, "unhealthy", "did not become healthy within timeout")
     // NJ-12: a service can miss its readiness window yet still be legitimately
-    // loading — diffusion-server's ~6GB cold GPU load can exceed readyTimeoutMs on a
-    // contended/cold GPU. Without a probe here it stays "unhealthy" forever even once
-    // it actually starts serving, silently defeating anything gated on its health (the
-    // NJ-6 local-first image reconcile keys on the diffusion-server healthy transition,
-    // so image gen would stay pinned to cloud while a working local model is up). Start
+    // loading. Originally motivated by the since-removed diffusion-server's ~6GB cold
+    // GPU load (the sidecar and its image reconcile went with the Odysseus removal,
+    // PR E); kept because ANY slow-loading sidecar benefits — a service that finally
+    // starts serving must not stay "unhealthy" forever. Start
     // a PASSIVE recovery probe that only flips unhealthy→healthy once it finally
     // answers. It deliberately does NOT kill/restart on continued misses (unlike
     // beginHealthWatch): the process is alive and may just need more time, and killing

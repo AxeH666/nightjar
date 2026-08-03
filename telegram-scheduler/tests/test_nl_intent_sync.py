@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 VENDORED = HERE.parent / "app" / "nl_intent.py"                                  # this repo's telegram copy
-AUTHORITATIVE = HERE.parents[1] / "phase2-odysseus" / "servers" / "nl_intent.py"  # source of truth
+AUTHORITATIVE = HERE.parents[1] / "phase2-mcp" / "nl_intent.py"  # source of truth (moved in PR #143)
 
 
 def _code_ast_dump(path: Path) -> str:

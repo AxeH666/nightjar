@@ -93,7 +93,7 @@ export function getSchedulerStatus(): SchedulerStatus {
   return schedulerStatus
 }
 
-// Start the local scheduler. Gated on the odysseus venv existing (mirrors the other sidecar
+// Start the local scheduler. Gated on the phase2-mcp venv existing (mirrors the other sidecar
 // gates) — without it the poller can't run, so there's nothing to schedule. Idempotent.
 // Reports availability via onStatus + the cached status so the UI can show a visible
 // "reminders unavailable — finish setup" signal instead of failing silently (P2-20).
@@ -107,7 +107,7 @@ export function startLocalScheduler(onStatus?: (s: SchedulerStatus) => void): vo
     return
   }
   if (!existsSync(pyPath())) {
-    console.warn("[scheduler] odysseus venv missing — local reminders disabled")
+    console.warn("[scheduler] phase2-mcp venv missing — local reminders disabled")
     set({ available: false, reason: "setup" })
     return
   }

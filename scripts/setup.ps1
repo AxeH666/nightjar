@@ -25,7 +25,7 @@ Prereqs (install first; reopen the terminal after each so PATH refreshes):
 [CmdletBinding()]
 param(
   [switch]$SkipOllama,      # skip the local vision model (gemma3:4b)
-  [switch]$SkipDiffusion,   # skip the local image-gen venv + Z-Image-Turbo (~6 GB)
+  [switch]$WithDiffusion,   # OPT-IN: local image-gen venv + Z-Image-Turbo (~6 GB) — currently unused by the app (PR E)
   [switch]$CoreOnly         # engine + phase-cad + UI only - the minimal LAB/CAD-via-BYOK path
 )
 $ErrorActionPreference = 'Stop'
@@ -36,14 +36,6 @@ Write-Host "== Nightjar setup (native Windows) - root: $Root ==" -ForegroundColo
 
 function Test-Cmd([string]$Name) { return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
 
-# Run git and return its exit code. Redirect ALL streams to $null with `*> $null` (NOT
-# `2>&1 | Out-Null`): piping a native command's output can leave $LASTEXITCODE unreliable on
-# some Windows-PowerShell 5.1 builds, and a wrong "already applied" here would SKIP the Odysseus
-# patch on a fresh clone (breaking the no-Docker embedded ChromaDB). With no pipeline,
-# $LASTEXITCODE is unambiguously git's exit. Used for the patch --check probes.
-function Invoke-GitCode([string[]]$GitArgs) {
-  $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-  try { & git @GitArgs *> $null; return $LASTEXITCODE } finally { $ErrorActionPreference = $old }
 }
 
 # Resolve bun.exe: PATH first, then the default installer location.
@@ -85,12 +77,12 @@ function New-Venv([string]$Dir, [string[]]$Py) {
 }
 
 # ---- 1) Submodules: Odysseus (RAG/PIM) + OpenCode (the engine) --------------------
-Write-Host "-- [1/8] git submodule (opencode engine) --"
+Write-Host "-- [1/7] git submodule (opencode engine) --"
 & git submodule update --init research/opencode
 if ($LASTEXITCODE -ne 0) { throw "git submodule update failed (need network + git access to the fork)" }
 
 # ---- 2) Engine deps: bun install in research/opencode ------------------------------
-Write-Host "-- [2/8] OpenCode engine deps (bun install) --"
+Write-Host "-- [2/7] OpenCode engine deps (bun install) --"
 $bun = Resolve-Bun
 $bunDir = Split-Path $bun -Parent
 if (($env:PATH -split ';') -notcontains $bunDir) { $env:PATH = "$bunDir;$env:PATH" }  # so dep postinstalls that call `bun` resolve
@@ -107,16 +99,14 @@ try {
   }
 } finally { Pop-Location }
 
-# ---- 3) (retired) the Odysseus patch step — the submodule itself was removed in PR E
-
 # ---- 4) UI node modules -----------------------------------------------------------
-Write-Host "-- [4/8] phase3-ui npm install --"
+Write-Host "-- [3/7] phase3-ui npm install --"
 if (-not (Test-Cmd 'npm')) { throw "npm not found. Install Node.js 20+ and reopen the terminal." }
 Push-Location (Join-Path $Root 'phase3-ui')
 try { & npm install --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw "npm install failed" } } finally { Pop-Location }
 
 # ---- 5) phase-cad venv (build123d / OCP via uv) - needed for LAB/CAD ---------------
-Write-Host "-- [5/8] phase-cad venv (build123d via uv) --"
+Write-Host "-- [4/7] phase-cad venv (build123d via uv) --"
 if (-not (Test-Cmd 'uv')) { throw "uv not found. Install it: powershell -c `"irm https://astral.sh/uv/install.ps1 | iex`" then reopen the terminal." }
 $cadPy = Join-Path $Root 'phase-cad\.venv\Scripts\python.exe'
 if (-not (Test-Path $cadPy)) { & uv venv --python 3.12 (Join-Path $Root 'phase-cad\.venv') }
@@ -134,7 +124,7 @@ if ($CoreOnly) {
 }
 
 # ---- 6) Backend Python venvs (phase2-mcp / browser-use) ----------
-Write-Host "-- [6/8] backend venvs (phase2-mcp, browser-use) --"
+Write-Host "-- [5/7] backend venvs (phase2-mcp, browser-use) --"
 $py312 = Get-Py312
 New-Venv (Join-Path $Root 'phase2-mcp') $py312
 # TTS moved from kokoro-onnx's GPL espeak tokenizer to misaki (Apache-2.0).
@@ -149,7 +139,7 @@ New-Venv (Join-Path $Root 'browser-use-mcp') $py312
 # browser-use needs a Chrome/Chromium; verify later:  browser-use-mcp\venv\Scripts\browser-use --doctor
 
 # ---- 7) Local vision model - Ollama + gemma3:4b (best-effort, NEVER fatal) ----------
-Write-Host "-- [7/8] local vision (Ollama + gemma3:4b) --"
+Write-Host "-- [6/7] local vision (Ollama + gemma3:4b) --"
 if ($SkipOllama) {
   Write-Host "   skipped (-SkipOllama)"
 } elseif (Test-Cmd 'ollama') {
@@ -163,9 +153,12 @@ if ($SkipOllama) {
 }
 
 # ---- 8) Local image backend - diffusion venv + Z-Image-Turbo (best-effort) ----------
-Write-Host "-- [8/8] local image backend (diffusion + Z-Image-Turbo) --"
-if ($SkipDiffusion) {
-  Write-Host "   skipped (-SkipDiffusion)"
+Write-Host "-- [7/7] local image backend (diffusion + Z-Image-Turbo) --"
+# PR E: the app currently has NO local image path (image gen is a BYOK cloud call;
+# the diffusion sidecar was removed with the Odysseus submodule). This step is kept
+# ONLY as groundwork for a possible future local backend, and is now OPT-IN.
+if (-not $WithDiffusion) {
+  Write-Host "   skipped (currently unused by the app - opt in with -WithDiffusion)"
 } else {
   try { New-Venv (Join-Path $Root 'diffusion-mcp') $py312 } catch { Write-Host "   (diffusion venv setup failed - retry later; cloud image gen via BYOK still works)" }
   $imgDir = if ($env:NIGHTJAR_IMAGE_MODEL_DIR) { $env:NIGHTJAR_IMAGE_MODEL_DIR } else { Join-Path $env:USERPROFILE 'models\Z-Image-Turbo' }

@@ -473,7 +473,7 @@ ipcMain.handle("cad:loadHero", () => buildHeroModel())
 app.whenReady().then(() => {
   createWindow()
   // Local reminder scheduler (Task 6 free tier): poll for due tasks + fire desktop
-  // notifications while the app is open. Gated on the odysseus venv inside start();
+  // notifications while the app is open. Gated on the phase2-mcp venv inside start();
   // its availability is pushed to the renderer so the UI can flag it (P2-20).
   startLocalScheduler(pushScheduler)
   // Inject any stored BYOK keys into opencode-serve's env before it starts.

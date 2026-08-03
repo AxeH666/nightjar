@@ -32,12 +32,11 @@
 | side-channel | `phase2-mcp/venv` python | 8765 | wake-word/TTS/orb side-channel | voice orb |
 | wake-daemon | `phase2-mcp/venv` python | 8766 | "Hey Nightjar" loop | wake word (needs mic) |
 | ollama | Ollama | 11434 | local **vision** (gemma3:4b) | offline image analysis |
-| diffusion-server | `diffusion-mcp/venv` (CUDA) | 8100 | local **image gen** (Z-Image-Turbo) | offline image gen |
 | Electron UI | Node + electron-vite | — | the app | everything (this is what renders) |
 
 **To verify the merged LAB foundation (Mechanical/CAD), you only need:** the Electron UI +
 opencode-serve + a chat model (**local llama OR a BYOK cloud key**) + the **cad-build123d**
-MCP (`phase-cad/.venv`). Everything else (voice/vision/email/RAG/diffusion) is optional.
+MCP (`phase-cad/.venv`). Everything else (voice/vision/websearch/image) is optional.
 
 ---
 
@@ -48,7 +47,7 @@ MCP (`phase-cad/.venv`). Everything else (voice/vision/email/RAG/diffusion) is o
    git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
    cd nightjar
    ```
-   Already cloned? `git submodule update --init research/odysseus`
+   Already cloned? `git submodule update --init research/opencode`
 2. **NVIDIA driver + CUDA** (only if you want local llama and/or local image gen on GPU).
    The Windows NVIDIA driver also powers CUDA inside WSL2 — no separate WSL driver.
 3. Decide **local model vs BYOK**: local llama.cpp is heavier to set up on Windows; a **BYOK
@@ -76,7 +75,7 @@ MCP (`phase-cad/.venv`). Everything else (voice/vision/email/RAG/diffusion) is o
 Install **Python 3.12** (python.org or `winget install Python.Python.3.12`). 3.12 is mandatory
 for phase-cad; use it everywhere for consistency.
 
-- **WSL / Git-Bash:** the one-shot script does the submodule patch + venvs + `npm install`:
+- **WSL / Git-Bash:** the one-shot script does the submodule + venvs + `npm install`:
   ```bash
   ./scripts/setup.sh          # bash only (WSL, or Git Bash on Windows)
   ```
@@ -123,25 +122,19 @@ venv via [`uv`](https://docs.astral.sh/uv/)**, kept isolated from the other venv
   which `vision.ts` already knows to look for). `ollama pull gemma3:4b` (~3.3 GB).
 - Skippable; cloud vision via BYOK works without it.
 
-### 3.7 diffusion / Z-Image-Turbo (optional — offline image gen, heavy CUDA)
-- `diffusion-mcp/venv` (torch/diffusers, CUDA) + download `Tongyi-MAI/Z-Image-Turbo` (~6 GB) to
-  `~/models/Z-Image-Turbo` (override `NIGHTJAR_IMAGE_MODEL_DIR`). Needs ~6 GB VRAM. The service is
-  added only when both the venv and model exist. Skippable (`NIGHTJAR_SKIP_DIFFUSION=1` in the
-  bash setup); cloud image gen via BYOK works without it.
-
-### 3.8 Odysseus submodule + patch
-`scripts/setup.sh` fetches `research/odysseus` (git submodule) and applies
-~~the Odysseus patch~~ — retired in the Odysseus removal (PR G); setup now reverts a previously-patched submodule to pristine. If
-you set venvs up manually, still run the submodule init + `git -C research/odysseus apply <patch>`
-(or run `scripts/setup.sh` under Git Bash). Only needed for the email/RAG/research/PIM tools — **not**
-for the LAB/CAD verification.
+### 3.7 image generation (BYOK cloud)
+Image gen is `phase2-mcp/imagegen_server.py` — an OpenAI-compatible BYOK call
+(OpenAI or OpenRouter). No local model, venv, or download; pick the provider in
+Settings → Capabilities and store its key. There is currently no local
+diffusion path (it went with the Odysseus removal; a diffusers backend may
+return as an additive provider).
 
 ---
 
 ## 4. Ports (all loopback `127.0.0.1`)
 
 `8085` llama · `8086` inference-proxy · `4096` opencode-serve · `8765` side-channel ·
-`8766` wake-daemon · `8100` diffusion · `11434` ollama. The renderer CSP allows only
+`8766` wake-daemon · `11434` ollama. The renderer CSP allows only
 `127.0.0.1`/`localhost` (loopback) — no other origins.
 
 ## 5. Environment variables
@@ -153,8 +146,8 @@ for the LAB/CAD verification.
 | `NIGHTJAR_LLAMA_BIN` | path to `llama-server` | set to your `llama-server.exe` |
 | `NIGHTJAR_MODEL_GGUF` | GGUF path | override if not in `~/models/…` |
 | `NIGHTJAR_WORKSPACE` | opencode cwd | default `engine-workspace/` |
-| `NIGHTJAR_DIFFUSION_PY` / `NIGHTJAR_IMAGE_MODEL_DIR` | image backend | Windows venv/model paths |
-| `NIGHTJAR_SKIP_OLLAMA` / `NIGHTJAR_SKIP_DIFFUSION` | skip optional models in bash setup | — |
+| `NIGHTJAR_IMAGE_PROVIDER` | image-gen backend (openai/openrouter/local=off) | set automatically by the app; export for manual `opencode serve` runs |
+| `NIGHTJAR_SKIP_OLLAMA` | skip the optional vision model in bash setup | — |
 | `NIGHTJAR_DESIGN_PROFILE` | lift local-model output caps | optional |
 
 > The app sets **`NJ_VENV_PY`** (`bin/python` on POSIX, `Scripts/python.exe` on Windows) in the
@@ -238,9 +231,9 @@ run). Keep your WSL clone until this passes — safety net.
   git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
   cd nightjar
   ```
-  `--recurse-submodules` is **required** — it fetches both the Odysseus and the **OpenCode
-  engine** (`research/opencode`, the only agent loop) submodules. Without it the engine is
-  absent and chat can't start. Already cloned without it? `git submodule update --init`.
+  `--recurse-submodules` is **required** — it fetches the **OpenCode engine** submodule
+  (`research/opencode`, the only agent loop). Without it the engine is absent and chat
+  can't start. Already cloned without it? `git submodule update --init`.
 - **Why fresh, not copied:** the WSL clone's `node_modules` hold Linux-native binaries
   (Electron/esbuild) and its venvs hold Linux python + Linux OCP/VTK wheels — none run on
   Windows. Fresh clone + fresh installs is mandatory.

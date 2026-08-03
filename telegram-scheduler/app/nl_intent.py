@@ -1,6 +1,7 @@
 """Natural-language → structured reminder intent (Task 6, the core new component).
 
-VENDORED COPY — the authoritative source is phase2-odysseus/servers/nl_intent.py. This server
+VENDORED COPY — the authoritative source is phase2-mcp/nl_intent.py (moved there in the
+Odysseus removal, PR #143). This server
 deploys as a standalone Docker image and cannot import from the odysseus tree, so the parser is
 duplicated here verbatim. Keep the two in sync when either changes — enforced by
 tests/test_nl_intent_sync.py (AST-compares the two copies; module docstrings may differ).

@@ -1,8 +1,10 @@
 # Nightjar — Operating Rules for Claude Code
 
-Nightjar is an offline, local-first AI coding + personal assistant (AGPL-3.0-or-later),
-built by bolting OpenCode (agent engine) + Row-Bot (voice/vision/memory/browser) +
-Odysseus (email/RAG/PIM) + orb-ui together via MCP and a WebSocket side-channel.
+Nightjar is an offline, local-first AI coding + personal assistant (AGPL-3.0-or-later):
+the OpenCode agent engine + vendored Row-Bot capabilities (voice/vision/memory/browser)
++ Nightjar-authored MCP servers (websearch/research/PIM/image) + a custom three.js orb,
+wired over MCP and a WebSocket side-channel. (Odysseus and orb-ui were removed —
+PRs #139–#147 and the Step-7 redesign; they appear below only as history.)
 Full architecture/history: `research/AUDIT_REPORT.md`. Known open issues:
 `KNOWN_ISSUES.md`.
 

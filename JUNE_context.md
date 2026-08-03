@@ -14,7 +14,7 @@
 ## 1. What this is
 
 **An offline, local-first AI coding + personal assistant + engineering workbench.** It runs a
-local LLM and a suite of capabilities (voice, vision, memory, browser, email, RAG, research,
+local LLM and a suite of capabilities (voice, vision, memory, browser, web search, research,
 calendar/notes/tasks, prompt-to-CAD) **on your own machine** — nothing goes to the cloud by
 default. Cloud is strictly opt-in per-capability via **BYOK** (bring your own key).
 
@@ -25,7 +25,7 @@ together over **MCP** rather than merged. See `NIGHTJAR_LICENSE_AND_ATTRIBUTION.
 |---|---|---|---|
 | **OpenCode** | the agent engine — the ONLY agent loop | MIT | git **submodule** at `research/opencode` (pinned to the `AxeH666/opencode` fork), run from TS source via **bun** |
 | **Row-Bot** | voice / vision / memory / browser capabilities | Apache-2.0 | vendored into `phase2-mcp/nightjar_capabilities/_vendor/` |
-| **Odysseus** | email / RAG / deep-research / calendar / notes / tasks | AGPL-3.0-or-later | **git submodule** at `research/odysseus` + a small integration patch |
+| ~~Odysseus~~ | REMOVED (PRs #139–#147) — tiers deleted or rebuilt Nightjar-side; the submodule is gone | — (historical) | see NIGHTJAR_LICENSE_AND_ATTRIBUTION.md + NJ-54 |
 | **orb-ui** | the voice-reactive orb | MIT | forked/themed into the UI |
 
 **Core design posture (these are load-bearing):**
@@ -59,7 +59,7 @@ together over **MCP** rather than merged. See `NIGHTJAR_LICENSE_AND_ATTRIBUTION.
 
   Model layer:  llama-server (:8085, CUDA)  ←  inference-proxy (:8086, bun)
   Side-channel: sidechannel.py (:8765 WS) + wake_daemon.py (:8766)
-  Optional:     ollama (:11434, vision) · diffusion-server (:8100, image gen)
+   Optional:     ollama (:11434, vision)
 ```
 
 **The key insight:** the Electron app is the *launcher*. Its **Supervisor** starts each service
@@ -81,7 +81,6 @@ browser-use-mcp/    autonomous browser MCP                                      
 diffusion-mcp/      local image generation (torch/diffusers)                        (venv)
 telegram-scheduler/ always-on Telegram reminder server (separate deployable)
 research/opencode/  OpenCode engine — git SUBMODULE (the only agent loop; AxeH666/opencode fork)
-research/odysseus/  Odysseus source — git SUBMODULE (AGPL source-availability)
 scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setup.ps1 (native Windows)
 ```
 
@@ -123,7 +122,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
   --timeout 120`). Fronted by **inference-proxy** (`:8086`, a bun `.mjs`) that adds a hard
   wall-clock abort.
 - **Local vision:** **Ollama** + **gemma3:4b** (`:11434`).
-- **Local image gen:** **Z-Image-Turbo** via **diffusers** (`:8100`, needs ~6 GB VRAM).
+- **Image gen:** BYOK cloud (OpenAI/OpenRouter) via `nightjar-image` — no local model (the diffusion path went with the Odysseus removal).
 - **Cloud (BYOK, opt-in):** OpenRouter / Fireworks / OpenAI / Anthropic / etc. — encrypted key
   storage + a model switcher + a dismissible "cloud active" banner backed by a persistent ☁ indicator in the switcher.
 
@@ -134,7 +133,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 | **phase2-mcp** (`venv`) | voice/vision/memory/browser | `faster-whisper`+`ctranslate2` (STT), `kokoro-onnx`+`phonemizer-fork`+`espeakng-loader` (TTS), `openwakeword` (wake word), `faiss-cpu`+`scikit-learn` (memory), `ollama`, `opencv-python-headless`, `mss`, `playwright`, `av`, `soundfile`, `mcp`, `websockets` |
 
 | **browser-use-mcp** (`venv`) | autonomous browser | `browser-use==0.13.3` (drives Chromium over CDP — needs a Chrome/Chromium) |
-| **diffusion-mcp** (`venv`) | local image gen | `torch` (install the CUDA wheel for GPU), `diffusers`, `transformers`, `accelerate`, `safetensors` |
+| ~~diffusion-mcp~~ | local image gen — REMOVED from the app (PR E); dir may exist but nothing launches it | — | — |
 | **telegram-scheduler** | always-on reminders (separate deployable) | `fastapi`, `apscheduler`, `aiogram`, `sqlalchemy`, `httpx` |
 
 > **Why separate venvs:** heavy/version-sensitive deps (OCP/VTK, torch, browser-use's SDKs) must
@@ -153,8 +152,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 | `side-channel` | phase2-mcp python | 8765 | wake-word / TTS / orb WebSocket |
 | `wake-daemon` | phase2-mcp python | 8766 | "Hey Nightjar" loop (needs a mic) |
 | `ollama` | Ollama | 11434 | local vision; **adopted** if already running |
-| `diffusion-server` | diffusion-mcp python | 8100 | added only if the venv **and** model exist |
-| MCP servers (×9) | per-venv python | — (stdio) | spawned by opencode-serve, not the supervisor |
+| MCP servers (×7) | per-venv python | — (stdio) | spawned by opencode-serve, not the supervisor |
 
 **Supervisor semantics that matter:**
 - **Adopt-don't-double-spawn:** if something already answers a service's health probe, it's
@@ -185,7 +183,7 @@ the Odysseus submodule is gone (PR E) — image gen is a BYOK cloud call.
 (Odysseus removal: `odysseus-email` / `odysseus-rag` / `odysseus-docs` were deleted in PR C —
 see KNOWN_ISSUES NJ-49 for the reachability audit that justified it.)
 (`nightjar-websearch` was split out of `odysseus-research` in the Odysseus-removal PR B — it is
-Odysseus-free and runs in the `phase2-mcp` venv; `odysseus-research` now serves `deep_research` only.)
+Odysseus-free and runs in the `phase2-mcp` venv; deep research is `nightjar-research` — Nightjar's own loop since PR F.)
 Each command = that phase's venv python + a thin launcher shim, resolved off `{env:NIGHTJAR_ROOT}`
 and `{env:NJ_VENV_PY}` (the cross-platform bit — see §9).
 
@@ -196,12 +194,12 @@ and `{env:NJ_VENV_PY}` (the cross-platform bit — see §9).
 - `NIGHTJAR_ROOT` — repo root (the app sets it automatically; export it for manual CLI runs).
 - **App data:** `~/.nightjar` (Linux) / `C:\Users\<you>\.nightjar` (Windows) — **separate per OS,
   so a Windows install does not touch WSL data.**
-- **Odysseus data:** `~/.nightjar/odysseus` (+ embedded Chroma at `…/chroma`).
+- **Legacy Odysseus data:** `~/.nightjar/odysseus` — read once by the PIM migration (NJ-50); nothing writes there anymore.
 - **Workspace** (opencode-serve cwd): `engine-workspace/`.
 - **BYOK keys:** encrypted, stored **per machine** → they do **not** carry over from WSL to
   Windows; re-add them there.
 - Key env overrides: `NIGHTJAR_BUN`, `NIGHTJAR_LLAMA_BIN`, `NIGHTJAR_MODEL_GGUF`,
-  `NIGHTJAR_WORKSPACE`, `NIGHTJAR_DIFFUSION_PY`, `NIGHTJAR_IMAGE_MODEL_DIR`,
+  `NIGHTJAR_WORKSPACE`, `NIGHTJAR_IMAGE_PROVIDER`,
   `NIGHTJAR_DESIGN_PROFILE`, `NJ_VENV_PY` (set by the app).
 
 ---

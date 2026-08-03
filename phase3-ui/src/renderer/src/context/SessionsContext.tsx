@@ -543,14 +543,19 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }),
       )
       // Image-generation tool completed → load the PNG from disk + append inline.
+      // PR E: nightjar-image_generate_image returns {"path": "...\\img_<stamp>.png"}
+      // (a filesystem path in JSON, backslashes escaped) — the old Odysseus tool
+      // returned a "generated-image/<file>" web link. Match the path field and pass
+      // its basename to the read-back IPC (which re-basenames defensively anyway).
       if (refs && call.status === "completed" && call.output && /generate_image/i.test(call.tool) && !refs.loadedImages.has(call.callID)) {
-        const m = /generated-image\/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))/i.exec(call.output)
-        if (m) {
+        const pm = /"path"\s*:\s*"([^"]+\.(?:png|jpe?g|webp))"/i.exec(call.output)
+        const file = pm ? (pm[1].split(/[\\/]/).pop() ?? null) : null
+        if (file) {
           refs.loadedImages.add(call.callID)
-          loadGeneratedImage(m[1]).then((src) => {
+          loadGeneratedImage(file).then((src) => {
             if (!src) return
             updateMessages(sid, (prev) =>
-              prev.map((mm) => (mm.id === messageID ? { ...mm, blocks: [...mm.blocks, { kind: "image", src, name: m[1] }] } : mm)),
+              prev.map((mm) => (mm.id === messageID ? { ...mm, blocks: [...mm.blocks, { kind: "image", src, name: file }] } : mm)),
             )
           })
         }
