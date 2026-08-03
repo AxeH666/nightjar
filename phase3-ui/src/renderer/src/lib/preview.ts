@@ -59,16 +59,5 @@ export function isRenderable(rel: string): boolean {
   return /\.(html?|svg|md)$/i.test(rel)
 }
 
-// Prefer the "primary" artifact to show: the latest .html, else the latest renderable,
-// else the latest file. `prev` biases toward keeping the current selection stable.
-export function pickActiveEntry(entries: string[], prev: string): string {
-  if (prev && entries.includes(prev)) return prev
-  const html = entries.filter((e) => /\.html?$/i.test(e))
-  if (html.length) return html[html.length - 1]
-  const renderable = entries.filter(isRenderable)
-  if (renderable.length) return renderable[renderable.length - 1]
-  return entries[entries.length - 1] ?? ""
-}
-
 export const fmtSize = (n: number): string =>
   n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`

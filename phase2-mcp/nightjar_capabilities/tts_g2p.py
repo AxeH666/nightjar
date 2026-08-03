@@ -68,7 +68,6 @@ CURATED = {
     "qwen": "kwˈɛn",
     "onnx": "ˈɑnˌɛks",
     "opencode": "ˈOpənkˌOd",
-    "odysseus": "Odˈɪsiəs",
     "electron": "ɪlˈɛktɹɑn",
     "toolpath": "tˈulpˌæθ",
     "von": "vˈɑn",

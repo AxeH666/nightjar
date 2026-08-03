@@ -13,7 +13,7 @@ whole pipeline can be smoke-tested offline. Set a bot token + a real LLM key to 
 The Nightjar desktop app isn't always running, but a reminder for 8am tomorrow needs something
 that is. This is that thin, always-on piece. It is a **standalone deployable** (its own Docker
 image / systemd unit) and shares no runtime with the desktop app — which is why the NL parser
-(`app/nl_intent.py`) is vendored from `phase2-odysseus/servers/nl_intent.py` rather than
+(`app/nl_intent.py`) is vendored from `phase2-mcp/nl_intent.py` rather than
 imported. Keep the two copies in sync.
 
 ## Architecture

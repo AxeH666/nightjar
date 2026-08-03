@@ -25,7 +25,6 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from imagegen_backend import (
-    ALLOWED_SIZES,
     build_payload,
     looks_like_image,
     output_path,

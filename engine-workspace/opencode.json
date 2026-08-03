@@ -150,7 +150,7 @@
     "nightjar-pim": {
       "type": "local",
       "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/pim_server.py"],
-      "environment": { "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus", "ODYSSEUS_MCP_MEMORY_OWNER": "nightjar" },
+      "environment": { "ODYSSEUS_DATA_DIR": "{env:HOME}/.nightjar/odysseus" },
       "enabled": true,
       "timeout": 120000
     },

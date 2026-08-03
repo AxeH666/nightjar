@@ -346,8 +346,8 @@ export class Supervisor {
   // through to spawn() → two processes fighting for the port, a crash-restart storm, or
   // the engine left down. This is now reachable because byok:set/remove AND
   // capabilities:set (browser/research/vision) all restart opencode-serve and the UI
-  // never serializes them. Guard it exactly like reconcileImageEndpoint: run passes to
-  // completion, and if a newer request lands mid-pass, run ONE more afterward so the
+  // never serializes them. Guard: single-flight with one trailing re-run — a pass runs
+  // to completion, and if a newer request lands mid-pass, run ONE more afterward so the
   // latest env still wins.
   async restartService(name: string, env?: Record<string, string>): Promise<void> {
     const m = this.managed.find((x) => x.def.name === name)

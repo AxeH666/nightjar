@@ -1,9 +1,14 @@
 """Natural-language → structured reminder intent (Task 6, the core new component).
 
+AUTHORITATIVE COPY, no phase2-mcp runtime importer (P3-17): the live consumer is the
+always-on telegram-scheduler, which vendors a verbatim copy at
+`telegram-scheduler/app/nl_intent.py`. Its `tests/test_nl_intent_sync.py` AST-compares
+that copy against THIS file — deleting or moving this file silently kills that guard.
+
 "meeting with xyz at 2, remind me at 1" → {title, when (UTC), repeat} that maps onto
 task_create. Provider-AGNOSTIC: the LLM is an injected `llm_call(system, user) -> str`
 callable, so the parser is built + fully unit-tested with a MOCKED LLM (no key, no network),
-and the server (PR 17) injects a real Anthropic/OpenAI client at deploy time.
+and the deployed server injects a real Anthropic/OpenAI client at deploy time.
 
 Timezone: the user speaks in their LOCAL time ("remind me at 1pm"); reminders are STORED in
 UTC. The LLM is given the user's current local time and returns a LOCAL wall-clock; this

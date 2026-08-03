@@ -48,6 +48,7 @@ adding networked access.
 | llmfit (© 2026 Alex Jones) | hardware model-fit (vendored at `phase1-engine/hwfit_vendor/`) | MIT | `phase1-engine/hwfit_vendor/LICENSE.llmfit-MIT` (travels with the vendored copy) |
 | Tongyi DeepResearch (Alibaba-NLP / Tongyi Lab) | deep-research **pattern reference only** — Nightjar's `phase2-mcp/deep_research_backend.py` is an original implementation of the search→fetch→extract→synthesize shape; **no code copied** (the AGPL Odysseus adaptation was removed in PR F) | Apache-2.0 | pattern credited here; upstream https://github.com/Alibaba-NLP/DeepResearch |
 | three.js (© three.js authors) | custom voice-reactive vortex orb (WebGL, redesign Step 7) | MIT | `phase3-ui/node_modules/three/LICENSE` |
+| orb-ui (© Alexander Chen) | **derived math only** — the RMS reduction + EMA smoothing + normalization curve in `phase3-ui/src/renderer/src/lib/audioVolume.ts` mirror orb-ui's mic monitor (`normalizeMicVolume`); the `orb-ui` npm dependency and the forked `AmberCircleTheme` were removed in redesign Step 7 | MIT | source-header attribution in `audioVolume.ts` |
 | react (© Meta Platforms / Facebook, Inc.) | UI framework for the Electron renderer | MIT | `phase3-ui/node_modules/react/LICENSE` (npm dep) |
 | react-dom (© Meta Platforms / Facebook, Inc.) | React DOM renderer (renderer root) | MIT | `phase3-ui/node_modules/react-dom/LICENSE` (npm dep) |
 | Browser Use (© 2024 Gregor Zunic) | autonomous web tasks / form-filling (separate MCP) | MIT | `browser-use-mcp/THIRD-PARTY-LICENSES/browser-use-MIT-LICENSE.txt` (pip dep, isolated venv) |
@@ -101,8 +102,8 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
   own key over a network API — **no bundled-code license obligation** (nothing new
   vendored). Same posture as the other BYOK providers already shipped.
 - **Step 3 — image_gen license audit.** ✅ **Done** — see "Image-generation model
-  licenses" below. TL;DR: the wired `odysseus-image` MCP is API-based (defaults to
-  *cloud* OpenAI image models); no restrictive local checkpoint is on the shipped path.
+  licenses" below. TL;DR: the wired image MCP (now `nightjar-image`, PR E) is API-based
+  (*cloud* OpenAI-compatible image models); no restrictive local checkpoint is on the shipped path.
   Recommended local default = **Z-Image-Turbo (Apache-2.0)**; **FLUX.1-dev**
   (non-commercial) and **SD 3.5** (Stability Community License) must never be defaults.
 - **Step 4 — live-preview panel. ✅ Implemented.** Reuses the OpenCode coding agent +
@@ -115,9 +116,10 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
 - **Step 6 — Phase 6 (CAD).** License-audit the Text2CAD/Text-to-CadQuery checkpoint,
   **CadQuery** (Apache-2.0), and the 3D render libs; add here.
 - **Step 7 — custom orb + JUNE rebrand. ✅ Implemented (2026-07-08).** The custom Three.js
-  swirling-vortex orb **replaced orb-ui**: the `orb-ui` dependency was dropped, the forked
-  `AmberCircleTheme` deleted (no forked code remains), and the orb-ui row above **retired** and
-  replaced with the **three.js (MIT — LICENSE read per rule 5)** row. **User-facing** strings are
+  swirling-vortex orb **replaced orb-ui**: the `orb-ui` dependency was dropped and the forked
+  `AmberCircleTheme` deleted. One derivation survives — the mic-monitor volume math in
+  `audioVolume.ts` — so the orb-ui row above is **narrowed to that** (not fully retired),
+  alongside the **three.js (MIT — LICENSE read per rule 5)** row. **User-facing** strings are
   renamed Nightjar → JUNE; internal identifiers stay (`NIGHTJAR_*` env, `window.nightjar` IPC,
   the `nightjar.*` Tailwind class namespace). The AGPL license of the combined work is unchanged
   by the rename. (Runtime verification of the redesign branches is pending a live-stack run.)

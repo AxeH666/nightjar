@@ -13,11 +13,9 @@ import os
 from typing import Dict, Optional, Tuple
 
 # provider id → (base_url, default model, BYOK env var, extra headers). OpenAI-COMPATIBLE
-# providers only — DeepResearcher speaks one base_url + Bearer, so Anthropic/Google (which
-# use different APIs) are intentionally excluded (and not offered in the capability UI).
-# For OpenRouter we pre-set Nightjar attribution headers so Odysseus's llm_core does NOT
-# inject its own `pewdiepie-archdaemon` / `Odysseus` branding via setdefault (identity
-# rule); the general fix to that default lives in a later PR.
+# providers only — the research loop speaks one base_url + Bearer, so Anthropic/Google
+# (which use different APIs) are intentionally excluded (and not offered in the
+# capability UI). For OpenRouter we send Nightjar attribution headers (identity rule).
 RESEARCH_PROVIDERS: Dict[str, Tuple[str, str, str, Dict[str, str]]] = {
     "openai": ("https://api.openai.com/v1", "gpt-4o-mini", "NIGHTJAR_BYOK_OPENAI", {}),
     "openrouter": (

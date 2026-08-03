@@ -73,9 +73,9 @@ def _migrate_dead_task_rows() -> int:
 _migrate_dead_task_rows()
 
 mcp = FastMCP("nightjar-pim")
-# Single-user Nightjar. Same env var the Odysseus wrapper read, so an existing
-# install keeps the same owner scope and its migrated rows stay visible.
-OWNER = os.environ.get("ODYSSEUS_MCP_MEMORY_OWNER") or os.environ.get("NIGHTJAR_PIM_OWNER") or "nightjar"
+# Single-user Nightjar. "nightjar" is the same owner value the launcher always
+# pinned (via env) since the Odysseus era, so migrated rows stay visible.
+OWNER = os.environ.get("NIGHTJAR_PIM_OWNER") or "nightjar"
 
 
 def _uid() -> str:

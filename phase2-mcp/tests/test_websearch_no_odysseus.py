@@ -31,9 +31,11 @@ PHASE2_MCP = os.path.join(REPO, "phase2-mcp")
 sys.path.insert(0, PHASE2_MCP)
 
 # Modules that only exist inside the Odysseus repo (research/odysseus/). `src.*` is
-# Odysseus's own package root — the deep_research import is `from src.deep_research`.
+# Odysseus's own package root — its deep-research import was `from src.deep_research`,
+# which the "src" root catches. Do NOT add "deep_research" here: Nightjar's own
+# `deep_research_backend` (PR F) would false-positive on a substring match.
 ODYSSEUS_ROOTS = ("src", "services", "routes", "mcp_servers", "core")
-ODYSSEUS_NAMES = ("odysseus", "deep_research", "chromadb", "_bootstrap")
+ODYSSEUS_NAMES = ("odysseus", "chromadb", "_bootstrap")
 
 FAILS = []
 
@@ -54,7 +56,6 @@ def odysseus_modules(mods):
 
 
 print("== 1. the Odysseus repo is NOT on sys.path ==")
-odys_repo = os.path.join(REPO, "research", "odysseus")
 on_path = [p for p in sys.path if "odysseus" in p.lower()]
 check("no odysseus path entry", not on_path, str(on_path))
 
@@ -83,7 +84,8 @@ for mod in ("research_backend", "web_search_backend"):
     check(f"{mod} reload pulls no Odysseus", not odysseus_modules(set(sys.modules) - b))
 
 print("\n== 5. it still works with the Odysseus repo physically absent ==")
-# Simulate PR G: nothing may resolve through research/odysseus.
+# Regression guard (PR G landed — research/odysseus is gone for real): nothing
+# may resolve through an odysseus path even if one reappears on sys.path.
 sys.path[:] = [p for p in sys.path if "odysseus" not in p.lower()]
 for name in list(sys.modules):
     if name.split(".")[0] in ODYSSEUS_ROOTS:
