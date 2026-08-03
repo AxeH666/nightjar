@@ -112,6 +112,14 @@
     }
   },
   "mcp": {
+    // Voice-phase decision (2026-08-03, NJ-35 pattern — INTENTIONAL, do not "fix"):
+    // this server's voice tools (transcribe, speak, wake_word_listen) are granted to
+    // NO agent — every agent's permission map denies them via "*": "deny" with no
+    // voice allows. The always-on "Hey June" path never needs the model to call them
+    // (the wake daemon drives voice directly), granting `speak` would let the model
+    // emit arbitrary audio ungated, and `wake_word_listen` would be an agent-initiated
+    // MIC OPEN — exactly the class rule 1 gates. A future explicit "read this aloud"
+    // feature may grant speak as "ask" (never "allow"); wake_word_listen stays denied.
     "nightjar": {
       "type": "local",
       "command": ["{env:NIGHTJAR_ROOT}/phase2-mcp/venv/{env:NJ_VENV_PY}", "{env:NIGHTJAR_ROOT}/phase2-mcp/mcp_server.py"],

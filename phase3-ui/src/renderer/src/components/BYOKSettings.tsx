@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { byok, type ByokProviderStatus, type KeyStorageMode } from "../lib/byok"
 import { CapabilitiesSettings } from "./CapabilitiesSettings"
+import { VoiceSettings } from "./VoiceSettings"
 
 // Modal to manage cloud provider API keys. Keys are stored encrypted-at-rest by
 // the main process (OS keychain); this panel only ever sees masked status.
@@ -152,6 +153,9 @@ export function BYOKSettings({ onClose, onChanged }: { onClose: () => void; onCh
           {/* Per-capability Online/Offline + provider selection (replaces implicit
               precedence). Reflects key availability from the same `providers` list. */}
           <CapabilitiesSettings providers={providers} />
+
+          {/* Voice master switch (NJ-57): consent-gated mic opt-in, OFF by default. */}
+          <VoiceSettings />
         </div>
       </div>
     </div>

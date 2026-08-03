@@ -34,6 +34,27 @@ function killProc(pid: number, force: boolean): void {
   }
 }
 
+// Liveness probe (signal 0 = existence check, kills nothing). EPERM means "alive but
+// not ours" — still alive. Used by stopService so "stopped" is only ever reported once
+// the process is verifiably GONE (NJ-57: the state must not outrun reality — taskkill
+// is async, and a graceful Windows taskkill can't even close a console process).
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code === "EPERM"
+  }
+}
+async function waitPidGone(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!pidAlive(pid)) return true
+    await sleep(150)
+  }
+  return !pidAlive(pid)
+}
+
 // Best-effort cross-platform "which PID is LISTENing on this local TCP port". Hard
 // 2s wall-clock cap (rule 3) so a blocked probe can never wedge a restart. Returns a
 // PID ONLY when EXACTLY ONE distinct listener is found — zero, or ambiguous (>1, as
@@ -101,6 +122,13 @@ export interface ServiceDef {
   // nonzero and burns the whole restart budget into an opaque "restarts exhausted"
   // (audit1.md P0-2).
   preflight?: () => string | null
+  // Opt-in gate consulted before ANY spawn or adopt (initial bring + crash-restart —
+  // spawn() is the single choke point). false → the service is put/kept in "stopped"
+  // ("disabled") instead of started. The wake daemon (an open microphone) is the
+  // motivating case (NJ-57): OFF must mean the process is DEAD — the OS mic-in-use
+  // indicator is the user's source of truth — never a soft-mute. Toggle at runtime via
+  // startService()/stopService().
+  enabled?: () => boolean
   readyTimeoutMs?: number // wait this long for first healthy after spawn (default 90s)
   autoRestart?: boolean // default true
   maxRestarts?: number // default 5
@@ -175,6 +203,20 @@ export class Supervisor {
   }
 
   private async bring(m: Managed): Promise<void> {
+    // Disabled services must be DEAD, not muted (NJ-57). Adopt-then-ignore would leave
+    // a stale instance (e.g. a wake daemon from a previous session = a live mic the
+    // user believes is off) running — actively stop it instead, then report honestly.
+    if (m.def.enabled && !m.def.enabled()) {
+      if (await m.def.ready()) {
+        await this.stopUnmanagedListener(m)
+        if (await m.def.ready()) {
+          this.set(m, "stopped", "disabled, but something is STILL listening on its port — stop that process manually")
+          return
+        }
+      }
+      this.set(m, "stopped", "disabled")
+      return
+    }
     // adopt if something is already answering the health probe on that port
     if (await m.def.ready()) {
       // NJ-5: capture the adopted process's PID (via its declared port) so a later
@@ -195,6 +237,12 @@ export class Supervisor {
     // checks ready() before ever calling spawn(), so an already-running instance is still
     // adopted regardless of preflight. This is the single choke point for every spawn
     // (initial + crash-restart), so a missing target can never enter a restart loop.
+    // enabled() gate at the single spawn choke point: a service disabled mid-run (voice
+    // toggled off while a crash-restart backoff was pending) must not respawn (NJ-57).
+    if (m.def.enabled && !m.def.enabled()) {
+      this.set(m, "stopped", "disabled")
+      return
+    }
     const pf = m.def.preflight?.()
     if (pf) {
       this.set(m, "failed", pf)
@@ -450,6 +498,80 @@ export class Supervisor {
     }
     m.status.restarts = 0
     await this.spawn(m)
+  }
+
+  // NJ-57: gracefully stop an UNMANAGED process listening on a service's port (a stale
+  // wake daemon from a prior session is a live mic the user believes is off). Same
+  // rule-4 care as restartOnce's adopted path: only ever the port's SOLE listener
+  // (pidOnPort returns undefined on zero/ambiguous), re-verified before the hard kill.
+  private async stopUnmanagedListener(m: Managed): Promise<void> {
+    const pid = m.def.port ? await pidOnPort(m.def.port) : undefined
+    if (!pid) return
+    killProc(pid, false)
+    let freeBy = Date.now() + 4000
+    while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+    if (await m.def.ready()) {
+      const still = m.def.port ? await pidOnPort(m.def.port) : undefined
+      if (still === pid) {
+        killProc(pid, true)
+        freeBy = Date.now() + 4000
+        while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
+      }
+    }
+  }
+
+  // Opt-in lifecycle for `enabled()`-gated services (the wake daemon). startService
+  // brings the service up through the normal bring() path — which re-checks the gate,
+  // so it stays a no-op while the pref says disabled. stopService KILLS the process
+  // (graceful, then hard) — never a soft-mute — so the OS-level mic-in-use indicator
+  // is the user's source of truth that listening actually ended (NJ-57).
+  async startService(name: string): Promise<void> {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (!m || m.child || m.restartInFlight) return
+    if (m.restartTimer) {
+      clearTimeout(m.restartTimer)
+      m.restartTimer = undefined
+    }
+    m.intentionalStop = false
+    m.status.restarts = 0
+    await this.bring(m)
+  }
+
+  async stopService(name: string): Promise<void> {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (!m) return
+    m.intentionalStop = true
+    if (m.healthTimer) {
+      clearInterval(m.healthTimer)
+      m.healthTimer = undefined
+    }
+    if (m.restartTimer) {
+      clearTimeout(m.restartTimer)
+      m.restartTimer = undefined
+    }
+    const c = m.child
+    if (c?.pid) {
+      c.removeAllListeners("exit")
+      killTree(c.pid, false) // graceful first — the daemon closes its device on SIGTERM
+      // Verify death rather than sleeping a fixed grace: a graceful Windows taskkill
+      // cannot close a console process at all, and the kill commands are async — the
+      // "stopped" we report below must mean the process is actually GONE (NJ-57).
+      if (!(await waitPidGone(c.pid, 2500))) {
+        killTree(c.pid, true)
+        await waitPidGone(c.pid, 4000)
+      }
+      m.child = undefined
+    } else if (await m.def.ready()) {
+      // No child of ours but the port answers → an adopted/stale listener. The same
+      // disable-must-kill guarantee applies (NJ-57).
+      await this.stopUnmanagedListener(m)
+    }
+    m.adoptedPid = undefined
+    if (await m.def.ready()) {
+      this.set(m, "stopped", "stop requested, but something is STILL listening on its port — stop that process manually")
+    } else {
+      this.set(m, "stopped", "disabled")
+    }
   }
 
   async stop(): Promise<void> {

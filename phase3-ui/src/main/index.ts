@@ -10,9 +10,10 @@ import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { Supervisor, type ServiceStatus } from "./supervisor"
-import { nightjarServices, REPO, REPO_POSIX, HOME_POSIX, WORKSPACE, isWSL, VENV_PY, venvPython } from "./services"
+import { nightjarServices, wakeDaemonEnv, REPO, REPO_POSIX, HOME_POSIX, WORKSPACE, isWSL, VENV_PY, venvPython } from "./services"
 import * as byok from "./byok"
 import * as capabilities from "./capabilities"
+import * as voice from "./voice"
 import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
 import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type SchedulerStatus } from "./scheduler"
@@ -79,7 +80,10 @@ function sendToRenderer(channel: string, ...args: unknown[]): void {
   }
 }
 
-const supervisor = new Supervisor(nightjarServices(), (statuses) => {
+// NJ-57: the wake daemon (an open microphone) is gated on the persisted voice pref —
+// OFF by default. The getter is read at every bring/spawn, so a pref flip while a
+// crash-restart backoff is pending is honored too.
+const supervisor = new Supervisor(nightjarServices({ voiceEnabled: () => voice.getVoiceEnabled() }), (statuses) => {
   latestStatus = statuses
   sendToRenderer("nightjar:status", statuses)
 })
@@ -388,6 +392,10 @@ ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.Cap
   // opencode-serve restart to re-inject the NIGHTJAR_*_PROVIDER vars.
   if (id === "browser" || id === "research" || id === "vision" || id === "image")
     await supervisor.restartService("opencode-serve", opencodeServeEnv())
+  // Voice turns run on the CHAT model (the daemon's persistent session): a chat-pref
+  // change must reach the running daemon, which reads NIGHTJAR_MODEL once at start.
+  if (id === "chat" && voice.getVoiceEnabled())
+    await supervisor.restartService("wake-daemon", wakeDaemonEnv(saved))
   return saved
 })
 
@@ -400,7 +408,29 @@ ipcMain.handle("capabilities:set", async (_e, id: string, pref: capabilities.Cap
 ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabilities.CapabilityPref>) => {
   const saved = capabilities.setBulk(prefs) // throws on any unknown id → no partial write
   await supervisor.restartService("opencode-serve", opencodeServeEnv())
+  // Same chat→daemon hook as capabilities:set (the global toggle changes chat too).
+  if ("chat" in prefs && voice.getVoiceEnabled())
+    await supervisor.restartService("wake-daemon", wakeDaemonEnv(saved.chat))
   return saved
+})
+
+// ── Voice master switch (NJ-57) ───────────────────────────────────────────────
+// OFF by default. Enabling starts the wake daemon (the renderer shows a consent
+// modal FIRST — this handler trusts that flow but is safe without it: enabling is
+// an explicit user IPC, never automatic). Disabling KILLS the daemon process —
+// never a soft-mute — so the OS mic-in-use indicator is the source of truth that
+// listening ended. State is pushed so the orb's indication can't go stale.
+ipcMain.handle("voice:get", () => ({ enabled: voice.getVoiceEnabled() }))
+ipcMain.handle("voice:set", async (_e, enabled: boolean) => {
+  const saved = voice.setVoiceEnabled(Boolean(enabled))
+  if (saved.enabled) {
+    supervisor.setEnv("wake-daemon", wakeDaemonEnv(capabilities.getPref("chat")))
+    await supervisor.startService("wake-daemon")
+  } else {
+    await supervisor.stopService("wake-daemon")
+  }
+  sendToRenderer("nightjar:voiceStatus", { enabled: saved.enabled })
+  return { enabled: saved.enabled }
 })
 
 // ── Local vision (Ollama gemma3:4b) — status + auto-pull ──────────────────────
@@ -478,6 +508,9 @@ app.whenReady().then(() => {
   startLocalScheduler(pushScheduler)
   // Inject any stored BYOK keys into opencode-serve's env before it starts.
   supervisor.setEnv("opencode-serve", opencodeServeEnv())
+  // Wake daemon env: route voice turns to the chat model the user actually picked
+  // (only consulted if the voice pref is enabled — the supervisor gate owns that).
+  supervisor.setEnv("wake-daemon", wakeDaemonEnv(capabilities.getPref("chat")))
   // fire-and-forget: bring up the stack; the health strip reflects progress. Once
   // the stack (incl. the ollama service) is up, ensure the local vision model.
   if (process.env.NIGHTJAR_NO_SUPERVISOR !== "1") {

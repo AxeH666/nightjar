@@ -83,7 +83,29 @@ function tcpOpen(host: string, port: number, timeoutMs = 1500): Promise<boolean>
   })
 }
 
-export function nightjarServices(): ServiceDef[] {
+// Env overlay for the wake daemon, pure so it's unit-testable. NIGHTJAR_MODEL is the
+// "provider/model" the daemon's persistent OpenCode session drives — derived from the
+// CHAT capability pref so a voice turn runs on the same model the user picked for chat
+// (before this, a Cloud user's voice turns silently ran on the local 4B). Offline (or a
+// half-formed pref) omits the var → the daemon's own local-qwen default applies.
+// NIGHTJAR_WAKEWORD_MODEL: an explicit env wins; else the PR-5 deploy path
+// (~/.nightjar/models/hey_june.onnx) is passed once it exists — zero code change on the
+// daemon side when the trained model lands.
+export function wakeDaemonEnv(chatPref?: { mode: string; providerId?: string; modelId?: string }): Record<string, string> {
+  const out: Record<string, string> = {
+    NIGHTJAR_DATA_DIR: process.env.NIGHTJAR_DATA_DIR || join(HOME, ".nightjar"),
+  }
+  if (chatPref?.mode === "online" && chatPref.providerId && chatPref.modelId) {
+    out.NIGHTJAR_MODEL = `${chatPref.providerId}/${chatPref.modelId}`
+  }
+  const wakeModel =
+    process.env.NIGHTJAR_WAKEWORD_MODEL ||
+    (existsSync(join(HOME, ".nightjar/models/hey_june.onnx")) ? join(HOME, ".nightjar/models/hey_june.onnx") : "")
+  if (wakeModel) out.NIGHTJAR_WAKEWORD_MODEL = wakeModel
+  return out
+}
+
+export function nightjarServices(opts?: { voiceEnabled?: () => boolean }): ServiceDef[] {
   const ollamaBin = findOllama()
   // NJ-8: opt-in "design profile" (NIGHTJAR_DESIGN_PROFILE=1) lifts the local
   // model's output caps so a bigger single previewable artifact fits in one write.
@@ -156,6 +178,14 @@ export function nightjarServices(): ServiceDef[] {
       command: venvPython(join(REPO, "phase2-mcp/venv")),
       args: [join(REPO, "phase2-mcp/wake_daemon.py")],
       cwd: join(REPO, "phase2-mcp"),
+      env: wakeDaemonEnv(), // index.ts overlays the chat pref via setEnv before start
+      // NJ-57: an always-on MICROPHONE must be opt-in — gated on the persisted voice
+      // pref (OFF by default; index.ts supplies the getter). Disabled = the process is
+      // never spawned (and a stale listener on :8766 is actively stopped), so the OS
+      // mic-in-use indicator is the user's source of truth. Toggling runs through
+      // supervisor.startService/stopService from the voice:set IPC.
+      enabled: opts?.voiceEnabled,
+      port: 8766, // health port — also the disable-path kill target (sole listener only)
       // Best-effort: no mic/audio hardware is not a reason the rest of Nightjar
       // should fail to start, so this is last in dependency order and its
       // failure doesn't block the other services (each service starts/gates
