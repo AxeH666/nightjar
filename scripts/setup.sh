@@ -31,14 +31,14 @@ elif command -v python3 >/dev/null 2>&1; then PYLAUNCH="python3"
 else PYLAUNCH="python"; fi
 
 # 1) Submodules: Odysseus (RAG/PIM) + OpenCode (the ENGINE — the only agent loop) --------
-echo "-- [1/10] git submodules (odysseus + opencode engine) --"
+echo "-- [1/8] git submodule (opencode engine) --"
 git submodule update --init research/opencode
 
 # 2) OpenCode engine deps — bun install (audit1.md P0-1: the engine is a submodule now, but
 # it still needs its node_modules). Put bun on PATH so dependency postinstalls that call
 # `bun` resolve; retry --ignore-scripts if a native postinstall (TUI-only tree-sitter
 # grammars → node-gyp) aborts — `serve` (HTTP) does not need them.
-echo "-- [2/10] OpenCode engine deps (bun install) --"
+echo "-- [2/8] OpenCode engine deps (bun install) --"
 BUN_BIN="${NIGHTJAR_BUN:-}"
 if [ -z "$BUN_BIN" ]; then
   if command -v bun >/dev/null 2>&1; then BUN_BIN="$(command -v bun)"
@@ -52,8 +52,6 @@ else
   echo "   WARNING: bun not found — the engine will not start. Install: curl -fsSL https://bun.sh/install | bash" >&2
 fi
 
-# 3) (retired) the Odysseus patch step — the submodule itself was removed in PR E
-
 # 4) Python venvs + deps ---------------------------------------------------------------
 make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)
   local d="$1"
@@ -66,7 +64,7 @@ make_venv() {  # $1 = dir holding requirements.txt (venv created as <dir>/venv)
   "$d/venv/$VBIN/$PYEXE" -m pip install -q --upgrade pip
   "$d/venv/$VBIN/$PYEXE" -m pip install -q -r "$d/requirements.txt"
 }
-echo "-- [4/10] phase2-mcp venv --";      make_venv phase2-mcp
+echo "-- [3/8] phase2-mcp venv --";      make_venv phase2-mcp
 # TTS moved from kokoro-onnx's GPL espeak tokenizer to misaki (Apache-2.0).
 # Dropping them from requirements.txt does NOT remove them from an existing
 # venv, so purge explicitly — otherwise upgraded installs keep a GPL espeak-ng
@@ -77,7 +75,7 @@ if [ -x "phase2-mcp/venv/$VBIN/$PYEXE" ]; then
 fi
 # Browser Use (autonomous form-filling) — isolated venv so its heavy deps
 # (openai/anthropic/google-genai/…) never destabilize phase2-mcp/venv.
-echo "-- [6/10] browser-use venv --";     make_venv browser-use-mcp
+echo "-- [4/8] browser-use venv --";     make_venv browser-use-mcp
 # Browser Use 0.13.x drives Chromium over CDP and manages its own browser; it needs a
 # Chrome/Chromium available. Best-effort diagnostic only — never fatal (a missing
 # browser disables just the browser-use tool). Run doctor yourself to verify/fix.
@@ -90,17 +88,17 @@ fi
 # 7) phase-cad venv (build123d / OCP via uv) — REQUIRED for the LAB / CAD lab -----------
 # Delegated to the dedicated uv-based script (a separate Python 3.12 venv, isolated because
 # OCP/VTK wheels are heavy + version-sensitive). Previously omitted from this one-shot.
-echo "-- [7/10] phase-cad venv (build123d via uv) --"
+echo "-- [5/8] phase-cad venv (build123d via uv) --"
 bash "$ROOT/phase-cad/setup.sh"
 
 # 8) UI node modules -------------------------------------------------------------------
-echo "-- [8/10] phase3-ui npm install --"
+echo "-- [6/8] phase3-ui npm install --"
 ( cd phase3-ui && npm install --no-audit --no-fund )
 
 # 9) Local vision model — Ollama + gemma3:4b (best-effort, NEVER fatal) ----------------
 # Powers offline image analysis (nightjar_analyze_image). Skippable with
 # NIGHTJAR_SKIP_OLLAMA=1. Cloud vision (BYOK) works regardless of this step.
-echo "-- [9/10] local vision (Ollama + gemma3:4b) --"
+echo "-- [7/8] local vision (Ollama + gemma3:4b) --"
 OLLAMA_HOST_URL="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 if command -v ollama >/dev/null 2>&1; then
   echo "   ollama present"
@@ -129,13 +127,16 @@ else
 fi
 
 # 10) Local IMAGE model — diffusers venv + Z-Image-Turbo (best-effort, NEVER fatal) -----
-# Powers OFFLINE image generation (NJ-6). Skippable with NIGHTJAR_SKIP_DIFFUSION=1.
+# Formerly powered OFFLINE image generation (NJ-6) — removed in PR E; see note below.
 # Cloud image gen (OpenAI/OpenRouter BYOK) works regardless of this step. Needs a
 # CUDA GPU + ~6 GB VRAM to actually generate; the model is Apache-2.0.
-echo "-- [10/10] local image backend (diffusion + Z-Image-Turbo) --"
+echo "-- [8/8] local image backend (diffusion + Z-Image-Turbo) --"
+# PR E: the app currently has NO local image path (image gen is a BYOK cloud call;
+# the diffusion sidecar went with the Odysseus submodule). Kept ONLY as groundwork
+# for a possible future local backend — now OPT-IN via NIGHTJAR_WITH_DIFFUSION=1.
 IMAGE_MODEL_DIR="${NIGHTJAR_IMAGE_MODEL_DIR:-$HOME/models/Z-Image-Turbo}"
-if [ "${NIGHTJAR_SKIP_DIFFUSION:-0}" = "1" ]; then
-  echo "   skipped (NIGHTJAR_SKIP_DIFFUSION=1)"
+if [ "${NIGHTJAR_WITH_DIFFUSION:-0}" != "1" ]; then
+  echo "   skipped (currently unused by the app — opt in with NIGHTJAR_WITH_DIFFUSION=1)"
 else
   echo "   creating diffusion-mcp/venv (heavy CUDA deps — this can take a while)…"
   make_venv diffusion-mcp || echo "   (diffusion venv setup failed — retry later: make_venv diffusion-mcp)"

@@ -198,7 +198,7 @@ export async function windowsClipboardImageAttachment(): Promise<Attachment | nu
 }
 
 // Read a generated image (filename parsed from the generate_image tool output) for
-// inline display — the tool returns a web link that isn't served in the desktop app.
+// inline display — the tool returns a filesystem path ({"path": ...}, PR E), not a served URL.
 export async function loadGeneratedImage(filename: string): Promise<string | null> {
   return (await bridge()?.readGeneratedImage(filename)) ?? null
 }

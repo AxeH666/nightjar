@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 
 // Local reminder-scheduler availability (P2-20). The free tier fires desktop notifications
-// for due tasks ONLY while the app is open, and only when the odysseus venv + OS notifications
+// for due tasks ONLY while the app is open, and only when the phase2-mcp venv + OS notifications
 // are present. NJ-16 makes task_create return success regardless, so without this banner a user
 // is told "reminder set" while nothing ever fires. Renders nothing when reminders can fire.
 type SchedulerStatus =
