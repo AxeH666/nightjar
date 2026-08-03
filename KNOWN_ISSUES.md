@@ -90,8 +90,25 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   backbone question above); (c) the runtime now warns about the NC fallback at startup
   (wake_daemon + wakeword.py), and the training README carries the product requirements
   (synthetic multi-voice only — never single-speaker recordings).
+- **UPSTREAM IS NON-RESPONSIVE ON THIS EXACT QUESTION (checked 2026-08-03).** Do not
+  plan around getting a clarification:
+  - [dscripka/openWakeWord#313](https://github.com/dscripka/openWakeWord/issues/313)
+    "Model License Question" (2026-01-23) — asks whether `melspectrogram.onnx` and
+    `embedding_model.onnx` are free for commercial use. **0 comments, still open (6+
+    months).**
+  - [dscripka/openWakeWord#338](https://github.com/dscripka/openWakeWord/issues/338)
+    (2026-06-25) — the same question in detail, citing the Apache-2.0 origins (the
+    melspectrogram export from torchlibrosa, the embedding model re-implemented from
+    Google's speech_embedding TFHub module). **0 comments, still open.**
+  - Nightjar deliberately did NOT file a third duplicate. Track/subscribe to those two;
+    a maintainer statement in either closes this item. **Because a clarification may
+    never come, the commercial plan needs a fallback that does not depend on it** —
+    either regenerating the backbone ourselves from the Apache-2.0 Google source, or a
+    different engine with permissive WEIGHTS (evaluation pending; the integration
+    surface is small — `WakeWordDetector.process_frame(int16[1280]) -> score` plus a
+    model path — so a swap is contained).
 
-## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — HOT-MIC HALF FIXED (voice-phase PR 2); echo half open (PR 4) 2026-08-03
+## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — BOTH HALVES FIXED (voice-phase PRs 2 + 4); acoustic + OS-indicator confirmation pending on hardware (PR 6) 2026-08-03
 
 - **Found during the Hey-June voice-phase scoping survey (rule 7 — filed, not drive-by fixed).**
 - **Hot mic without consent — FIXED (voice-phase PR 2):** `wake-daemon` was in
@@ -111,14 +128,24 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   choice instead of silently running local; `NIGHTJAR_WAKEWORD_MODEL` pass-through for the
   PR-5 model). **Residual (rule 8):** the OS mic-indicator lifecycle (on → off on disable/
   quit) and real capture can only be confirmed on native hardware — PR-6 checklist.
-- **Self-wake echo loop:** the daemon's "wake-scoring pauses while a reply plays" note
-  (`wake_daemon.py:26-27`) only holds for the local `NIGHTJAR_PLAY_TTS=1` path. In the real
-  app the RENDERER plays the WAV; the daemon resumes scoring right after publishing
-  `tts ready` (`wake_daemon.py:335`) and can wake on June's own speech from the speakers.
-  The orb already publishes `tts playing/ended` (`orbAdapter.ts:220,256`) for exactly this,
-  but the daemon never subscribes — the NJ-56 producer-only pattern, inverted. Fix:
-  voice-phase PR 4 (daemon subscribes + mutes scoring during playback, with a wall-clock
-  un-mute backstop per rule 3).
+- **Self-wake echo loop — FIXED (voice-phase PR 4):** the daemon's "wake-scoring pauses
+  while a reply plays" note only held for the local `NIGHTJAR_PLAY_TTS=1` path. In the real
+  app the RENDERER plays the WAV; the daemon resumed scoring right after publishing
+  `tts ready` and could wake on June's own speech from the speakers. The orb already
+  published `tts playing/ended` (`orbAdapter.ts`) for exactly this, but nothing subscribed
+  — the NJ-56 producer-only pattern, inverted. Now: `sidechannel.Subscriber` (new,
+  self-reconnecting background consumer) feeds a `PlaybackMute` state machine; wake
+  scoring is skipped between `playing` and `ended` (the mic keeps draining, so the stream
+  never backs up), `ready` deliberately does NOT mute (synthesis ≠ playback), and `error`
+  unmutes. Rule-3 backstop: `NIGHTJAR_PLAYBACK_MUTE_MAX_S` (default 90s, deliberately >
+  the orb's 60s speaking watchdog) force-unmutes and logs if an `ended` is ever lost — a
+  stuck mute would be as bad as no mute. The local paplay path mutes explicitly around
+  playback and gained a matching subprocess timeout. **Verified by running:** pure
+  state-machine tests on an injected clock + a LIVE layer driving real `playing`/`ended`
+  frames through the real :8765 hub (`tests/test_wake_mute.py`, 16 checks).
+  **Residual (rule 8):** the ACOUSTIC proof — that June, played through real speakers at
+  normal volume (not headphones), no longer re-wakes herself — needs the PR-6 hardware
+  pass. Barge-in (interrupting a reply) remains explicitly out of scope.
 - **Rule 8:** both fixes need a real-mic/speaker verification on native Windows; the echo fix
   specifically needs real speakers (not headphones) — recorded in the voice-phase checklist.
 

@@ -78,5 +78,74 @@ def publish(event: dict) -> bool:
         return False
 
 
+# --- background subscriber for long-lived consumers (the wake daemon) ---
+class Subscriber:
+    """Persistent background subscription to the hub: `on_event(dict)` is called
+    for every broadcast event (and for each entry of the connect-time snapshot),
+    on the reader thread.
+
+    Added for the wake daemon's echo suppression (voice-phase PR 4): the renderer
+    publishes `tts playing/ended` — a PRODUCER-ONLY event until now — and the
+    daemon must consume it to stop hearing June's own voice. Best-effort and
+    self-reconnecting: the side-channel being down degrades a feature, it must
+    never kill its consumer. `on_event` exceptions are swallowed for the same
+    reason (a bad handler must not stop the stream).
+
+    `replay_snapshot` defaults to **False** — the hub's connect-time snapshot is
+    LATEST-per-kind HISTORY with no timestamp, so replaying it as if live is a
+    staleness trap (Bugbot, PR #153): a `tts playing` whose `ended` never reached
+    the hub (renderer crash) would mute every newly-connected daemon for the whole
+    backstop window despite nothing actually playing. Consumers that genuinely
+    want current-state-on-connect (a UI restoring browser_state, say) opt in
+    explicitly and must handle the events being arbitrarily old."""
+
+    def __init__(self, on_event, url: str | None = None, reconnect_s: float = 2.0,
+                 replay_snapshot: bool = False) -> None:
+        import threading
+
+        self._on_event = on_event
+        self._url = url or f"ws://{HOST}:{PORT}"
+        self._reconnect_s = reconnect_s
+        self._replay_snapshot = replay_snapshot
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="sidechannel-sub")
+        self._thread.start()
+
+    def _dispatch(self, ev: dict) -> None:
+        try:
+            self._on_event(ev)
+        except Exception:
+            pass
+
+    def _loop(self) -> None:
+        from websockets.sync.client import connect
+
+        while not self._stop.is_set():
+            try:
+                with connect(self._url, open_timeout=2) as ws:
+                    while not self._stop.is_set():
+                        # Bounded recv so a silent hub can't wedge the stop check.
+                        try:
+                            raw = ws.recv(timeout=1)
+                        except TimeoutError:
+                            continue
+                        try:
+                            data = json.loads(raw)
+                        except Exception:
+                            continue
+                        if data.get("type") == "event":
+                            self._dispatch(data.get("event") or {})
+                        elif data.get("type") == "snapshot" and self._replay_snapshot:
+                            for ev in (data.get("state") or {}).values():
+                                if isinstance(ev, dict):
+                                    self._dispatch(ev)
+            except Exception:
+                if self._stop.wait(self._reconnect_s):
+                    return
+
+    def close(self) -> None:
+        self._stop.set()
+
+
 if __name__ == "__main__":
     asyncio.run(main())
