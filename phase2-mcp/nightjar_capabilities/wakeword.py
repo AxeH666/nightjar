@@ -1,15 +1,19 @@
-"""Nightjar wake-word capability — openWakeWord (MIT, offline) always-listening
-trigger in front of the voice pipeline.
+"""Nightjar wake-word capability — openWakeWord always-listening trigger in
+front of the voice pipeline. Licensing (verified from the installed package,
+rule 5 / NJ-58): the openWakeWord CODE is Apache-2.0, but its bundled
+pretrained MODELS — including the `hey_jarvis` stand-in below — are
+CC-BY-NC-SA 4.0 (NON-commercial). A commercial build must ship the custom
+synthetic model (voice-phase PR 5), never the stock fallback.
 
-New for Nightjar (Row-Bot had no wake word). On detection of "Hey Nightjar" the
-daemon hands the following speech to faster-whisper (voice.transcribe) and emits
-a `wake` event on the side-channel.
+New for Nightjar (Row-Bot had no wake word). On detection of the wake phrase
+the daemon hands the following speech to faster-whisper (voice.transcribe) and
+emits a `wake` event on the side-channel.
 
 This module is the detector + file/array scanner. The live-mic feed loop lives
-in the daemon (needs a sound card — absent in this dev box, so detection is
-validated here on audio arrays/WAVs instead of a live mic).
+in the daemon (wake_daemon.py — sounddevice/PortAudio capture since voice-phase
+PR 3; detection is also validated here on audio arrays/WAVs without a mic).
 
-Custom model: point NIGHTJAR_WAKEWORD_MODEL at a trained `hey_nightjar.onnx`.
+Custom model: point NIGHTJAR_WAKEWORD_MODEL at a trained `hey_june.onnx`.
 If unset/missing, falls back to a bundled stock model with a loud warning (so
 the pipeline is testable, but production must ship the custom phrase model).
 """
@@ -34,8 +38,8 @@ def _bundled_dir() -> Path:
 
 
 def resolve_model_path() -> tuple[str, bool]:
-    """Return (path, is_custom). Prefer the trained Hey-Nightjar model; else a
-    stock fallback (flagged is_custom=False)."""
+    """Return (path, is_custom). Prefer the trained Hey-June model; else the stock
+    fallback (flagged is_custom=False — CC-BY-NC-SA, non-commercial; NJ-58)."""
     custom = os.environ.get("NIGHTJAR_WAKEWORD_MODEL")
     if custom and Path(custom).exists():
         return custom, True
@@ -55,8 +59,9 @@ class WakeWordDetector:
         self.model_key = Path(model_path).stem
         if not is_custom:
             print(f"[nightjar-wakeword] WARNING: using STOCK model '{self.model_key}' — "
-                  f"train a custom 'Hey Nightjar' model and set NIGHTJAR_WAKEWORD_MODEL "
-                  f"before shipping.", file=sys.stderr)
+                  f"train the custom 'Hey June' model and set NIGHTJAR_WAKEWORD_MODEL "
+                  f"before shipping. The stock openWakeWord models are CC-BY-NC-SA "
+                  f"(non-commercial) — see KNOWN_ISSUES.md NJ-58.", file=sys.stderr)
         self._model = Model(wakeword_model_paths=[model_path])
 
     def reset(self) -> None:

@@ -58,6 +58,9 @@ adding networked access.
 | misaki (© 2025 hexgrad) | TTS grapheme-to-phoneme — the reference G2P Kokoro was trained with | Apache-2.0 | `phase2-mcp/NOTICE` (pip dep) |
 | kokoro-onnx (© 2024 thewh1teagle) | **data only** — the 114-entry phoneme→id table, vendored to `phase2-mcp/nightjar_capabilities/kokoro_vocab.json`; the package itself is **no longer a dependency** | MIT | `phase2-mcp/NOTICE` |
 | en_core_web_sm (© 2016 ExplosionAI GmbH) | spaCy English pipeline misaki uses for POS tagging | MIT | `phase2-mcp/NOTICE` (pip dep, install-time) |
+| openWakeWord (© dscripka) | wake-word detection engine | ⚠ **split**: code Apache-2.0; bundled pretrained **models CC-BY-NC-SA 4.0 (non-commercial)** — incl. the `hey_jarvis` stand-in currently used as fallback. See **NJ-58**; the PR-5 custom `hey_june.onnx` is the commercial path | package LICENSE + README license section (read from the installed wheel, rule 5) |
+| sounddevice (© 2015-2025 Matthias Geier) | cross-platform mic capture for the wake daemon (voice-phase PR 3) | MIT | `venv/.../sounddevice-*.dist-info/licenses/LICENSE` (pip dep) |
+| PortAudio (© Ross Bencina, Phil Burk) | audio I/O library the sounddevice wheel bundles as DLLs | MIT (per the wheel's `portaudio-binaries` README). ASIO-enabled variant embeds the proprietary Steinberg ASIO SDK — **never loaded** (`SD_ENABLE_ASIO` unset); wheel fetched by the user's pip at setup, not vendored | `venv/.../_sounddevice_data/portaudio-binaries/README.md` |
 
 (Historical note: while the Odysseus submodule was in-tree, its
 `ACKNOWLEDGMENTS.md` and `licenses/` directory had to ship with any Nightjar
@@ -125,8 +128,23 @@ actual LICENSE** (CLAUDE.md rule 5) and update the table above. Known upcoming t
   by the rename. (Runtime verification of the redesign branches is pending a live-stack run.)
 - **Step 10 — Odysseus fork. RETIRED (PR E)** — the submodule was removed instead of
   re-hosted; there is no Odysseus code left to attribute.
-- **Step 12 — wake word ("Hey June").** local-wake (MIT) / openWakeWord (Apache-2.0) +
-  verifier — add whichever ships.
+- **Step 12 — wake word ("Hey June").** Decision (voice-phase, 2026-08-03): **openWakeWord
+  ships**; local-wake is the recorded fallback, not built. ⚠ **Split licensing, verified from
+  the installed package per rule 5 (NJ-58):** openWakeWord **code** is Apache-2.0 (LICENSE
+  file read), but its **bundled pretrained models — including the `hey_jarvis_v0.1.onnx`
+  stand-in Nightjar currently falls back to — are CC-BY-NC-SA 4.0 (NON-commercial)** per the
+  package's own README/METADATA ("All of the included pre-trained models are licensed under
+  the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International license").
+  **No paid/commercial build may ship the stock fallback.** The custom synthetic
+  `hey_june.onnx` (PR 5) is the commercial path; before it ships, rule-5-verify the shared
+  embedding backbone (claimed Apache-2.0, re-implemented from Google's speech_embedding
+  TFHub module), the negative-feature datasets, and piper-sample-generator + its voices.
+  **PR 3 additions (LICENSE files read from the installed wheels):** `sounddevice` 0.5.5 —
+  MIT (© Matthias Geier); bundled **PortAudio** DLLs — MIT per the wheel's binaries README
+  (© Ross Bencina / Phil Burk). The wheel also carries an ASIO-enabled DLL embedding the
+  proprietary **Steinberg ASIO SDK** — it loads ONLY when `SD_ENABLE_ASIO` is set, which
+  Nightjar never sets, and the wheel arrives via the user's own pip at setup time (not
+  vendored in this repo).
 
 ## Image generation — current state (PR E, 2026-08-03) and the Step-3 audit history
 

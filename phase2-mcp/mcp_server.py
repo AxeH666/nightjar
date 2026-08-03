@@ -158,7 +158,7 @@ def wake_word_listen(audio_path: str = "", timeout_s: float = 8.0) -> Dict[str, 
         # strip a leading wake phrase if present
         cmd = transcript
         low = transcript.lower()
-        for w in ("hey nightjar", "hey jarvis"):
+        for w in ("hey june", "hey nightjar", "hey jarvis"):  # keep in sync with wake_daemon.WAKE_PHRASES
             if low.startswith(w):
                 cmd = transcript[len(w):].lstrip(" ,.").strip()
                 break

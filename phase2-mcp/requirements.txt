@@ -76,6 +76,7 @@ scipy==1.18.0
 setuptools==83.0.0
 shellingham==1.5.4
 smart_open==8.0.1
+sounddevice==0.5.5
 soundfile==0.14.0
 spacy-legacy==3.0.12
 spacy-loggers==1.0.5

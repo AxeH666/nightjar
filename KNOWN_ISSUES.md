@@ -61,6 +61,36 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-58 — openWakeWord's pretrained MODELS (incl. the shipped `hey_jarvis` fallback) are CC-BY-NC-SA — NON-commercial; the code's Apache-2.0 does NOT cover them — OPEN (blocks any paid build until PR 5's custom model ships) 2026-08-03
+
+- **Verified from the actual installed package (rule 5), voice-phase PR 3:**
+  `openwakeword-0.4.0.dist-info/METADATA` (the package's own README) states: code is
+  **Apache-2.0**, but *"All of the included pre-trained models are licensed under the
+  Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International license due to
+  the inclusion of datasets with unknown or restrictive licensing as part of the training
+  data."* The earlier voice-plan license read covered the CODE license only — this entry
+  corrects the record for the MODELS.
+- **Files affected** (`openwakeword/resources/models/` in the venv):
+  - `hey_jarvis_v0.1.onnx` — **the fallback Nightjar actually uses today**
+    (`wakeword.resolve_model_path()`); CC-BY-NC-SA → **must not ship in any commercial
+    build**. Free/AGPL distribution is compatible while non-commercial.
+  - `alexa_v0.1.onnx`, `hey_marvin_v0.1.onnx`, `hey_mycroft_v0.1.onnx`, `timer_v0.1.onnx`,
+    `weather_v0.1.onnx` — present in the wheel, unused by Nightjar.
+  - `embedding_model.onnx` + `melspectrogram.onnx` — the shared feature backbone used by
+    EVERY inference **including a future custom `hey_june.onnx`**. The same README
+    separately describes the embedding model as re-implemented from Google's
+    speech_embedding TFHub module under **Apache-2.0** — but the blanket "all of the
+    included pre-trained models" sentence is ambiguous about it. **Must be resolved
+    upstream (issue/maintainer statement) before a commercial ship**, since NC on the
+    backbone would taint even the custom model's runtime.
+  - `silero_vad.onnx` — unused by Nightjar's path (no `vad_threshold` passed).
+- **Consequences:** (a) the PR-5 custom synthetic `hey_june.onnx` is a **licensing
+  requirement**, not a cosmetic rename; (b) its training inputs must also be
+  rule-5-verified (negative-feature datasets, piper-sample-generator voices, the
+  backbone question above); (c) the runtime now warns about the NC fallback at startup
+  (wake_daemon + wakeword.py), and the training README carries the product requirements
+  (synthetic multi-voice only — never single-speaker recordings).
+
 ## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — HOT-MIC HALF FIXED (voice-phase PR 2); echo half open (PR 4) 2026-08-03
 
 - **Found during the Hey-June voice-phase scoping survey (rule 7 — filed, not drive-by fixed).**
