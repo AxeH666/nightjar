@@ -33,7 +33,7 @@ side-channel (wake-word / transcription / TTS / orb state).
 Phases 1–4 are built and reported:
 
 - **Phase 1 / 1.5 — engine + safety harness** ([report](phase1-engine/PHASE1_REPORT.md), [1.5](phase1-engine/PHASE1.5_REPORT.md)): local Qwen3-4B via llama.cpp behind a timeout proxy + run-supervisor watchdog + OpenCode safety plugins.
-- **Phase 2 — capabilities** ([report](phase2-mcp/PHASE2_REPORT.md)): Row-Bot's voice/vision/memory/browser re-exposed as a 14-tool MCP server; a live **wake-word daemon** (`phase2-mcp/wake_daemon.py`) drives the "Hey Nightjar" loop.
+- **Phase 2 — capabilities** ([report](phase2-mcp/PHASE2_REPORT.md)): Row-Bot's voice/vision/memory/browser re-exposed as a 14-tool MCP server; a live **wake-word daemon** (`phase2-mcp/wake_daemon.py`) drives the "Hey June" loop (interim stand-in phrase: "hey buddy", until the custom model is trained).
 - **Phase 2b — Odysseus** ([report](research/PHASE2B_REPORT.md)): email/RAG/research/PIM as MCP sidecars — since **fully removed** (tiers deleted or rebuilt Nightjar-side, PRs #140–#145; the submodule itself dropped in PR E; image gen is now a BYOK cloud call).
 - **Phase 3 — UI shell** ([report](phase3-ui/PHASE3_REPORT.md)): chat + tool-call cards + explicit mode selector + permission/approval panel + a multi-sidecar supervisor.
 - **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): a voice-reactive orb + a Siri-style overlay, wired to the live pipeline. *(Phase 4 integrated orb-ui; Step 7 later replaced it with a custom three.js orb.)*

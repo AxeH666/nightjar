@@ -1,0 +1,1083 @@
+{
+  "_generated_by": "mirror_datasets.py plan",
+  "sources": [
+    {
+      "repo": "benjamin-paine/hey-buddy",
+      "type": "dataset",
+      "license_entry": "benjamin-paine/hey-buddy (precalculated)",
+      "role": "precalculated negatives + validation (up to 72 GB)",
+      "license": "CC-BY-4.0",
+      "license_blocked": false,
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 2419,
+          "sha": "55cab133643a2a73e083373d2106533678d0edd5",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/.gitattributes"
+        },
+        {
+          "path": "README.md",
+          "size": 10986,
+          "sha": "41de6cef681b08718b17f4c02ae31b354e6abfd0",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/README.md"
+        },
+        {
+          "path": "examples/buddy.mp3",
+          "size": 2160,
+          "sha": "dc492549dcee99a2ac3ab83d87fb629b6597b09a8b30b83f36f0ae86439515df",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/buddy.mp3"
+        },
+        {
+          "path": "examples/buddy_adv.mp3",
+          "size": 3024,
+          "sha": "85bcaf5f4cb6be0340ba00b006b7db901ad738164964739a1b2ae21777bdd1d8",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/buddy_adv.mp3"
+        },
+        {
+          "path": "examples/buddy_adv_augmented.mp3",
+          "size": 4536,
+          "sha": "2fe7f75815dd4277247f317b766206f283d23f9796324308dcab72e9986c2d3d",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/buddy_adv_augmented.mp3"
+        },
+        {
+          "path": "examples/buddy_augmented.mp3",
+          "size": 4536,
+          "sha": "967d541869d6b0ab58fd2495a3301c27f9c121c5e30b644331eab41ed1c3e62f",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/buddy_augmented.mp3"
+        },
+        {
+          "path": "examples/hey_buddy.mp3",
+          "size": 2592,
+          "sha": "c48a2a21b88372eb9e8fc403d993f74720c739e5304c22deb3e2c28cd21bc8ee",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hey_buddy.mp3"
+        },
+        {
+          "path": "examples/hey_buddy_adv.mp3",
+          "size": 4536,
+          "sha": "cbc246b1f30fa2c4e02f6567e3b7472122b2c6eddb772a351aae80278e89444a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hey_buddy_adv.mp3"
+        },
+        {
+          "path": "examples/hey_buddy_adv_augmented.mp3",
+          "size": 4536,
+          "sha": "f3ee82c50716b41811ec7674f9abb6329ff2202dcb7297817cc3eb1607d33e28",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hey_buddy_adv_augmented.mp3"
+        },
+        {
+          "path": "examples/hey_buddy_augmented.mp3",
+          "size": 4536,
+          "sha": "ade965e1da6a0381e2d78d1db01a943ed8edf33644f8fbdb66d34980b2bdd63d",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hey_buddy_augmented.mp3"
+        },
+        {
+          "path": "examples/hi_buddy.mp3",
+          "size": 3024,
+          "sha": "aa64c16fcd685f0230007397258b71b58377f8e5e2e4848b552bc377fa2ed7cd",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hi_buddy.mp3"
+        },
+        {
+          "path": "examples/hi_buddy_adv.mp3",
+          "size": 4320,
+          "sha": "9b47f573a726fcd5169bbb392c63122f5e804accc56d4f03f2afe11a8ed13655",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hi_buddy_adv.mp3"
+        },
+        {
+          "path": "examples/hi_buddy_adv_augmented.mp3",
+          "size": 4536,
+          "sha": "106f1fbee22adb9ca3c6a05084d3a04921d02a90e030af7d03156ffedaa77f51",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hi_buddy_adv_augmented.mp3"
+        },
+        {
+          "path": "examples/hi_buddy_augmented.mp3",
+          "size": 4536,
+          "sha": "02ad1ee9d881dceb4de634ef72e6ff9d9cdcc8a9b1746f068e6ffa52061f7b91",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/hi_buddy_augmented.mp3"
+        },
+        {
+          "path": "examples/okay_buddy.mp3",
+          "size": 3348,
+          "sha": "e13a4aaaaf437dd6d4929b7e8a52f0ad3be25e73ec4093d38203ed82221dcca5",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/okay_buddy.mp3"
+        },
+        {
+          "path": "examples/okay_buddy_adv.mp3",
+          "size": 4536,
+          "sha": "c1a531d28a1facfc10aed93b045a4e049fbd518a65efe942da011137df63230b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/okay_buddy_adv.mp3"
+        },
+        {
+          "path": "examples/okay_buddy_adv_augmented.mp3",
+          "size": 4536,
+          "sha": "92e743b4684318d0b8cc17bb446254762d90ef425ef53c80cfe7a4fbdbb17149",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/okay_buddy_adv_augmented.mp3"
+        },
+        {
+          "path": "examples/okay_buddy_augmented.mp3",
+          "size": 4536,
+          "sha": "8dadf56ab38f9f93d9b430701dcda1d10f6f7cf0abbe8f3444e03a2ebdac4e96",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/okay_buddy_augmented.mp3"
+        },
+        {
+          "path": "examples/sup_buddy.mp3",
+          "size": 2916,
+          "sha": "a71924fa561b8939aec9889cf8f76761e83a19a8847ed6895eaca10e0df8163a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/sup_buddy.mp3"
+        },
+        {
+          "path": "examples/sup_buddy_adv.mp3",
+          "size": 4860,
+          "sha": "5d2b8aeb7729e911557a7bfc9f24e04a6c0fc53466a56692cce6fa0009d8d16c",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/sup_buddy_adv.mp3"
+        },
+        {
+          "path": "examples/sup_buddy_adv_augmented.mp3",
+          "size": 4536,
+          "sha": "3ff198d920bfe59ebd5b707c54a04a784214765e1e0b6a9886e76e9a1dc96b7a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/sup_buddy_adv_augmented.mp3"
+        },
+        {
+          "path": "examples/sup_buddy_augmented.mp3",
+          "size": 4536,
+          "sha": "f9e1597b713f27c9dbffcf72c7f5c15440edf081fcbb3b2356436a2d8858e656",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/sup_buddy_augmented.mp3"
+        },
+        {
+          "path": "examples/yo_buddy.mp3",
+          "size": 3348,
+          "sha": "d963a77f609e7a8104af6d6e6cb4d5fc4469d10957f08ad85525547627cd72dc",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/yo_buddy.mp3"
+        },
+        {
+          "path": "examples/yo_buddy_adv.mp3",
+          "size": 5292,
+          "sha": "a61b1a1a68a9b483df8895b9e0e7090f0870495cbaac5e0079480aead6eb2139",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/yo_buddy_adv.mp3"
+        },
+        {
+          "path": "examples/yo_buddy_adv_augmented.mp3",
+          "size": 4536,
+          "sha": "22743580f41d6e30e1ef56c4ffab34d5b725b60e6411e80a503d5635e4422051",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/yo_buddy_adv_augmented.mp3"
+        },
+        {
+          "path": "examples/yo_buddy_augmented.mp3",
+          "size": 4536,
+          "sha": "81438976649da995475086dfe988ba3d16885b418e99a8d60e91cc67989701eb",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/examples/yo_buddy_augmented.mp3"
+        },
+        {
+          "path": "precalculated/buddy/buddy.npy",
+          "size": 1536000128,
+          "sha": "0f330211fb55415fc81f4c94f9b1a035723ca3574e6f3fb563cfd20a9a008509",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/buddy.npy"
+        },
+        {
+          "path": "precalculated/buddy/buddy_adv.npy",
+          "size": 1536000128,
+          "sha": "2ba58636519755352265c634121936ad62c09a232211fb82dd9cab34da9b4bb5",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/buddy_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/buddy_tst.npy",
+          "size": 153600128,
+          "sha": "2ebbb087a35e078a988bb57f9f7e5aeec72cb1664eb25676661af00cf9a71ade",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/buddy_tst.npy"
+        },
+        {
+          "path": "precalculated/buddy/buddy_tst_adv.npy",
+          "size": 153600128,
+          "sha": "40cc5fade776162f2c78cb221e9c66b423138fe4ad72599d34203cb4a78f09d2",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/buddy_tst_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/buddy_val.npy",
+          "size": 153600128,
+          "sha": "9af7d6b1074509629c21d860eb85082f94e198492b274d1da5e0ac267f556137",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/buddy_val.npy"
+        },
+        {
+          "path": "precalculated/buddy/hey_buddy.npy",
+          "size": 1536000128,
+          "sha": "0c01ff5bbcc048364c228ec2313f3c0b59c825cba4d4c1ea159fe748b2bb49a1",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hey_buddy.npy"
+        },
+        {
+          "path": "precalculated/buddy/hey_buddy_adv.npy",
+          "size": 1536000128,
+          "sha": "3dc2f3b2a8cb8304b3e51ee4284e0541abc7e9dcc963cba999de220b7bec9a70",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hey_buddy_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/hey_buddy_tst.npy",
+          "size": 153600128,
+          "sha": "679721ef718149d2380309e83616908d3c4a9f2ca46d3413b9beeff2202c84f3",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hey_buddy_tst.npy"
+        },
+        {
+          "path": "precalculated/buddy/hey_buddy_tst_adv.npy",
+          "size": 153600128,
+          "sha": "1272481ae0c87f0fac19d353a3f37f553266930f0019c4e6473ac690f8dda003",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hey_buddy_tst_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/hey_buddy_val.npy",
+          "size": 153600128,
+          "sha": "35deb90edd9c8aa8ffae971e5bdae63e042ca28448db24dbcbe81f50d2ea38b5",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hey_buddy_val.npy"
+        },
+        {
+          "path": "precalculated/buddy/hi_buddy.npy",
+          "size": 1536000128,
+          "sha": "27db7a5410b2f80649a7fd6ca59874719cf01bd9ca014d44d36d6be16045cae3",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hi_buddy.npy"
+        },
+        {
+          "path": "precalculated/buddy/hi_buddy_adv.npy",
+          "size": 1536000128,
+          "sha": "9310181f906c17cf8c2001ceb29d9c0cfb592b2882e956414ee2332a447aa1be",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hi_buddy_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/hi_buddy_tst.npy",
+          "size": 153600128,
+          "sha": "8be3a1fa290114472d4b6844ab8b6eb79f8a0da1f20c264eaae671f518ce3a0a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hi_buddy_tst.npy"
+        },
+        {
+          "path": "precalculated/buddy/hi_buddy_tst_adv.npy",
+          "size": 153600128,
+          "sha": "50ea6f557c3a30018dd7f76eb66e3b4be1d4fc63228e203394032715a2dd3350",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hi_buddy_tst_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/hi_buddy_val.npy",
+          "size": 153600128,
+          "sha": "974412de47fff32c6e7b95da3465a3f212baa9b07c9502136c82450230e108d7",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/hi_buddy_val.npy"
+        },
+        {
+          "path": "precalculated/buddy/okay_buddy.npy",
+          "size": 1536000128,
+          "sha": "87f8b7e175533b34aa5884c7a52e927d445af6a4b99ce30c538416eb59674941",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/okay_buddy.npy"
+        },
+        {
+          "path": "precalculated/buddy/okay_buddy_adv.npy",
+          "size": 1536000128,
+          "sha": "eccfd4f6d80c199480f0428b681ed05d58ad50fe077add3547b4e7e5963aa167",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/okay_buddy_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/okay_buddy_tst.npy",
+          "size": 153600128,
+          "sha": "abd0c566d349377503da1f167d32595980b1dcf7df8a77a8b8a1583c95d9614e",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/okay_buddy_tst.npy"
+        },
+        {
+          "path": "precalculated/buddy/okay_buddy_tst_adv.npy",
+          "size": 153600128,
+          "sha": "b7027d11163f20c8b2651900008c121f827cb7173929bb75820b446818ac354b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/okay_buddy_tst_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/okay_buddy_val.npy",
+          "size": 153600128,
+          "sha": "35537d6aee012c35ad864368410296883628507f52c1c952d0371ae356c7d21b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/okay_buddy_val.npy"
+        },
+        {
+          "path": "precalculated/buddy/sup_buddy.npy",
+          "size": 1536000128,
+          "sha": "759ba0d777caa869313905ee1bbaadd7b2ec7dcbc7351d6443ac0e87e6ab00f4",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/sup_buddy.npy"
+        },
+        {
+          "path": "precalculated/buddy/sup_buddy_adv.npy",
+          "size": 1536000128,
+          "sha": "dd287df2a73718089d27c42ee31bc3062ed8238ac0b8c7fa27d8c3d8e5b24f36",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/sup_buddy_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/sup_buddy_tst.npy",
+          "size": 153600128,
+          "sha": "a08ca84b4254fb502920670cf971bac9760b06d791e9669e1d4a8183a3798131",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/sup_buddy_tst.npy"
+        },
+        {
+          "path": "precalculated/buddy/sup_buddy_tst_adv.npy",
+          "size": 153600128,
+          "sha": "129616c83c5ffba0991decf867137e57136532079c12082c6c133e19b3dd593b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/sup_buddy_tst_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/sup_buddy_val.npy",
+          "size": 153600128,
+          "sha": "79ad564eaa848d7c650538cf700a6b7badf12212b234ad44579f0152f54c1b26",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/sup_buddy_val.npy"
+        },
+        {
+          "path": "precalculated/buddy/yo_buddy.npy",
+          "size": 1536000128,
+          "sha": "970f356fbfb559db4aa41e43f701423a31b0494a1881b26015f7362189282422",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/yo_buddy.npy"
+        },
+        {
+          "path": "precalculated/buddy/yo_buddy_adv.npy",
+          "size": 1536000128,
+          "sha": "6fd87169eec0d2ab99e947b0dab13548140a0297097879941f0bfddf7b642d65",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/yo_buddy_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/yo_buddy_tst.npy",
+          "size": 153600128,
+          "sha": "32b21fab637defbf9a6ed74bfb9a5d33c054799e4067a5562181edf29e7c2912",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/yo_buddy_tst.npy"
+        },
+        {
+          "path": "precalculated/buddy/yo_buddy_tst_adv.npy",
+          "size": 153600128,
+          "sha": "10e6dbce60ee45320a356f0c65cdb1559639a94d13a2c9b86fbc2c0f5096d86f",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/yo_buddy_tst_adv.npy"
+        },
+        {
+          "path": "precalculated/buddy/yo_buddy_val.npy",
+          "size": 153600128,
+          "sha": "959fb585d757620f71fafe44fca60c7a1a1eb5f206af8cd872cba22d8b1e9c26",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/buddy/yo_buddy_val.npy"
+        },
+        {
+          "path": "precalculated/common/training-large.npy",
+          "size": 48999984128,
+          "sha": "143141ab44d0dfd9665c97e3b4a20bcdfcd018dc8800ab0be50279e6b68057de",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/common/training-large.npy"
+        },
+        {
+          "path": "precalculated/common/training-medium.npy",
+          "size": 21741703232,
+          "sha": "af0118fd397db00207d8f7b9f01e8f5be79e74734bfd21327bc6ccce8ee01992",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/common/training-medium.npy"
+        },
+        {
+          "path": "precalculated/common/validation.npy",
+          "size": 411916928,
+          "sha": "3126ed1872f725c99c02df4f6512aa32fd1a7ec6821570e75ca8884797a9aca7",
+          "url": "https://huggingface.co/datasets/benjamin-paine/hey-buddy/resolve/main/precalculated/common/validation.npy"
+        }
+      ],
+      "total_bytes": 92350519921
+    },
+    {
+      "repo": "benjamin-paine/freesound-laion-640k-commercial-16khz-full",
+      "type": "dataset",
+      "license_entry": "benjamin-paine/freesound-laion-640k-commercial-16khz-full",
+      "role": "augmentation: background sound effects",
+      "license": "CC-BY-4.0",
+      "license_blocked": false,
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 2419,
+          "sha": "55cab133643a2a73e083373d2106533678d0edd5",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/.gitattributes"
+        },
+        {
+          "path": "README.md",
+          "size": 4655,
+          "sha": "343a3da5f287876c921cc69e5844b0b382b6ab3b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/README.md"
+        },
+        {
+          "path": "data/train-00000-of-00081.parquet",
+          "size": 478388386,
+          "sha": "885e478cd4cce98da838bb3a47c47f22a1649b441ad60dc6592c20f798920055",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00000-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00001-of-00081.parquet",
+          "size": 460473483,
+          "sha": "d87e902a4a2b96c74a08de6b1c16d743f85091dad1dd79099d8bcf16302ea98a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00001-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00002-of-00081.parquet",
+          "size": 456329240,
+          "sha": "f9cda949e70eb17f39d909517956b82b699602e87ab1adb2d933f3914407b4e0",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00002-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00003-of-00081.parquet",
+          "size": 457575808,
+          "sha": "bd425627d38ebf8837c09c594148b965f50ce898e8aeb41fc6323afaba765c04",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00003-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00004-of-00081.parquet",
+          "size": 462505432,
+          "sha": "ef0f67fcd216fa4d57bac55a7bb1b9530088428fa01b1758e0e001d75b9d6317",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00004-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00005-of-00081.parquet",
+          "size": 454305778,
+          "sha": "b9d2ce638d9c1e139890c0272cd1dd61371978266c3de2c8499dd88edf48b43f",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00005-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00006-of-00081.parquet",
+          "size": 463469219,
+          "sha": "0a1ad644dc3625c74be80d695550c9da0e2acb31323d7d8f8d6103a95fc62a73",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00006-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00007-of-00081.parquet",
+          "size": 468077016,
+          "sha": "1b59b92437e1643176390f5f4f22f8beef4aee0f41fa7f343cde7a9e096a1f8d",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00007-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00008-of-00081.parquet",
+          "size": 460423395,
+          "sha": "fa3f02e71b3ad7c4492f60add015b4ed96dc15c4667e8939a8bf4552c72f6587",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00008-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00009-of-00081.parquet",
+          "size": 459385104,
+          "sha": "6e152d392747d9b27a67db1fc87d531659cdf0a9419292acaaa4631b79100301",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00009-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00010-of-00081.parquet",
+          "size": 464466363,
+          "sha": "17ab6f6bbe4d616918f2a71cbe6e387b776a46236a36e08fb368290431638098",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00010-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00011-of-00081.parquet",
+          "size": 461824645,
+          "sha": "c96abb72faecaadc7826408d1500626e88eae30a4f3515b7d63635c2da889601",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00011-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00012-of-00081.parquet",
+          "size": 460299963,
+          "sha": "1f8828f6fb62b02633ea4c1a6bd4ec52cfb62761b6439c74fd30aecd6735d688",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00012-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00013-of-00081.parquet",
+          "size": 464775868,
+          "sha": "4ab0d4e47d2ea8af0bdf90deea514a74bcf766629cef45fc84f3d9a802fe7c68",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00013-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00014-of-00081.parquet",
+          "size": 450780353,
+          "sha": "dfb135f037407183908602a2adfc2a35af53c789ef8eead640d5bd36b9a8f5be",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00014-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00015-of-00081.parquet",
+          "size": 460844037,
+          "sha": "03183bffefdd289707cdd9419f5622c4c64ff705c87ba401008ab740ec77e0f4",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00015-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00016-of-00081.parquet",
+          "size": 458177176,
+          "sha": "4d6047dd67ded812f2771cedd4ddf0253a92b417fae51ba8c2e93406fc5e8327",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00016-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00017-of-00081.parquet",
+          "size": 450009520,
+          "sha": "0b7cc72b3df281705ae168df2442b944ddcd4e3796a90b017623492d6ab78c0d",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00017-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00018-of-00081.parquet",
+          "size": 456676928,
+          "sha": "0d12a810fc758f08504bbba0111a9ebaf3bcfb4b37e958d6e8c7118acce4122f",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00018-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00019-of-00081.parquet",
+          "size": 463223754,
+          "sha": "b2edcae5cb39579f6d4f11617e16905909cb9d0d5beaac7c17ffef944d4c3cad",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00019-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00020-of-00081.parquet",
+          "size": 461930088,
+          "sha": "c065c47cf3dd52bddefaab09d6fc34bf4aac75f34842cc9dc0b761efbd7e83b2",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00020-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00021-of-00081.parquet",
+          "size": 464103350,
+          "sha": "f5525a15c9630ed31cd402f317f3df552f384bdcd4c57b7442c98dee70f745a1",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00021-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00022-of-00081.parquet",
+          "size": 446252250,
+          "sha": "cde124c420fab0de626a9ebd75bb3fb706cfb72618e0218e4f3608f853dd2347",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00022-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00023-of-00081.parquet",
+          "size": 451373322,
+          "sha": "b06d12181b5354322f89bcb1aae7b7299538d181b591043127ae14560abd2e15",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00023-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00024-of-00081.parquet",
+          "size": 449926608,
+          "sha": "4ddcb2f5eb45b68ffd35e2ab08284cc946da0a15fbe52e7956a29c8751585eec",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00024-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00025-of-00081.parquet",
+          "size": 453234161,
+          "sha": "f0347a38c0e4403bbce9582b0c485b2b0e033366470df611767cc378452d4333",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00025-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00026-of-00081.parquet",
+          "size": 478765740,
+          "sha": "1d864f0ced5eda8ed847218ced1362a578964d0b2ab28f636247252ffc52403a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00026-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00027-of-00081.parquet",
+          "size": 460521405,
+          "sha": "9aca661c817969d5e7e9a9f551e712054a14535dca518266074879028bda7d1d",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00027-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00028-of-00081.parquet",
+          "size": 467918895,
+          "sha": "2d18dfba27aa528ebd9e37333a40ae7ca5a8186b46edac201492d756998f86df",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00028-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00029-of-00081.parquet",
+          "size": 465991863,
+          "sha": "18b6f80af9d2ea2301404a30ba2410fe84c5528f18ad0287f3d26e5a6bde3abb",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00029-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00030-of-00081.parquet",
+          "size": 455982301,
+          "sha": "f9b180cffc3e55a8525ba070d5507b81cfbca52683bc7780ec6b65118e743542",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00030-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00031-of-00081.parquet",
+          "size": 461250209,
+          "sha": "16a13ede8d4a0b01ac2c58ae4f96b735f30d2530240ba56eb68d9890e0e5f209",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00031-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00032-of-00081.parquet",
+          "size": 480198114,
+          "sha": "e1318a6d05c3dd6da06fdfbbef2b640fc3de9c3c93408720df34821ff34fe1c4",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00032-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00033-of-00081.parquet",
+          "size": 468436806,
+          "sha": "e39504eda8812c1af3bfcc5c61485b1813da7a47dc35a2d57d0168d3727cbdf3",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00033-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00034-of-00081.parquet",
+          "size": 460951139,
+          "sha": "24614453a7fc0d56d24a91c84604753b331e206961bdd4825058443553bf474b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00034-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00035-of-00081.parquet",
+          "size": 478961851,
+          "sha": "23a9bd054b1756dcd19b9b2e0906e593100fad44336d155e52bdeafd7a2b8296",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00035-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00036-of-00081.parquet",
+          "size": 468349381,
+          "sha": "c69e670b7ab432ffb48d981919a4daaa9aaaa7f5946cb08dbae28e2fe2e1e25c",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00036-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00037-of-00081.parquet",
+          "size": 477339399,
+          "sha": "a36752408b46e6ca0950afb4bd3e6b5ada917df447e26f9586e5fb16e61fc687",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00037-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00038-of-00081.parquet",
+          "size": 469700287,
+          "sha": "be3a0f4c872e4382bb2bf0e720f3cec47ef8edea3e09384afb3ab8a9a2424379",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00038-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00039-of-00081.parquet",
+          "size": 465281510,
+          "sha": "9b5d5fdfc254369c09b023d8e64158c9afe97e210fe93bcec48b119a08616bfa",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00039-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00040-of-00081.parquet",
+          "size": 468964131,
+          "sha": "4e8a7ffc0c2761c368be53b4aeb66171626b46b2ba1d94b1d398bb4011967963",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00040-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00041-of-00081.parquet",
+          "size": 471567166,
+          "sha": "b6e72f1dee3450207cdb84a1948a1a86d6608112437b3b102cd89d48c2d9aa21",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00041-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00042-of-00081.parquet",
+          "size": 451200310,
+          "sha": "e1ac69c742ef08e90e38c1c1123e66fbec386827f4fbe14558b6e799c6e23d1d",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00042-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00043-of-00081.parquet",
+          "size": 475156985,
+          "sha": "c1235ac7ca89fa603e5af0b4bb4f8ba9602f2bb523a57b78d0d1499b205497ed",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00043-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00044-of-00081.parquet",
+          "size": 438309503,
+          "sha": "c5247b2b09db12a640ff7f2bff2f311757590ccf6c65f14f1e7823a0947bd3f6",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00044-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00045-of-00081.parquet",
+          "size": 464731189,
+          "sha": "99aadc504ec72d7537dc361df972dc3e065c1f2dfdf8ccf9d3c6562a345a9374",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00045-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00046-of-00081.parquet",
+          "size": 473819588,
+          "sha": "594ea6b95f72206363d3e6d231510782256cb4c44976ba243f035f9aad6f831e",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00046-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00047-of-00081.parquet",
+          "size": 452383372,
+          "sha": "024329761faaf49c0438c8f958235372c5d917e3cc49f8e1384cfbc993467008",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00047-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00048-of-00081.parquet",
+          "size": 470804040,
+          "sha": "409a55e2d35bbb9552326e994cd4b61cff64ab4fe45de544c0b4131da1a4e9aa",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00048-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00049-of-00081.parquet",
+          "size": 457268955,
+          "sha": "ad21c546d951970c55c3dde75590344ee4a3f9c6c4d58e3c0ddaa464683b58c3",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00049-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00050-of-00081.parquet",
+          "size": 473006998,
+          "sha": "b8cea141d0d8a84281cc955d9765abf3d101165537acbbecbda348edc3241163",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00050-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00051-of-00081.parquet",
+          "size": 467929041,
+          "sha": "c09569c271138c0bcdb3e3050261d3bc405a779258f0a11939e7d713e3b24107",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00051-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00052-of-00081.parquet",
+          "size": 460379193,
+          "sha": "0c83ce034f202343bf7876f0f533e61e4b6da1fc502b2b50b2442dc4223b0762",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00052-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00053-of-00081.parquet",
+          "size": 483543033,
+          "sha": "6e5c204d13207d45ec50e1a253552d957d74565e594840c69a6eead339f69b8e",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00053-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00054-of-00081.parquet",
+          "size": 455767335,
+          "sha": "2b3bb5fcd7b75db3618934b800f1d4023aa84cea2b4fe8ef4dfbed3fc0f6d2b9",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00054-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00055-of-00081.parquet",
+          "size": 442015250,
+          "sha": "5878c4fdef09b84b58d27a746240ae8f9e4e3667591b8f698f246eec2b22587c",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00055-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00056-of-00081.parquet",
+          "size": 459378229,
+          "sha": "79b2492c2755b897798a9e7b530c9eb8d97dcdaff15707bf877e16b76f0a127c",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00056-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00057-of-00081.parquet",
+          "size": 475876087,
+          "sha": "b5d9e2e98f46bea56883e187569ad8b6b2b45493a415d633a698ff6a8649c511",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00057-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00058-of-00081.parquet",
+          "size": 452431768,
+          "sha": "b0ffb3e4f2c5a409359377d8d4c70739a106e237dda98f55b4ab338248602280",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00058-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00059-of-00081.parquet",
+          "size": 452403011,
+          "sha": "a1dbca882f2b678118e368fc13a1f612635478575ea08e43676bc9abad37cad0",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00059-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00060-of-00081.parquet",
+          "size": 474572663,
+          "sha": "04bae54038a08348159aec51bbec8bd9bf02102b28eaf351cb24850b79b77a91",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00060-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00061-of-00081.parquet",
+          "size": 477370415,
+          "sha": "162d6cbcd1516a6e25a4af3b844a73b5cefa88ad962dd193e910950a5910405b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00061-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00062-of-00081.parquet",
+          "size": 467129189,
+          "sha": "3e85839db50fee73824600563060b5c4737b66fb51833ad25511fc454ae96a8f",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00062-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00063-of-00081.parquet",
+          "size": 466564370,
+          "sha": "a1e71983b85091e709784b69fd60a7abcbe531578276a1f7d3d2fb8c0f02c8c9",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00063-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00064-of-00081.parquet",
+          "size": 466333869,
+          "sha": "f12909585a1fe4e1f737234f88ca10439d51be4dccf1009586c7223ad2b62190",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00064-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00065-of-00081.parquet",
+          "size": 463695677,
+          "sha": "75f2353aacd3ca253c99856630b4fe0fec6a87f790c08b760e06bb35b3214d9e",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00065-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00066-of-00081.parquet",
+          "size": 459420600,
+          "sha": "b00210bd5d5f08ef09045f33d707eb8d24ffc5527d441126cdfd7cc1c1735327",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00066-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00067-of-00081.parquet",
+          "size": 471793323,
+          "sha": "0a050fe8a8dad20e8f1e70f260870bbf7c97d4eb1a8b988cb015517dc7d64583",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00067-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00068-of-00081.parquet",
+          "size": 466183428,
+          "sha": "a6e5200c5f2dedd897a649e0204dedb246cbb413d4b1db44844c02a1837405a3",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00068-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00069-of-00081.parquet",
+          "size": 467380578,
+          "sha": "a101f6eb728051c1a23a318eb2464b1a61e1753ed170a2b2ec242c60e983ea1c",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00069-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00070-of-00081.parquet",
+          "size": 452380948,
+          "sha": "68843874f1bc598037489f7361d688fb67ef98c8343a176c5929f83cace75d85",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00070-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00071-of-00081.parquet",
+          "size": 482216064,
+          "sha": "eb3863183f0f70032c0c63bf84abe057258469c5b3e82ce109c44f30d81330c7",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00071-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00072-of-00081.parquet",
+          "size": 450076119,
+          "sha": "c175bf5ad56cebc92c39e888eefc0d62ca0cfc97b03e43bf16d9dca622734d94",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00072-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00073-of-00081.parquet",
+          "size": 474171608,
+          "sha": "fcf12775f4ec6e8b6d8042089934ed735838ab9a1be7f954e058e9b507224b2e",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00073-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00074-of-00081.parquet",
+          "size": 446832059,
+          "sha": "60decd1117f9e7adc9c8421bab390f4c916a2556eaac887cf615303ce3f4e271",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00074-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00075-of-00081.parquet",
+          "size": 465505337,
+          "sha": "e750a4dd441a79c39da844de549e8d1f36ab7cf35f73fe3a69e6ffe26d063d27",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00075-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00076-of-00081.parquet",
+          "size": 474717182,
+          "sha": "a5ffed6a877b119e4a7a773cb4e749080cc2889b1941ac030d80f875abea93ec",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00076-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00077-of-00081.parquet",
+          "size": 461595985,
+          "sha": "50698bd306dbe3d990062ed91fa6557764e903a7b59e6e5dc8bd1143e1e56b88",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00077-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00078-of-00081.parquet",
+          "size": 478373796,
+          "sha": "957fff18741561525b493ac60f7724193badda8b87b1ef85932980be521d77aa",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00078-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00079-of-00081.parquet",
+          "size": 473857593,
+          "sha": "3a10ebc05046e52a9011addf0fc8633781e19afdbc00c8034d6343644f512738",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00079-of-00081.parquet"
+        },
+        {
+          "path": "data/train-00080-of-00081.parquet",
+          "size": 451184748,
+          "sha": "27f7218eff6340267f3d29bd8a7e0100bd1affb8108894c05b869d22b9b6b2db",
+          "url": "https://huggingface.co/datasets/benjamin-paine/freesound-laion-640k-commercial-16khz-full/resolve/main/data/train-00080-of-00081.parquet"
+        }
+      ],
+      "total_bytes": 37536777956
+    },
+    {
+      "repo": "benjamin-paine/free-music-archive-commercial-16khz-full",
+      "type": "dataset",
+      "license_entry": "benjamin-paine/free-music-archive-commercial-16khz-full",
+      "role": "augmentation: background music",
+      "license": "CC-BY-4.0",
+      "license_blocked": false,
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 2419,
+          "sha": "55cab133643a2a73e083373d2106533678d0edd5",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/.gitattributes"
+        },
+        {
+          "path": "README.md",
+          "size": 5682,
+          "sha": "51de3a6707abff32c8efdde5b9ef66fe682fffc1",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/README.md"
+        },
+        {
+          "path": "data/train-00000-of-00013.parquet",
+          "size": 454246671,
+          "sha": "1e996adc648f86041d0aaa030de768113f6b3e96ffe9202f0d5c24fdac894e7e",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00000-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00001-of-00013.parquet",
+          "size": 577016023,
+          "sha": "6ee5b6ab157ba38fbf3ed3a026d0895173539b92eb6217b437441c61e98df7ed",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00001-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00002-of-00013.parquet",
+          "size": 749446467,
+          "sha": "1127fd503fe9ed05ecbedf6a0f1ab28398f759a534e5c307562d146b43f7606b",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00002-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00003-of-00013.parquet",
+          "size": 702193031,
+          "sha": "c9bd2647c41ebbd84bab33082051021fe50c7587a9bc8b6d8361808a0871e846",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00003-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00004-of-00013.parquet",
+          "size": 755320672,
+          "sha": "2863027713ce3246cdf0207eefe545fe6d1a26e212c174e3126cb82604797225",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00004-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00005-of-00013.parquet",
+          "size": 873752726,
+          "sha": "89260c3aa78a5cf43780e920ca99ed62af27a0b50c6d41bb1b492a2775b09943",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00005-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00006-of-00013.parquet",
+          "size": 558079673,
+          "sha": "f25cd195e940754190dbdba49800c06b9ebc22c1ac66e02aecddc784985ef9aa",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00006-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00007-of-00013.parquet",
+          "size": 996374968,
+          "sha": "7498465f933270015c6274726b218662d167cc418e5a0b0811e279d86fbddeb2",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00007-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00008-of-00013.parquet",
+          "size": 1068152999,
+          "sha": "7eab40bc7aeb459230821581110b84f396b4a4b05c0e6fd40196f39fa4ea9a3a",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00008-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00009-of-00013.parquet",
+          "size": 700996139,
+          "sha": "a181fefef7f71e0fb7aa1c1e36da3c48c37d9ec8cf3df76cb2c0450a48dd0653",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00009-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00010-of-00013.parquet",
+          "size": 1034461886,
+          "sha": "a89dd1d9647aace9b9b17836c3969dbecedf72fff8fbba963e9c4adaa9f5d913",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00010-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00011-of-00013.parquet",
+          "size": 1006692338,
+          "sha": "8a7f3c016ff3eba4654c086b7311939ccdae958badf5ec6d2667473a6b845029",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00011-of-00013.parquet"
+        },
+        {
+          "path": "data/train-00012-of-00013.parquet",
+          "size": 1030159102,
+          "sha": "3f20327f6aaf8547c0f94e25160a42ab588628ecf4e3a55246f6ea09f52eea89",
+          "url": "https://huggingface.co/datasets/benjamin-paine/free-music-archive-commercial-16khz-full/resolve/main/data/train-00012-of-00013.parquet"
+        }
+      ],
+      "total_bytes": 10506900796
+    },
+    {
+      "repo": "benjamin-paine/mit-impulse-response-survey-16khz",
+      "type": "dataset",
+      "license_entry": "benjamin-paine/mit-impulse-response-survey-16khz",
+      "role": "augmentation: room impulse responses",
+      "license": null,
+      "license_blocked": true
+    },
+    {
+      "repo": "benjamin-paine/hey-buddy",
+      "type": "model",
+      "license_entry": "speech-embedding.onnx",
+      "role": "pretrained backbone + upstream wake models",
+      "license": "Apache-2.0",
+      "license_blocked": false,
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 1519,
+          "sha": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/.gitattributes"
+        },
+        {
+          "path": "README.md",
+          "size": 42136,
+          "sha": "8ee8310078c7286f62b9e7b11cf53254e8715fcb",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/README.md"
+        },
+        {
+          "path": "models/buddy.onnx",
+          "size": 1186048,
+          "sha": "0e51c54c332bac780c58b80315e70ce54d8319566664330634e5fd5531a90cd8",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/buddy.onnx"
+        },
+        {
+          "path": "models/hello-buddy.onnx",
+          "size": 1186048,
+          "sha": "4c1691b8ef79fd882a7fe9df554620fd572329eddbee536315aed180e0bbfb0a",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/hello-buddy.onnx"
+        },
+        {
+          "path": "models/hey-buddy.onnx",
+          "size": 1186048,
+          "sha": "dfeb1222f8b45da7b151aa66882404632a4d058860828ac29a6756616fbaf397",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/hey-buddy.onnx"
+        },
+        {
+          "path": "models/hi-buddy.onnx",
+          "size": 1186048,
+          "sha": "367b13a937dcd14b02199fe6d5841d0d4d273cc5101dd5bd199209f4a0655cf2",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/hi-buddy.onnx"
+        },
+        {
+          "path": "models/okay-buddy.onnx",
+          "size": 1031918,
+          "sha": "369133f69d0ae9459719d7cf81cbc8c1ad0196cce384eef6b960beff9cea6dd0",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/okay-buddy.onnx"
+        },
+        {
+          "path": "models/sup-buddy.onnx",
+          "size": 1186048,
+          "sha": "b3f1463e948a46d839bfc237d44f699bc8c6e71a51f2dbf0a0cbf3e24179616a",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/sup-buddy.onnx"
+        },
+        {
+          "path": "models/thanks-buddy.onnx",
+          "size": 1186048,
+          "sha": "d0d744166e0a3c0b13a36c6bcdba2d8545869dffdc18f785a39cbf8662316583",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/thanks-buddy.onnx"
+        },
+        {
+          "path": "models/yo-buddy.onnx",
+          "size": 1186048,
+          "sha": "22009da6216ad8881f9d6c3a03430609767081961241bb12feb2bd75c4689db6",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/models/yo-buddy.onnx"
+        },
+        {
+          "path": "pretrained/mel-spectrogram.onnx",
+          "size": 1087958,
+          "sha": "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/pretrained/mel-spectrogram.onnx"
+        },
+        {
+          "path": "pretrained/piper-libritts-en-r-medium.safetensors",
+          "size": 122751936,
+          "sha": "58479c5a37610068fe2083e2612463e0e341b02593231c7c4a5909d3c6b58870",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/pretrained/piper-libritts-en-r-medium.safetensors"
+        },
+        {
+          "path": "pretrained/silero-vad.onnx",
+          "size": 1807522,
+          "sha": "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/pretrained/silero-vad.onnx"
+        },
+        {
+          "path": "pretrained/speech-embedding.onnx",
+          "size": 1326578,
+          "sha": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f",
+          "url": "https://huggingface.co/benjamin-paine/hey-buddy/resolve/main/pretrained/speech-embedding.onnx"
+        }
+      ],
+      "total_bytes": 136351903
+    }
+  ]
+}

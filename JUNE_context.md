@@ -130,7 +130,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 | Component | Purpose | Notable deps |
 |---|---|---|
 | **phase-cad** (`.venv`, **Python 3.12 exactly**, via `uv`) | Prompt-to-CAD | `build123d>=0.11,<0.12`, `build123d-mcp==0.3.79`, `cadquery-ocp-novtk` (OCCT/VTK) |
-| **phase2-mcp** (`venv`) | voice/vision/memory/browser | `faster-whisper`+`ctranslate2` (STT), `kokoro-onnx`+`phonemizer-fork`+`espeakng-loader` (TTS), `openwakeword` (wake word), `faiss-cpu`+`scikit-learn` (memory), `ollama`, `opencv-python-headless`, `mss`, `playwright`, `av`, `soundfile`, `mcp`, `websockets` |
+| **phase2-mcp** (`venv`) | voice/vision/memory/browser | `faster-whisper`+`ctranslate2` (STT), Kokoro ONNX weights + `misaki` (TTS), onnxruntime wake pipeline — hey-buddy models, no openwakeword (wake word), `faiss-cpu`+`scikit-learn` (memory), `ollama`, `opencv-python-headless`, `mss`, `playwright`, `av`, `soundfile`, `mcp`, `websockets` |
 
 | **browser-use-mcp** (`venv`) | autonomous browser | `browser-use==0.13.3` (drives Chromium over CDP — needs a Chrome/Chromium) |
 | ~~diffusion-mcp~~ | local image gen — REMOVED from the app (PR E); dir may exist but nothing launches it | — | — |
@@ -150,7 +150,7 @@ scripts/setup.{sh,ps1}  one-shot setup — setup.sh (Linux/WSL/Git-Bash) · setu
 | `inference-proxy` | bun | 8086 | wall-clock-timeout proxy over llama |
 | `opencode-serve` | bun | **4096** | the engine; **spawns all MCP servers**; cwd = the workspace |
 | `side-channel` | phase2-mcp python | 8765 | wake-word / TTS / orb WebSocket |
-| `wake-daemon` | phase2-mcp python | 8766 | "Hey Nightjar" loop (needs a mic) |
+| `wake-daemon` | phase2-mcp python | 8766 | "Hey June" loop (stand-in phrase "hey buddy"; needs a mic) |
 | `ollama` | Ollama | 11434 | local vision; **adopted** if already running |
 | MCP servers (×7) | per-venv python | — (stdio) | spawned by opencode-serve, not the supervisor |
 

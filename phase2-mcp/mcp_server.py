@@ -143,10 +143,13 @@ def browser_back() -> str:
 # ---------------- wake word ----------------
 @mcp.tool()
 def wake_word_listen(audio_path: str = "", timeout_s: float = 8.0) -> Dict[str, Any]:
-    """Listen for the 'Hey Nightjar' wake word, then transcribe the command that
+    """Listen for the 'Hey June' wake word, then transcribe the command that
     follows. Pass `audio_path` to run against a recorded clip (headless/testing);
     with no path a live mic is required (unavailable on this host). Returns
-    {detected, command, wake}. Publishes wake + transcription to the side-channel."""
+    {detected, command, wake}. Publishes wake + transcription to the side-channel.
+
+    NOTE: until a trained hey_june.onnx is deployed the bundled stand-in actually
+    answers to 'Hey buddy' — see nightjar_capabilities/wakeword.py."""
     if not audio_path:
         return {"detected": False, "error": "no audio_path and no live mic on this host",
                 "command": ""}
@@ -158,7 +161,7 @@ def wake_word_listen(audio_path: str = "", timeout_s: float = 8.0) -> Dict[str, 
         # strip a leading wake phrase if present
         cmd = transcript
         low = transcript.lower()
-        for w in ("hey june", "hey nightjar", "hey jarvis"):  # keep in sync with wake_daemon.WAKE_PHRASES
+        for w in ("hey june", "hey buddy", "hey nightjar"):  # keep in sync with wake_daemon.WAKE_PHRASES
             if low.startswith(w):
                 cmd = transcript[len(w):].lstrip(" ,.").strip()
                 break

@@ -30,7 +30,7 @@
 | nightjar-image (MCP) | `phase2-mcp/venv` | — (stdio) | image gen (BYOK cloud, OpenAI-compatible) | assistant tools (ask) |
 | browser-use (MCP) | `browser-use-mcp/venv` | — (stdio) | autonomous browser | browser tool |
 | side-channel | `phase2-mcp/venv` python | 8765 | wake-word/TTS/orb side-channel | voice orb |
-| wake-daemon | `phase2-mcp/venv` python | 8766 | "Hey Nightjar" loop | wake word (needs mic) |
+| wake-daemon | `phase2-mcp/venv` python | 8766 | "Hey June" loop (stand-in phrase "hey buddy") | wake word (needs mic) |
 | ollama | Ollama | 11434 | local **vision** (gemma3:4b) | offline image analysis |
 | Electron UI | Node + electron-vite | — | the app | everything (this is what renders) |
 
