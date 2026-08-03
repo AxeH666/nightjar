@@ -1,9 +1,27 @@
-# Custom "Hey Nightjar" wake word — training recipe
+# Custom "Hey June" wake word — training recipe
 
 **Status: pipeline built + validated; the custom base model is NOT yet trained
 (see hazard below). Nightjar runs today with a stock stand-in model; drop in a
-trained `hey_nightjar.onnx` and set `NIGHTJAR_WAKEWORD_MODEL` to activate the
+trained `hey_june.onnx` and set `NIGHTJAR_WAKEWORD_MODEL` to activate the
 real phrase — no code changes.**
+
+## PRODUCT REQUIREMENTS (voice-phase PR 5 — read before training)
+
+1. **The model must be trained SYNTHETICALLY, on thousands of generated voices**
+   (openWakeWord's recommended piper-sample-generator pipeline), **never on
+   recordings of one person**. A model trained on the maintainer's voice
+   recognises the maintainer and fails for customers — this is a product, not a
+   personal tool. The kokoro generator below (5 same-engine, all-female voices ×
+   3 speeds) is NOT sufficient diversity for the shipped model; treat it as a
+   smoke-test source only.
+2. **Licensing is why this model exists (NJ-58):** the stock openWakeWord models
+   (incl. the `hey_jarvis` stand-in Nightjar currently falls back to) are
+   **CC-BY-NC-SA 4.0 — non-commercial** per the package's own license statement.
+   No paid build may ship the stock fallback. Before shipping `hey_june.onnx`,
+   also verify (rule 5) the licenses of: the shared embedding backbone
+   (claimed Apache-2.0, re-implemented from Google's speech_embedding), the
+   negative-feature datasets (ACAV100M etc.), and piper-sample-generator + its
+   voices — the trained model's license follows its training inputs.
 
 ## Why this isn't trained in-repo (hazard)
 
@@ -31,9 +49,11 @@ it cannot create the new "Hey Nightjar" phrase. Hence full training is required.
    ```
    python wakeword_training/generate_samples.py /path/to/positives 2000
    ```
-   Scale `VOICES`/`SPEEDS`/repetitions in the script up to ~thousands of clips.
-   These use the same kokoro-onnx TTS Nightjar ships. For robustness, also record
-   real human "Hey Nightjar" samples if available.
+   These use the same kokoro-onnx TTS Nightjar ships — smoke-test positives only
+   (see PRODUCT REQUIREMENTS above): the shipped model's positives must come from
+   the piper-sample-generator pipeline (thousands of distinct synthetic voices).
+   Do NOT train on recordings of a single real person — that overfits the model
+   to that speaker.
 
 2. **On a training machine (GPU, torch/TF ok):**
    ```

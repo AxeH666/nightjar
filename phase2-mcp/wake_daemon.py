@@ -8,16 +8,16 @@ that only scanned prerecorded WAV files/arrays; `mcp_server.py`'s
 autonomous background listener; nothing tied wake -> transcribe -> an OpenCode
 prompt -> a spoken reply together. This script is that missing piece.
 
-Loop: capture the live microphone (a `parec` subprocess — no new heavy audio
-dependency; matches nightjar_capabilities/voice.py's existing "no
-sounddevice/pyaudio" stance) -> score every 80ms frame with openWakeWord
--> on wake, publish `wake`, record a fixed follow-up window, transcribe with
-faster-whisper, publish `transcription` -> POST the command to a persistent
-OpenCode session (agent=NIGHTJAR_AGENT, default "assistant") and collect the
-reply off the real SSE event stream -> synthesize the reply with kokoro-onnx,
-publish `tts` -> back to listening. Every event kind/shape matches what
-mcp_server.py already publishes, so NightjarOrb (Phase 4) animates identically
-whether the event came from an agent tool call or this daemon.
+Loop: capture the live microphone (sounddevice/PortAudio — the cross-platform
+path, REQUIRED on native Windows; `parec` remains as the PulseAudio fallback
+where PortAudio is absent — voice-phase PR 3) -> score every 80ms frame with
+openWakeWord -> on wake, publish `wake`, record a fixed follow-up window,
+transcribe with faster-whisper, publish `transcription` -> POST the command to
+a persistent OpenCode session (agent=NIGHTJAR_AGENT, default "assistant") and
+collect the reply off the real SSE event stream -> synthesize the reply with
+kokoro-onnx, publish `tts` -> back to listening. Every event kind/shape matches
+what mcp_server.py already publishes, so NightjarOrb (Phase 4) animates
+identically whether the event came from an agent tool call or this daemon.
 
 Known, explicitly-accepted limitations (not silently hidden):
 - Command-window endpointing is a fixed window (COMMAND_WINDOW_S), not VAD —
@@ -26,7 +26,10 @@ Known, explicitly-accepted limitations (not silently hidden):
   back, so the daemon can't hear its own TTS output and re-trigger on it — but
   it also means it can't hear you barge in over a reply.
 - Uses the STOCK wake-word model unless NIGHTJAR_WAKEWORD_MODEL points at a
-  trained hey_nightjar.onnx (none exists yet — see wakeword_training/README.md).
+  trained hey_june.onnx (none exists yet — see wakeword_training/README.md).
+  The stock openWakeWord models are CC-BY-NC-SA — NON-commercial (NJ-58); the
+  custom synthetic model in voice-phase PR 5 is what makes shipping legal, not
+  a cosmetic rename.
 
 Run: python wake_daemon.py
 Env: NIGHTJAR_OPENCODE_URL (default http://127.0.0.1:4096), NIGHTJAR_AGENT
@@ -39,12 +42,13 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import requests
@@ -71,25 +75,164 @@ TTS_VOICE = os.environ.get("NIGHTJAR_TTS_VOICE", "af_heart")
 PLAY_TTS_LOCALLY = os.environ.get("NIGHTJAR_PLAY_TTS", "0") == "1"
 HEALTH_PORT = int(os.environ.get("NIGHTJAR_WAKE_HEALTH_PORT", "8766"))
 
-WAKE_PHRASES = ("hey nightjar", "hey jarvis")  # stripped if the transcript leads with either
+# Stripped if the transcript leads with one. "hey june" is the product phrase (the
+# trained model lands in voice-phase PR 5); the others cover the legacy name and the
+# stock stand-in model. Keep in sync with mcp_server.py's copy.
+WAKE_PHRASES = ("hey june", "hey nightjar", "hey jarvis")
 
 
 def log(msg: str) -> None:
     print(f"[wake-daemon] {msg}", flush=True)
 
 
-# ─── live mic capture (parec subprocess; no new heavy audio dependency) ───────
+# ─── live mic capture (sounddevice/PortAudio primary; parec fallback) ─────────
+# Voice-phase PR 3: parec (PulseAudio) was the ONLY backend, so capture was dead on
+# native Windows — the whole voice path silently didn't exist there (NJ-57's "inert
+# by missing binary"). sounddevice/PortAudio (WASAPI/DirectSound/ALSA/CoreAudio) is
+# now the primary path on every OS; parec stays as the fallback where PortAudio is
+# absent. Selection is deterministic and LOGGED; no backend at all is a loud
+# RuntimeError naming both failures (visible in the supervisor health strip), never
+# a silent no-op (rule 8).
+
+SILENCE_HINT_S = float(os.environ.get("NIGHTJAR_SILENCE_HINT_S", "10.0"))
+
+
+def sounddevice_available() -> tuple[bool, str]:
+    """Import-probe sounddevice/PortAudio. Returns (ok, detail-for-errors)."""
+    try:
+        import sounddevice  # noqa: F401 — the import itself loads the PortAudio DLL
+
+        return True, ""
+    except Exception as e:  # noqa: BLE001 — missing wheel OR missing/broken PortAudio lib
+        return False, f"{type(e).__name__}: {e}"
+
+
+def select_mic_backend(force: Optional[str], sd_ok: bool, parec_ok: bool,
+                       sd_detail: str = "") -> str:
+    """Pure backend choice (unit-tested offline). NIGHTJAR_MIC_BACKEND forces one
+    (its open-failure then surfaces at start time); otherwise sounddevice wins,
+    parec is the fallback, and NO backend is a hard, named error."""
+    if force in ("sounddevice", "parec"):
+        return force
+    if force:
+        raise RuntimeError(f"NIGHTJAR_MIC_BACKEND={force!r} is not a backend (use 'sounddevice' or 'parec')")
+    if sd_ok:
+        return "sounddevice"
+    if parec_ok:
+        return "parec"
+    raise RuntimeError(
+        "no usable mic backend: sounddevice/PortAudio failed "
+        f"({sd_detail or 'not importable'}) and `parec` (PulseAudio) is not on PATH. "
+        "Install PortAudio via `pip install sounddevice` (bundled DLL on Windows/macOS; "
+        "libportaudio2 on Linux) or PulseAudio for parec."
+    )
+
+
+def is_digital_silence(frame: np.ndarray) -> bool:
+    """True for an ALL-ZERO frame — the Windows mic-privacy-off signature: a denied
+    desktop app gets silent zeros from WASAPI, not an error (the NJ-37 silent-failure
+    shape, in capture form). Real mics always carry ≥1 LSB of noise floor."""
+    return frame.size == 0 or int(np.abs(frame).max()) == 0
+
+
+class SilenceTracker:
+    """Detects a CONTINUOUSLY all-zero capture stream and says so once per silent
+    run. update() returns True exactly when the hint should be logged — after
+    `hint_after_s` of unbroken digital silence; any real sample resets the run
+    (and re-arms the hint for a later silent run). Clock injectable for tests."""
+
+    def __init__(self, hint_after_s: float = SILENCE_HINT_S,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self._hint_after_s = hint_after_s
+        self._clock = clock
+        self._silent_since: Optional[float] = None
+        self._hinted = False
+
+    def update(self, frame: np.ndarray) -> bool:
+        if not is_digital_silence(frame):
+            self._silent_since = None
+            self._hinted = False
+            return False
+        now = self._clock()
+        if self._silent_since is None:
+            self._silent_since = now
+            return False
+        if not self._hinted and now - self._silent_since >= self._hint_after_s:
+            self._hinted = True
+            return True
+        return False
+
+
+SILENCE_HINT_MSG = (
+    f"⚠️  mic delivers ONLY silence (all-zero frames for {int(SILENCE_HINT_S)}s+). "
+    "On Windows this is what a DENIED microphone looks like — check Settings → "
+    "Privacy & security → Microphone → 'Let desktop apps access your microphone' "
+    "(a denied app gets silent zeros, not an error). Also confirm the intended "
+    "input device is the default, or set NIGHTJAR_MIC_DEVICE."
+)
+
 
 class MicStream:
+    """Live 16 kHz mono int16 capture, one FRAME (80 ms) per read_frame().
+
+    device: explicit input (env NIGHTJAR_MIC_DEVICE) — a PortAudio device index or
+    name (substring) for sounddevice, a PulseAudio source name for parec; else the
+    system default. Restarts the active backend (bounded) on stall/EOF."""
+
     def __init__(self, device: Optional[str] = None) -> None:
-        # device: explicit PulseAudio source name (env NIGHTJAR_MIC_DEVICE), else
-        # the system default input — override lets a test drive a loopback sink.
         self._device = device or os.environ.get("NIGHTJAR_MIC_DEVICE")
-        self._proc: Optional[subprocess.Popen] = None
+        sd_ok, sd_detail = sounddevice_available()
+        self.backend = select_mic_backend(
+            os.environ.get("NIGHTJAR_MIC_BACKEND"), sd_ok, shutil.which("parec") is not None, sd_detail)
+        log(f"mic backend: {self.backend}")
         self._restarts = 0
+        self._silence = SilenceTracker()
+        self._proc: Optional[subprocess.Popen] = None          # parec
+        self._sd_stream = None                                  # sounddevice
+        self._sd_q: Optional["queue.Queue[bytes]"] = None
         self._start()
 
+    # ── backend lifecycle ──────────────────────────────────────────────────────
     def _start(self) -> None:
+        if self.backend == "sounddevice":
+            self._start_sounddevice()
+        else:
+            self._start_parec()
+
+    def _start_sounddevice(self) -> None:
+        import sounddevice as sd
+
+        q: "queue.Queue[bytes]" = queue.Queue(maxsize=64)
+
+        def _cb(indata, _frames, _time_info, status) -> None:
+            # PortAudio callback thread: copy the CFFI buffer out immediately (it is
+            # reused after return). On overflow drop the OLDEST frame — wake scoring
+            # needs a live stream, not history. `status` (over/underflow) is normal
+            # under load; the stall clock in read_frame owns real failures.
+            data = bytes(indata)
+            try:
+                q.put_nowait(data)
+            except queue.Full:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(data)
+                except queue.Empty:
+                    pass
+
+        device: Optional[object] = None
+        if self._device:
+            try:
+                device = int(self._device)
+            except ValueError:
+                device = self._device  # sounddevice resolves name substrings itself
+        self._sd_stream = sd.RawInputStream(
+            samplerate=SR, blocksize=FRAME, channels=1, dtype="int16",
+            device=device, callback=_cb,
+        )
+        self._sd_stream.start()
+        self._sd_q = q
+
+    def _start_parec(self) -> None:
         cmd = ["parec", "--format=s16le", f"--rate={SR}", "--channels=1", "--raw"]
         if self._device:
             cmd.append(f"--device={self._device}")
@@ -100,6 +243,7 @@ class MicStream:
             bufsize=0,
         )
 
+    # ── reads ──────────────────────────────────────────────────────────────────
     def _read_exact(self, n: int) -> bytes:
         buf = b""
         deadline = time.monotonic() + MIC_READ_TIMEOUT_S
@@ -113,21 +257,43 @@ class MicStream:
             deadline = time.monotonic() + MIC_READ_TIMEOUT_S  # got bytes; reset stall clock
         return buf
 
+    def _read_backend_frame(self) -> np.ndarray:
+        if self.backend == "sounddevice":
+            try:
+                raw = self._sd_q.get(timeout=MIC_READ_TIMEOUT_S)
+            except queue.Empty:
+                raise TimeoutError(
+                    f"mic read stalled >{MIC_READ_TIMEOUT_S}s (PortAudio stream stopped delivering)"
+                ) from None
+            return np.frombuffer(raw, dtype=np.int16)
+        return np.frombuffer(self._read_exact(BYTES_PER_FRAME), dtype=np.int16)
+
     def read_frame(self) -> np.ndarray:
-        """Read one FRAME-sample int16 mono frame, restarting parec (bounded) on failure."""
+        """One FRAME-sample int16 mono frame; restarts the backend (bounded) on failure.
+        Also watches for the all-silence capture signature and hints once, visibly."""
         while True:
             try:
-                raw = self._read_exact(BYTES_PER_FRAME)
-                return np.frombuffer(raw, dtype=np.int16)
+                frame = self._read_backend_frame()
+                if self._silence.update(frame):
+                    log(SILENCE_HINT_MSG)
+                return frame
             except (TimeoutError, EOFError) as e:
                 self._restarts += 1
                 if self._restarts > MIC_RESTART_LIMIT:
                     raise RuntimeError(f"mic capture failed {self._restarts}x: {e}") from e
-                log(f"mic capture error ({e}); restarting parec (attempt {self._restarts})")
+                log(f"mic capture error ({e}); restarting {self.backend} (attempt {self._restarts})")
                 self.close()
                 self._start()
 
     def close(self) -> None:
+        if self._sd_stream is not None:
+            try:
+                self._sd_stream.stop()
+                self._sd_stream.close()
+            except Exception:  # noqa: BLE001 — closing a dead stream must not mask the real error
+                pass
+            self._sd_stream = None
+            self._sd_q = None
         if self._proc:
             self._proc.kill()
             self._proc.wait(timeout=5)
@@ -150,16 +316,22 @@ class OpenCodeVoice:
         self.base_url = base_url.rstrip("/")
         self.agent = agent
         self.model = model
-        self.session_id = self._create_session()
+        # Session-leak fix (voice-phase PR 3): created LAZILY at the first wake, not
+        # here — a crash-restart storm used to mint a fresh OpenCode session per
+        # daemon start, none of them ever used.
+        self.session_id: Optional[str] = None
         self._q: "queue.Queue[dict]" = queue.Queue()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._sse_loop, daemon=True)
         self._thread.start()
 
-    def _create_session(self) -> str:
-        r = requests.post(f"{self.base_url}/session", json={"title": "Nightjar voice"}, timeout=10)
-        r.raise_for_status()
-        return r.json()["id"]
+    def _ensure_session(self) -> str:
+        if not self.session_id:
+            r = requests.post(f"{self.base_url}/session", json={"title": "Nightjar voice"}, timeout=10)
+            r.raise_for_status()
+            self.session_id = r.json()["id"]
+            log(f"voice session created: {self.session_id}")
+        return self.session_id
 
     def _sse_loop(self) -> None:
         while not self._stop.is_set():
@@ -191,10 +363,11 @@ class OpenCodeVoice:
         """POST a prompt under `agent`, then collect streamed text until
         session.idle/session.error or the hard timeout. Returns the reply text
         (possibly partial/empty on timeout — never blocks past timeout_s)."""
+        session_id = self._ensure_session()
         slash = self.model.find("/")
         model_ref = {"providerID": self.model[:slash], "modelID": self.model[slash + 1:]} if slash > 0 else None
         r = requests.post(
-            f"{self.base_url}/session/{self.session_id}/prompt_async",
+            f"{self.base_url}/session/{session_id}/prompt_async",
             json={"agent": self.agent, **({"model": model_ref} if model_ref else {}),
                   "parts": [{"type": "text", "text": text}]},
             timeout=10,
@@ -362,15 +535,17 @@ def _start_health_server() -> None:
 def main() -> None:
     config.ensure_dirs()
     _start_health_server()
-    log(f"connecting OpenCode session at {OPENCODE_URL} (agent={AGENT}, model={MODEL})")
+    log(f"OpenCode voice ready at {OPENCODE_URL} (agent={AGENT}, model={MODEL}; "
+        f"session created lazily at first wake)")
     oc = OpenCodeVoice(OPENCODE_URL, AGENT, MODEL)
-    log(f"session {oc.session_id} ready")
 
     detector = _wakeword.WakeWordDetector()
     if not detector.is_custom:
         log(f"⚠️  STOCK wake model in use ('{detector.model_key}') — say the stock phrase, "
-            f"not 'Hey Nightjar', until a trained hey_nightjar.onnx is deployed "
-            f"(see wakeword_training/README.md)")
+            f"not 'Hey June', until a trained hey_june.onnx is deployed "
+            f"(see wakeword_training/README.md). Licensing note: the stock openWakeWord "
+            f"models are CC-BY-NC-SA (non-commercial) — a commercial build must NOT ship "
+            f"this fallback (NJ-58).")
 
     mic = MicStream()
     log("listening (live mic, real openWakeWord inference on every 80ms frame)…")
