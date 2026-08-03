@@ -1,8 +1,8 @@
 """Guard against drift between the two hand-duplicated nl_intent.py copies (P3-17).
 
 `telegram-scheduler/app/nl_intent.py` is a VENDORED verbatim copy of the authoritative
-`phase2-odysseus/servers/nl_intent.py` (the telegram server deploys as a standalone Docker
-image and can't import from the odysseus tree). The two carried a "keep in sync" comment but
+`phase2-mcp/nl_intent.py` (the telegram server deploys as a standalone Docker
+image and can't import from the desktop repo). The two carried a "keep in sync" comment but
 no automated check — so a change to one could silently diverge. This asserts they stay
 code-identical.
 

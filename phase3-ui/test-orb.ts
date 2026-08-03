@@ -1,6 +1,6 @@
 // Phase 4 orb test — drives the ACTUAL Nightjar orb modules:
 //   - src/renderer/src/lib/audioVolume.ts   (RMS reduction + AnalyserNode monitor)
-//   - src/renderer/src/lib/orbAdapter.ts     (the custom orb-ui OrbAdapter)
+//   - src/renderer/src/lib/orbAdapter.ts     (Nightjar's OrbAdapter implementation)
 //
 // Three layers:
 //   1. Unit — pure RMS/normalize math on known buffers.

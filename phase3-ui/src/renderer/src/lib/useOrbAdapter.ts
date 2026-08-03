@@ -1,8 +1,8 @@
 // Bridge an OrbAdapter's subscribe({onStateChange,onVolumeChange}) into React
-// state, yielding the `{state, volume}` pair for orb-ui's controlled mode
-// (`<Orb state={state} volume={volume} theme="circle" />`). Keeping the adapter
-// as the source of truth and the component purely controlled mirrors how orb-ui
-// separates provider adapters from rendering.
+// state, yielding the `{state, volume}` pair the orb renderers consume
+// (NightjarOrb → CssMiniOrb / VortexOverlay). Keeping the adapter as the source
+// of truth and the components purely controlled separates provider adapters
+// from rendering (a split inherited from the retired orb-ui design).
 import { useEffect, useState } from "react"
 import type { OrbAdapter, OrbState } from "./orbTypes"
 

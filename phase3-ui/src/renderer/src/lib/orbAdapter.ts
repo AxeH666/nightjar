@@ -1,8 +1,8 @@
 // Nightjar OrbAdapter (Phase 4).
 //
-// A custom orb-ui `OrbAdapter` for Nightjar's local voice pipeline — the same
-// contract orb-ui ships for Vapi / ElevenLabs (`subscribe({onStateChange,
-// onVolumeChange})` + start/stop), but wired to Nightjar's own signals:
+// Nightjar's `OrbAdapter` implementation (contract in ./orbTypes — the shape orb-ui
+// shipped for its Vapi / ElevenLabs adapters: `subscribe({onStateChange,
+// onVolumeChange})` + start/stop), wired to Nightjar's own signals:
 //
 //   • STATE comes off the Phase-2 side-channel WebSocket (ws://127.0.0.1:8765):
 //       wake            → 'listening'   (openWakeWord fired: "Hey Nightjar")

@@ -9,7 +9,8 @@ Nightjar-authored pure modules (`web_search_backend`, `research_backend`). It on
 kills the whole module on import.
 
 So this is a co-location fix, not a rewrite: the tool body is carried over
-unchanged. `deep_research` stays where it is until PR F replaces it.
+unchanged. (`deep_research` was later replaced by Nightjar's own loop in PR F —
+see `research_server.py` + `deep_research_backend.py`.)
 
 Runs in the phase2-mcp venv (Odysseus-free). `tests/test_websearch_no_odysseus.py`
 import-traces this module and fails if any Odysseus module is pulled in.

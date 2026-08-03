@@ -61,6 +61,81 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — OPEN (fix scheduled in the Hey-June voice phase) 2026-08-03
+
+- **Found during the Hey-June voice-phase scoping survey (rule 7 — filed, not drive-by fixed).**
+- **Hot mic without consent:** `phase3-ui/src/main/services.ts:154-165` includes `wake-daemon`
+  in `nightjarServices()` unconditionally, so the supervisor spawns `wake_daemon.py` at every
+  app start. On Linux/WSL its `parec` capture opens the microphone with no opt-in, no
+  indication, and no off switch. It is only *accidentally* inert on native Windows because
+  `parec` doesn't exist there — the privacy posture is an accident of a missing binary, not a
+  design. Fix: voice-phase PR 2 (voice pref OFF by default + supervisor `enabled()` gating +
+  consent modal + orb mic indication; disable = process dead, not muted).
+- **Self-wake echo loop:** the daemon's "wake-scoring pauses while a reply plays" note
+  (`wake_daemon.py:26-27`) only holds for the local `NIGHTJAR_PLAY_TTS=1` path. In the real
+  app the RENDERER plays the WAV; the daemon resumes scoring right after publishing
+  `tts ready` (`wake_daemon.py:335`) and can wake on June's own speech from the speakers.
+  The orb already publishes `tts playing/ended` (`orbAdapter.ts:220,256`) for exactly this,
+  but the daemon never subscribes — the NJ-56 producer-only pattern, inverted. Fix:
+  voice-phase PR 4 (daemon subscribes + mutes scoring during playback, with a wall-clock
+  un-mute backstop per rule 3).
+- **Rule 8:** both fixes need a real-mic/speaker verification on native Windows; the echo fix
+  specifically needs real speakers (not headphones) — recorded in the voice-phase checklist.
+
+## NJ-56 — second post-removal hygiene sweep: setup.ps1 didn't PARSE (fixed); residual dead wiring + a shim defect remain — RESOLVED (fixed items in-tree; open items listed) 2026-08-03
+
+- **Context:** a four-agent sweep (phase2-mcp / phase3-ui / engine-scripts-config /
+  cross-cutting orphans) hunting what the NJ-55 sweep (commit 559cf11) missed.
+- **FIXED — `scripts/setup.ps1` did not parse (blocker):** 559cf11 deleted the Odysseus
+  `Invoke-GitCode` helper but its closing `}` was a diff CONTEXT line and survived —
+  PowerShell aborted at line 39 with "Unexpected token '}'", so the entire native-Windows
+  installer was dead while the commit message claimed "Both setup scripts parse".
+  Removed the orphan brace; re-verified with `[Parser]::ParseFile` → clean. Lesson: "the
+  script parses" must be asserted by running the parser, not by reading the diff.
+- **FIXED — stale-claim / dead-config cleanup:** dead `ODYSSEUS_MCP_MEMORY_OWNER` read
+  (pim_server) + its opencode.json pin (launcher pinned it to the fallback value, so
+  behavior is identical); "odysseus" purged from the TTS CURATED vocabulary; guard-test
+  false-positive trap (`deep_research` token would fire on Nightjar's own
+  `deep_research_backend`); unused `ALLOWED_SIZES` import; dead `pickActiveEntry` export
+  (preview.ts); dangling `reconcileImageEndpoint` comment ref (supervisor.ts); stale
+  orb-ui/"Odysseus tree"/"9 MCP commands"/"Odysseus submodule" wording across
+  setup scripts, WINDOWS_SETUP.md, telegram-scheduler, globalMode.ts, orbAdapter.ts,
+  useOrbAdapter.ts, test-orb.ts, vitest.config.ts, research_backend.py,
+  websearch_server.py, nl_intent.py (both copies' docstrings; AST guard unaffected).
+- **FIXED — license-attribution gap (rule 5):** `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md`
+  claimed Step 7 left "no forked code remains" from orb-ui, but
+  `phase3-ui/src/renderer/src/lib/audioVolume.ts` still derives its RMS/EMA/normalize
+  mic-monitor math from orb-ui (MIT, © Alexander Chen) — `normalizeVolume()` is upstream's
+  formula. Added a scoped orb-ui (MIT, derived-math-only) row and narrowed the Step-7 claim.
+- **OPEN — `phase1-engine/hw-detect.mjs` shim still hardcodes `python3` (no timeout):**
+  audit1.md P2-10's fix note says hw-detect + hwcheck were both made OS-aware, but only
+  the live plugin (`nightjar-hwcheck.ts`) was; the retired-entry-point shim still runs
+  `execFileSync("python3", ...)` → fails on native Windows. Small fix (`py -3` on win32 +
+  a timeout, mirroring the plugin), deliberately not drive-by-fixed in the hygiene pass
+  (rule 7).
+- **OPEN — `browser_state` side-channel event has a producer and no consumer:**
+  `phase2-mcp/mcp_server.py:102` formats + publishes it; nothing in phase3-ui consumes it
+  (`orbAdapter.ts` explicitly ignores it). Dead wiring or an unfinished UI feature —
+  maintainer call.
+- **OPEN — orphaned-but-kept files (flagged, not deleted):**
+  `phase1-engine/opencode.json` (stale Phase-1 provider config; the live workspace is
+  `engine-workspace/` since PR #140 — RECOMMEND DELETE; deletion was blocked by the
+  session's permission mode), `phase-cad/materials.py` (Task-5 feasibility module, never
+  wired; its prompt table was inlined into the cad agent prompt),
+  `phase1-engine/nightjar-run.mjs` + `verify-watchdog.sh` (freeze-watchdog, dead per
+  audit1.md P3-20/21), and 4 undiscoverable manual bun harnesses
+  (`phase3-ui/test-attachments|capabilities|openrouter|vision.ts`) with no npm script or
+  doc reference.
+- **NOTE — vendored llmfit still says "Odysseus container" / "Cookbook":**
+  `hwfit_vendor/services/hwfit/hardware.py:741` is a user-visible warning string naming
+  the removed upstream; it only fires inside Docker (not a supported Nightjar path) and
+  the tree is vendored (convention: don't edit) — left as-is.
+- Also verified clean: `.gitmodules`/`.git/config`/`.git/modules` (opencode only), no
+  tracked `*.patch`/`.gitkeep`/symlinks, requirements.txt has no Odysseus-only deps,
+  IPC/preload channels symmetric, `pim_db.py` migration + `ODYSSEUS_DATA_DIR` correctly
+  kept (legacy-install migration source), `.gitignore`/`.vscode` excludes for removed
+  dirs deliberately kept as defense for existing checkouts.
+
 ## NJ-55 — post-removal hygiene sweep: inline image render was dead; sync guard was dead; browser-use venv gap remains — RESOLVED (2 fixed, 1 open) 2026-08-03
 
 - **Context:** a six-dimension hygiene sweep after the Odysseus removal (branches pruned:

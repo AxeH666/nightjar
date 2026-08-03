@@ -1,9 +1,10 @@
 import { defineConfig } from "vitest/config"
 
-// Unit tests for PURE renderer logic only (no React, no Electron, no DOM). The plan calls
+// Unit tests for PURE logic only (no React, no Electron renderer, no DOM). The plan calls
 // for real tests on the global-mode derivation, capability-support, and image-availability
-// helpers; this is the runner for them. Kept scoped to *.test.ts so it never tries to load
-// component or main-process code.
+// helpers; this is the runner for them. The src/**/*.test.ts glob also picks up the
+// main-process suites (services.paths, services.opencode-env, supervisor.preflight) —
+// they import Node-only module logic and run fine under environment: "node".
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],

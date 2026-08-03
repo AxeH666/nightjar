@@ -161,13 +161,17 @@ export function applyGlobalMode(args: {
 }
 
 // Can an image actually be generated right now, given the image capability pref and whether
-// a local diffusion backend is present? Surfaced at use-time so the Create-Image flow shows
+// a local image backend is present? Surfaced at use-time so the Create-Image flow shows
 // "Current API doesn't support image generation." instead of dispatching to a dead route.
 //
 //   online + a provider that supports image  → yes
 //   online + a provider that does NOT         → no (the ask the plan calls out)
-//   offline + local diffusion present         → yes
-//   offline + no local diffusion              → no (offline image has no backend yet)
+//   offline + local image backend present     → yes
+//   offline + no local image backend          → no
+//
+// No local image backend ships today (the diffusion sidecar went with the Odysseus
+// removal, PR E) — production callers pass `localImagePresent: false`. The parameter is
+// a deliberate seam for a future local backend, not dead code.
 export function imageGenAvailable(args: {
   imagePref: CapabilityPref | undefined
   localImagePresent: boolean
@@ -193,7 +197,7 @@ export const IMAGE_UNAVAILABLE_LOCAL =
 //     for an image-incapable cloud provider (Cloud+Groq), so we must consult the active
 //     chat provider — not just imagePref — to know it's "cloud, unsupported" vs truly local
 //     (Bugbot: the offline imagePref alone can't tell those apart).
-//   • otherwise (genuinely offline, no local diffusion backend) → point at a cloud provider.
+//   • otherwise (genuinely offline; no local image backend ships — PR E) → point at a cloud provider.
 export function imageUnavailableReason(args: {
   imagePref: CapabilityPref | undefined
   localImagePresent: boolean

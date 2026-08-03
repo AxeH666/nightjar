@@ -5,7 +5,6 @@ which is bash-only and hardcodes POSIX venv paths - see audit1.md P1-5).
 Provisions a fresh clone to a runnable app:
   - fetches the git submodule (research/opencode - the ENGINE)
   - `bun install` for the OpenCode engine (the only agent loop)
-  - applies Nightjar's Odysseus integration patch (embedded ChromaDB, no Docker)
   - creates the Python 3.12 venvs (phase2-mcp, browser-use) + installs deps
   - phase-cad venv via `uv` (build123d / OCP) + smoke test
   - installs the UI's node modules
@@ -35,8 +34,6 @@ Set-Location $Root
 Write-Host "== Nightjar setup (native Windows) - root: $Root ==" -ForegroundColor Cyan
 
 function Test-Cmd([string]$Name) { return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
-
-}
 
 # Resolve bun.exe: PATH first, then the default installer location.
 function Resolve-Bun {
@@ -76,7 +73,7 @@ function New-Venv([string]$Dir, [string[]]$Py) {
   if ($LASTEXITCODE -ne 0) { throw "pip install failed for $Dir" }
 }
 
-# ---- 1) Submodules: Odysseus (RAG/PIM) + OpenCode (the engine) --------------------
+# ---- 1) Submodule: OpenCode (the engine) -------------------------------------------
 Write-Host "-- [1/7] git submodule (opencode engine) --"
 & git submodule update --init research/opencode
 if ($LASTEXITCODE -ne 0) { throw "git submodule update failed (need network + git access to the fork)" }

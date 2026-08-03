@@ -30,7 +30,7 @@ if command -v py >/dev/null 2>&1 && py -3.12 --version >/dev/null 2>&1; then PYL
 elif command -v python3 >/dev/null 2>&1; then PYLAUNCH="python3"
 else PYLAUNCH="python"; fi
 
-# 1) Submodules: Odysseus (RAG/PIM) + OpenCode (the ENGINE — the only agent loop) --------
+# 1) Submodule: OpenCode (the ENGINE — the only agent loop) ------------------------------
 echo "-- [1/8] git submodule (opencode engine) --"
 git submodule update --init research/opencode
 

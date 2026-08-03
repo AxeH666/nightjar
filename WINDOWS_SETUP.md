@@ -42,7 +42,7 @@ MCP (`phase-cad/.venv`). Everything else (voice/vision/websearch/image) is optio
 
 ## 2. Prerequisites
 
-1. **Git** (with submodules). Clone with the Odysseus submodule:
+1. **Git** (with submodules). Clone with the OpenCode engine submodule:
    ```powershell
    git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
    cd nightjar
@@ -186,7 +186,7 @@ now, then land the §7 fixes and move to **Option B** incrementally.
 These were the two blockers to a fully-native Windows run. **Both are now fixed** — Linux-preserving
 (nothing changes on Linux; typecheck/build/tests green). Only the Windows *runtime* is yours to confirm.
 
-1. **POSIX venv paths.** `opencode.json` (all 9 MCP commands) + `services.ts` (side-channel,
+1. **POSIX venv paths.** `opencode.json` (all 7 MCP commands) + `services.ts` (side-channel,
    wake-daemon, diffusion default) hardcoded `venv/bin/python`; on Windows that's
    `venv\Scripts\python.exe`. **Fixed:** `opencode.json` now uses `venv/{env:NJ_VENV_PY}`, and
    `services.ts` sets `NJ_VENV_PY`=`bin/python`/`Scripts/python.exe` by `process.platform` (and
@@ -245,7 +245,7 @@ First install the four prerequisites (**reopen the terminal after each** so PATH
 3. **Python 3.12** (exactly — not 3.13) → `winget install Python.Python.3.12` (confirm `py -3.12 --version`).
 4. **uv** → `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`.
 
-Then run the setup script — it fetches the submodules (incl. the **OpenCode engine**),
+Then run the setup script — it fetches the **OpenCode engine** submodule,
 `bun install`s the engine, builds the **phase-cad** venv, and
 installs the UI's node modules:
 ```powershell

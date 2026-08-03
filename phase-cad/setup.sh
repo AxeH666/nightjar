@@ -4,7 +4,7 @@
 # A DEDICATED Python 3.12 venv via `uv`, separate from the other phase venvs: the OCP /
 # VTK wheels this pulls are heavy and version-sensitive, and build123d 0.11 depends on
 # `cadquery-ocp-novtk` (not `cadquery-ocp`). Keeping it isolated means a CAD dependency
-# bump can never disturb the odysseus or mcp environments.
+# bump can never disturb the other phase venvs (phase2-mcp, browser-use).
 #
 # Usage:  phase-cad/setup.sh          # from the repo root
 # Result: phase-cad/.venv with build123d + build123d-mcp, ready for opencode.json (PR 9).
