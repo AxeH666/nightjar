@@ -61,16 +61,26 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
-## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — OPEN (fix scheduled in the Hey-June voice phase) 2026-08-03
+## NJ-57 — wake daemon autostarts UNCONDITIONALLY: an un-consented always-on mic on Linux/WSL; and it can re-wake on its own TTS voice — HOT-MIC HALF FIXED (voice-phase PR 2); echo half open (PR 4) 2026-08-03
 
 - **Found during the Hey-June voice-phase scoping survey (rule 7 — filed, not drive-by fixed).**
-- **Hot mic without consent:** `phase3-ui/src/main/services.ts:154-165` includes `wake-daemon`
-  in `nightjarServices()` unconditionally, so the supervisor spawns `wake_daemon.py` at every
-  app start. On Linux/WSL its `parec` capture opens the microphone with no opt-in, no
-  indication, and no off switch. It is only *accidentally* inert on native Windows because
-  `parec` doesn't exist there — the privacy posture is an accident of a missing binary, not a
-  design. Fix: voice-phase PR 2 (voice pref OFF by default + supervisor `enabled()` gating +
-  consent modal + orb mic indication; disable = process dead, not muted).
+- **Hot mic without consent — FIXED (voice-phase PR 2):** `wake-daemon` was in
+  `nightjarServices()` unconditionally, so the supervisor spawned `wake_daemon.py` at every
+  app start. On Linux/WSL its `parec` capture opened the microphone with no opt-in, no
+  indication, and no off switch — only *accidentally* inert on native Windows because
+  `parec` doesn't exist there (a privacy posture by missing binary, not by design). Now:
+  a persisted voice pref (`voice.ts`, **OFF by default**) gates the service via a new
+  supervisor `enabled()` hook (checked at the single spawn choke point, so a pending
+  crash-restart can't respawn after a disable); enabling always passes through a consent
+  modal (every enable — no "don't show again") whose copy states the cloud-egress
+  consequence plainly; the header orb shows "mic on"/"voice off" and click = one-click
+  kill; **disable KILLS the process** (and a stale listener on :8766 from a prior session
+  is actively stopped at startup, sole-listener-verified per rule 4) — the OS mic-in-use
+  indicator is the user's source of truth, never a soft-mute. Daemon env is now wired at
+  spawn (`NIGHTJAR_MODEL` from the chat pref — voice turns follow the user's Local/Cloud
+  choice instead of silently running local; `NIGHTJAR_WAKEWORD_MODEL` pass-through for the
+  PR-5 model). **Residual (rule 8):** the OS mic-indicator lifecycle (on → off on disable/
+  quit) and real capture can only be confirmed on native hardware — PR-6 checklist.
 - **Self-wake echo loop:** the daemon's "wake-scoring pauses while a reply plays" note
   (`wake_daemon.py:26-27`) only holds for the local `NIGHTJAR_PLAY_TTS=1` path. In the real
   app the RENDERER plays the WAV; the daemon resumes scoring right after publishing

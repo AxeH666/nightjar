@@ -110,6 +110,21 @@ contextBridge.exposeInMainWorld("nightjar", {
     setBulk: (prefs: Record<string, CapabilityPref>): Promise<Record<string, CapabilityPref>> =>
       ipcRenderer.invoke("capabilities:setBulk", prefs),
   },
+  // Voice master switch (NJ-57): OFF by default; enabling is consent-gated in the
+  // renderer; disabling kills the wake-daemon process (the OS mic indicator is the
+  // source of truth). Status pushes keep the orb's mic indication live.
+  // `stillListening` = the pref says off but the daemon's port still answers (an
+  // unmanaged listener survived the kill) — the UI must warn, never claim "off".
+  voice: {
+    get: (): Promise<{ enabled: boolean; stillListening: boolean }> => ipcRenderer.invoke("voice:get"),
+    set: (enabled: boolean): Promise<{ enabled: boolean; stillListening: boolean }> =>
+      ipcRenderer.invoke("voice:set", enabled),
+    onStatus: (cb: (s: { enabled: boolean; stillListening: boolean }) => void) => {
+      const handler = (_e: unknown, s: { enabled: boolean; stillListening: boolean }) => cb(s)
+      ipcRenderer.on("nightjar:voiceStatus", handler)
+      return () => ipcRenderer.removeListener("nightjar:voiceStatus", handler)
+    },
+  },
   // CAD (Task 5): convert a model-exported STEP file to a viewable GLB, and read its bytes.
   cad: {
     convert: (

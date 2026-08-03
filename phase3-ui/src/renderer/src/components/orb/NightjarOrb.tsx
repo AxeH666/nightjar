@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { createNightjarOrbAdapter } from "../../lib/orbAdapter"
 import { useOrbAdapter } from "../../lib/useOrbAdapter"
+import { voice } from "../../lib/voice"
 import { CssMiniOrb } from "./CssMiniOrb"
 import { VortexOverlay } from "./VortexOverlay"
 
@@ -53,6 +54,31 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
   )
   const { state, volume } = useOrbAdapter(adapter)
 
+  // NJ-57: the orb is the always-visible mic indication — while the mic is open it
+  // must SAY so ("mic on"), and clicking it is the one-click kill switch. Enabling is
+  // deliberately NOT offered here (that goes through Settings' consent modal) — the
+  // asymmetry is the point: turning a mic off should be one click, turning it on
+  // should be a considered act.
+  const [voiceOn, setVoiceOn] = useState<boolean | null>(null)
+  // Stuck mic (Bugbot, PR #151): voice pref is OFF but the daemon's port still
+  // answers — the process could not be killed, so the mic may still be LIVE. The
+  // orb must warn, never show a false "voice off".
+  const [micStuck, setMicStuck] = useState(false)
+  useEffect(() => {
+    let mounted = true
+    const apply = (s: { enabled: boolean; stillListening?: boolean }) => {
+      if (!mounted) return
+      setVoiceOn(s.enabled)
+      setMicStuck(!s.enabled && Boolean(s.stillListening))
+    }
+    voice.get().then(apply)
+    const off = voice.onStatus(apply)
+    return () => {
+      mounted = false
+      off()
+    }
+  }, [])
+
   // Tear the adapter fully down (WS + audio) when it's replaced or unmounted.
   useEffect(() => () => adapter.disconnect(), [adapter])
 
@@ -63,24 +89,46 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
     return () => clearTimeout(t)
   }, [audioFailed])
 
+  // The idle label doubles as the mic indication (NJ-57): "mic on" while listening for
+  // the wake word, "voice off" when the daemon is not running, and "mic stuck on" when
+  // off was requested but the listener would not die. Non-idle states (a live voice
+  // turn) keep their pipeline labels.
+  const idleLabel = micStuck ? "mic stuck on" : voiceOn === null ? LABELS.idle : voiceOn ? "mic on" : "voice off"
+  const label = state === "idle" ? idleLabel : (LABELS[state] ?? state)
+  const title = micStuck
+    ? "Voice orb — voice was turned OFF but something is still listening on the voice port; the mic may still be live. Check the health strip or stop the process manually."
+    : audioFailed
+      ? "Voice orb — the reply's audio could not be played (details in the console)"
+      : state === "idle" && voiceOn
+        ? "Voice orb — mic is ON, listening for the wake word. Click to turn voice off."
+        : state === "idle" && voiceOn === false
+          ? "Voice orb — voice is off (mic closed). Enable it in Settings."
+          : `Voice orb — ${LABELS[state] ?? state}`
+
   return (
     <>
       <div
-        className="flex flex-col items-center gap-1"
+        className={`flex flex-col items-center gap-1 ${voiceOn ? "cursor-pointer" : ""}`}
         data-orb-state={state}
         data-orb-audio-failed={audioFailed || undefined}
-        title={
-          audioFailed
-            ? "Voice orb — the reply's audio could not be played (details in the console)"
-            : `Voice orb — ${LABELS[state] ?? state}`
-        }
+        data-orb-mic={voiceOn === null ? undefined : voiceOn ? "on" : "off"}
+        title={title}
+        onClick={() => {
+          if (voiceOn) void voice.set(false) // one-click kill switch; enabling lives in Settings
+        }}
       >
         <CssMiniOrb state={state} volume={volume} size={size} />
-        {audioFailed ? (
-          <span className="text-[10px] uppercase tracking-wide text-nightjar-alert">audio failed</span>
+        {audioFailed || (micStuck && state === "idle") ? (
+          <span className="text-[10px] uppercase tracking-wide text-nightjar-alert">
+            {audioFailed ? "audio failed" : "mic stuck on"}
+          </span>
         ) : (
-          <span className="text-[10px] uppercase tracking-wide text-nightjar-text/40">
-            {LABELS[state] ?? state}
+          <span
+            className={`text-[10px] uppercase tracking-wide ${
+              state === "idle" && voiceOn ? "text-nightjar-accent/80" : "text-nightjar-text/40"
+            }`}
+          >
+            {label}
           </span>
         )}
       </div>
