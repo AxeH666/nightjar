@@ -22,9 +22,11 @@ identically whether the event came from an agent tool call or this daemon.
 Known, explicitly-accepted limitations (not silently hidden):
 - Command-window endpointing is a fixed window (COMMAND_WINDOW_S), not VAD —
   the same "naive, needs work" gap phase2-mcp/PHASE2_REPORT.md already flagged.
-- No acoustic echo cancellation: wake-scoring is paused while a reply plays
-  back, so the daemon can't hear its own TTS output and re-trigger on it — but
-  it also means it can't hear you barge in over a reply.
+- No acoustic echo cancellation: wake-scoring is MUTED while a reply plays back
+  (voice-phase PR 4 — driven by the renderer's real `tts playing`/`ended`
+  events, with a wall-clock backstop), so the daemon can't hear its own TTS
+  through the speakers and re-trigger on it — but it also means you cannot
+  barge in over a reply. Barge-in is explicitly out of scope.
 - Uses the STOCK wake-word model unless NIGHTJAR_WAKEWORD_MODEL points at a
   trained hey_june.onnx (none exists yet — see wakeword_training/README.md).
   The stock openWakeWord models are CC-BY-NC-SA — NON-commercial (NJ-58); the
@@ -95,6 +97,13 @@ def log(msg: str) -> None:
 # a silent no-op (rule 8).
 
 SILENCE_HINT_S = float(os.environ.get("NIGHTJAR_SILENCE_HINT_S", "10.0"))
+
+# Hard cap on how long a single playback may mute wake scoring (rule 3). Deliberately
+# LONGER than the orb's own speakingTimeoutMs (60s, orbAdapter.ts) so the renderer's
+# watchdog normally publishes `ended` first; this only fires if that event is lost
+# (renderer crash, side-channel drop mid-clip). Without it, one missing `ended` would
+# deafen June permanently — a stuck mute is as bad as no mute.
+PLAYBACK_MUTE_MAX_S = float(os.environ.get("NIGHTJAR_PLAYBACK_MUTE_MAX_S", "90.0"))
 
 
 def sounddevice_available() -> tuple[bool, str]:
@@ -306,6 +315,64 @@ def publish(kind: str, **fields) -> None:
     sidechannel.publish({"kind": kind, **fields})
 
 
+# ─── echo suppression: mute wake scoring while our own reply is playing ──────
+# NJ-57 (echo half). The daemon's original note claimed scoring "is paused while a
+# reply plays" — true ONLY for the local NIGHTJAR_PLAY_TTS=1 paplay path. In the real
+# app the RENDERER plays the WAV, and the daemon resumed scoring the moment it
+# published `tts ready` — so June could hear herself through the speakers and wake on
+# her own voice. The orb already publishes `tts playing`/`tts ended` (source="orb-ui")
+# for exactly this; nothing consumed them (the NJ-56 producer-only pattern, inverted).
+# Now the daemon subscribes and mutes between them, with PLAYBACK_MUTE_MAX_S as the
+# rule-3 wall-clock backstop so a lost `ended` cannot deafen her forever.
+
+class PlaybackMute:
+    """Tracks whether our TTS is currently audible. Pure + clock-injectable so the
+    whole state machine is testable offline (no hub, no sound card).
+
+    on_event() consumes side-channel events; muted() answers 'skip wake scoring?'
+    and self-expires via the backstop. Only `state` matters — `source` is NOT
+    filtered: the renderer is the authority on real playback, and the daemon never
+    publishes playing/ended itself, so any producer reporting audible TTS should
+    mute us (a stricter source filter would silently miss a future player)."""
+
+    def __init__(self, max_s: float = PLAYBACK_MUTE_MAX_S,
+                 clock: Callable[[], float] = time.monotonic,
+                 on_backstop: Optional[Callable[[], None]] = None) -> None:
+        self._max_s = max_s
+        self._clock = clock
+        self._on_backstop = on_backstop
+        self._since: Optional[float] = None
+
+    def on_event(self, ev: dict) -> None:
+        if (ev or {}).get("kind") != "tts":
+            return
+        state = ev.get("state")
+        if state == "playing":
+            self._since = self._clock()
+        elif state in ("ended", "error"):
+            self._since = None
+        # 'ready' deliberately ignored: synthesis finishing is not playback starting.
+
+    def begin_local_playback(self) -> None:
+        """Mute for the daemon's own NIGHTJAR_PLAY_TTS=1 paplay path, which produces
+        no side-channel playing/ended pair."""
+        self._since = self._clock()
+
+    def end_local_playback(self) -> None:
+        self._since = None
+
+    def muted(self) -> bool:
+        if self._since is None:
+            return False
+        if self._clock() - self._since >= self._max_s:
+            # Backstop: a lost `ended` must not deafen the daemon permanently.
+            self._since = None
+            if self._on_backstop:
+                self._on_backstop()
+            return False
+        return True
+
+
 # ─── OpenCode turn: persistent session + SSE listener thread ─────────────────
 
 class OpenCodeVoice:
@@ -464,7 +531,8 @@ def strip_wake_phrase(transcript: str) -> str:
     return transcript
 
 
-def handle_wake(mic: MicStream, oc: OpenCodeVoice, max_score: float) -> None:
+def handle_wake(mic: MicStream, oc: OpenCodeVoice, max_score: float,
+                mute: Optional["PlaybackMute"] = None) -> None:
     log(f"WAKE detected (score={max_score:.3f}) — capturing {COMMAND_WINDOW_S}s command window")
     publish("wake", detected=True, max_score=round(max_score, 4))
 
@@ -507,7 +575,17 @@ def handle_wake(mic: MicStream, oc: OpenCodeVoice, max_score: float) -> None:
     log(f"speaking: {path}")
     publish("tts", state="ready", path=path, text=reply)
     if PLAY_TTS_LOCALLY:
-        subprocess.run(["paplay", path], check=False)
+        # Local playback emits no side-channel playing/ended pair, so mute around it
+        # directly (the renderer path is driven by its own events instead).
+        if mute:
+            mute.begin_local_playback()
+        try:
+            subprocess.run(["paplay", path], check=False, timeout=PLAYBACK_MUTE_MAX_S)
+        except subprocess.TimeoutExpired:
+            log(f"local paplay exceeded {PLAYBACK_MUTE_MAX_S}s; abandoning playback")
+        finally:
+            if mute:
+                mute.end_local_playback()
 
 
 # ─── main loop ────────────────────────────────────────────────────────────────
@@ -547,20 +625,34 @@ def main() -> None:
             f"models are CC-BY-NC-SA (non-commercial) — a commercial build must NOT ship "
             f"this fallback (NJ-58).")
 
+    # Echo suppression (NJ-57): consume the renderer's real playback events.
+    mute = PlaybackMute(
+        on_backstop=lambda: log(
+            f"⚠️  playback-mute backstop fired after {PLAYBACK_MUTE_MAX_S}s without a "
+            f"'tts ended' event (renderer crash or side-channel drop?) — resuming wake "
+            f"scoring so a lost event can't deafen the daemon"),
+    )
+    sub = sidechannel.Subscriber(mute.on_event)
+
     mic = MicStream()
     log("listening (live mic, real openWakeWord inference on every 80ms frame)…")
     try:
         while True:
             frame = mic.read_frame()
+            # Keep draining the mic while muted (so the stream never backs up), but
+            # do NOT score — this is what stops June waking on her own voice.
+            if mute.muted():
+                continue
             score = detector.process_frame(frame)
             if score >= detector.threshold:
-                handle_wake(mic, oc, score)
+                handle_wake(mic, oc, score, mute)
                 detector.reset()
                 time.sleep(WAKE_COOLDOWN_S)
     except KeyboardInterrupt:
         log("stopping (KeyboardInterrupt)")
     finally:
         mic.close()
+        sub.close()
         oc.close()
 
 
