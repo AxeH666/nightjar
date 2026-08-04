@@ -45,26 +45,65 @@ function Resolve-Bun {
 
 # The Python 3.12 launcher. Prefer the `py -3.12` launcher; fall back to a `python` that
 # reports 3.12. build123d/OCP wheels require 3.12 EXACTLY (not 3.13).
+#
+# NJ-74: both probes MUST be wrapped in try/catch. This script runs under
+# $ErrorActionPreference='Stop', and in Windows PowerShell 5.1 ANY stderr redirection on a
+# NATIVE command turns each stderr line into an ErrorRecord, which EAP=Stop promotes to a
+# terminating error. So on a box that HAS the `py` launcher but NOT 3.12, `py -3.12 --version`
+# threw out of this function — the `python` fallback below and the actionable winget message
+# were both unreachable, and the user just got py's bare "No suitable Python runtime found".
+# `2>$null` does NOT fix this: the ErrorRecord comes from the redirection itself, not from
+# where the output lands (verified by running; line ~140's purge is the standing proof — it
+# already uses 2>$null and was still fatal).
 function Get-Py312 {
   if (Test-Cmd 'py') {
-    $v = (& py -3.12 --version 2>&1)
-    if ($LASTEXITCODE -eq 0 -and "$v" -match '3\.12\.') { return @('py', '-3.12') }
+    try {
+      $v = (& py -3.12 --version 2>&1)
+      if ($LASTEXITCODE -eq 0 -and "$v" -match '3\.12\.') { return @('py', '-3.12') }
+    } catch {
+      # py exists but has no 3.12 runtime — fall through to the `python` probe.
+    }
   }
   if (Test-Cmd 'python') {
-    $v = (& python --version 2>&1)
-    if ("$v" -match '3\.12\.') { return @('python') }
+    try {
+      $v = (& python --version 2>&1)
+      # NOTE: `return @('python')` unrolls to a SCALAR string here. That is benign — every
+      # call site binds it to New-Venv's [string[]]$Launcher, which re-coerces it to a
+      # 1-element array (verified). Don't "fix" it without re-checking those call sites.
+      if ("$v" -match '3\.12\.') { return @('python') }
+    } catch {
+      # python exists but isn't 3.12 (or isn't runnable) — fall through to the throw.
+    }
   }
   throw "Python 3.12 not found. Install it: winget install Python.Python.3.12 (then reopen the terminal)."
 }
 
 # Create <dir>\venv from <dir>\requirements.txt if absent, install deps. Idempotent.
-function New-Venv([string]$Dir, [string[]]$Py) {
+#
+# NJ-73 — the parameter is $Launcher, NOT $Py, and that is load-bearing. PowerShell variable
+# names are CASE-INSENSITIVE, so the old `[string[]]$Py` parameter and the local
+# `$py = Join-Path $Dir 'venv\Scripts\python.exe'` below were THE SAME VARIABLE. The local
+# assignment clobbered the launcher before it was ever used (the [string[]] constraint just
+# re-coerced the path into a 1-element array), so the venv-creation line invoked the
+# not-yet-created venv interpreter and died with CommandNotFoundException. New-Venv could
+# therefore never create a venv on ANY machine — this was not, as first reported, limited to
+# boxes lacking `py -3.12`. Existing installs were unaffected only because the Test-Path
+# guard below skips creation when a venv already exists. Do not rename this back, and do not
+# introduce another local called $py-with-any-casing.
+function New-Venv([string]$Dir, [string[]]$Launcher) {
   $req = Join-Path $Dir 'requirements.txt'
   if (-not (Test-Path $req)) { Write-Host "   ($Dir has no requirements.txt - skipping)"; return }
   $py = Join-Path $Dir 'venv\Scripts\python.exe'
   if (-not (Test-Path $py)) {
     Write-Host "   creating $Dir\venv"
-    & $Py[0] @($Py[1..($Py.Length-1)]) -m venv (Join-Path $Dir 'venv')
+    # NJ-73 (second defect, same line): the tail was `$Launcher[1..($Launcher.Length-1)]`.
+    # For a ONE-element launcher that is `1..0`, which PowerShell evaluates as the REVERSED
+    # range 1,0 — so the tail became the launcher itself, duplicating the interpreter as its
+    # own script argument. Select-Object -Skip 1 yields an empty tail for length 1 and the
+    # correct tail for 2+.
+    $exe  = $Launcher[0]
+    $rest = @($Launcher | Select-Object -Skip 1)
+    & $exe @rest -m venv (Join-Path $Dir 'venv')
     if ($LASTEXITCODE -ne 0) { throw "venv creation failed for $Dir" }
   }
   Write-Host "   installing $Dir deps (this can take a while)..."
@@ -130,9 +169,23 @@ New-Venv (Join-Path $Root 'phase2-mcp') $py312
 # Dropping any of them from requirements.txt does NOT remove them from an existing
 # venv, so purge explicitly — otherwise upgraded installs keep a GPL espeak-ng
 # binary, or a non-commercial model set, on disk. Idempotent; never fatal.
+#
+# NJ-75: "never fatal" was FALSE, and the try/catch is what finally makes it true. pip writes
+# "WARNING: Skipping <pkg> as it is not installed" to stderr for each absent package and still
+# exits 0; under EAP=Stop, PowerShell 5.1 turns that stderr into a terminating error. At least
+# one of these four is absent in any freshly created venv, so this threw every time. It was
+# masked only because NJ-73 killed the script at the New-Venv above first — fixing that alone
+# would have relocated the fatal error nine lines down, still inside step [5/7], still leaving
+# no browser-use-mcp venv. `2>$null` does not help (the ErrorRecord is from the redirection,
+# not the destination). The bash original guards the identical call with `|| true`
+# (scripts/setup.sh:76); the PowerShell port dropped it.
 $mcpPy = Join-Path $Root 'phase2-mcp\venv\Scripts\python.exe'
 if (Test-Path $mcpPy) {
-  & $mcpPy -m pip uninstall -y -q kokoro-onnx phonemizer-fork espeakng-loader openwakeword 2>$null | Out-Null
+  try {
+    & $mcpPy -m pip uninstall -y -q kokoro-onnx phonemizer-fork espeakng-loader openwakeword 2>$null | Out-Null
+  } catch {
+    Write-Host "   (purge of retired packages reported nothing to remove - continuing)"
+  }
 }
 New-Venv (Join-Path $Root 'browser-use-mcp') $py312
 # browser-use needs a Chrome/Chromium; verify later:  browser-use-mcp\venv\Scripts\browser-use --doctor

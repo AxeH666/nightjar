@@ -35,8 +35,11 @@ Run with the phase2-mcp venv:
 """
 from __future__ import annotations
 
+import os
 import re
+import site
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 
@@ -224,13 +227,85 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> int:
-    sp = Path(sys.prefix) / "Lib" / "site-packages"
-    if not sp.exists():
-        cands = list((Path(sys.prefix) / "lib").glob("python*/site-packages"))
-        sp = cands[0] if cands else sp
+    # NJ-76: derive the sweep root from sysconfig instead of string-building it off
+    # sys.prefix. The old form was `Path(sys.prefix)/"Lib"/"site-packages"` with a POSIX
+    # glob fallback; sysconfig is correct on every platform by construction, so the
+    # untestable fallback branch is gone rather than merely documented.
+    sp = Path(sysconfig.get_paths()["purelib"])
     print(f"== sweeping {sp} ==")
+    print("\n== 0. sweep sanity: is this run capable of finding anything? ==")
+
+    # ---- invariant 1: are we even pointed at the right interpreter? ----------------
+    # This guard used to derive its root from whatever interpreter ran it, sweep an empty
+    # or unrelated site-packages, print ALL CHECKS PASSED and exit 0 having verified
+    # NOTHING — while the five negative controls still passed, because they build their
+    # own synthetic dist-info dirs. Six green lines and a zero exit for a run that checked
+    # no real distribution. Realistic trigger: `python tests/test_no_copyleft_venv.py`
+    # instead of the venv interpreter (the correct invocation lives only in a docstring,
+    # and there is no CI to enforce it).
+    #
+    # Identity is compared with os.path.samefile, NOT string containment or
+    # Path.is_relative_to: reached over a UNC path (\\localhost\c$\...) is_relative_to
+    # returns False and .resolve() does not normalise UNC to drive form, so a perfectly
+    # correct sweep would fail. samefile compares by file identity and transparently
+    # absorbs junctions, symlinked repos and subst drives.
+    expected_venv = Path(__file__).resolve().parents[2] / "phase2-mcp" / "venv"
+    override = os.environ.get("NIGHTJAR_COPYLEFT_VENV")  # RunPod/Linux/conda escape hatch
+    if override:
+        print(f"   (venv identity waived via NIGHTJAR_COPYLEFT_VENV={override})")
+    else:
+        same = False
+        try:
+            same = expected_venv.exists() and os.path.samefile(sys.prefix, expected_venv)
+        except OSError:
+            same = False
+        check(
+            "running under the phase2-mcp venv (not an arbitrary interpreter)",
+            same,
+            f"sys.prefix={sys.prefix} expected={expected_venv}",
+        )
+
+    # ---- invariant 2: is the importable graph really just this one root? -----------
+    # NJ-77: the sweep covers ONE site-packages directory, but sys.path can carry more. A
+    # venv created with --system-site-packages carries its own root AND the base prefix's,
+    # while purelib names only the first — so GPL sitting in the base prefix would remain
+    # importable and never swept, and this guard would go green. Same class as the bug
+    # above: sweep root != importable graph.
+    # Checked via pyvenv.cfg rather than by diffing site.getsitepackages(): on Windows that
+    # returns the venv PREFIX alongside the real site-packages dir, so a naive set-difference
+    # flags the venv against itself. pyvenv.cfg is the setting that actually decides whether
+    # the base prefix joins the import path.
+    in_venv = sys.prefix != sys.base_prefix
+    cfg = Path(sys.prefix) / "pyvenv.cfg"
+    system_site = "unknown"
+    if cfg.exists():
+        for line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.lower().replace(" ", "").startswith("include-system-site-packages="):
+                system_site = line.split("=", 1)[1].strip().lower()
+    user_site = bool(getattr(site, "ENABLE_USER_SITE", False))
+    check(
+        "one importable root: a venv, without system-site-packages or user-site",
+        in_venv and system_site == "false" and not user_site,
+        f"in_venv={in_venv} include-system-site-packages={system_site} ENABLE_USER_SITE={user_site}",
+    )
+
     report = scan(sp)
     print(f"   {len(report)} distributions (tooling excluded: {sorted(TOOLING)})")
+
+    # ---- invariant 3: did the sweep actually see the real dependency set? ----------
+    # An ANCHOR SET, not a numeric floor. A floor like `>= 50` is satisfied by any
+    # unrelated fat environment — another project's venv, a conda base, a CI image — while
+    # proving nothing about phase2-mcp, so it cannot backstop the escape hatch above. These
+    # five are pinned in phase2-mcp/requirements.txt, none is platform-conditional, and a
+    # miss means either the wrong tree was swept or a real dependency was dropped — both of
+    # which you want to hear about.
+    ANCHORS = ("num2words", "mcp", "httpx", "numpy", "onnxruntime")
+    missing = [a for a in ANCHORS if a not in report]
+    check(
+        "the swept tree is really phase2-mcp's (anchor distributions present)",
+        not missing,
+        f"missing: {missing} — swept {len(report)} distributions from {sp}",
+    )
 
     print("\n== 1. no unallowlisted copyleft / missing-license distributions ==")
     bad = {n: r for n, r in report.items() if r["fatal"]}
@@ -248,10 +323,14 @@ def main() -> int:
             print(f"  [stale] {name}: not installed — prune this entry when convenient")
             continue
         print(f"  [noted] {name}: tolerates {sorted(tolerated)} — {why}")
-    if "num2words" in report:
-        check("num2words is still LGPL (a license CHANGE would need NJ-42 re-review)",
-              any(v == "LGPL" for _, v in report["num2words"]["files"]),
-              str(report["num2words"]["files"]))
+    # Unconditional (NJ-76): this used to be `if "num2words" in report:`, so on a run that
+    # swept the wrong tree it silently vanished instead of failing. The `in report` test is
+    # now part of the assertion rather than a gate around it — note the short-circuit, which
+    # is what stops report["num2words"] raising KeyError and killing the census with a
+    # traceback instead of a [FAIL] line.
+    check("num2words is still LGPL (a license CHANGE would need NJ-42 re-review)",
+          "num2words" in report and any(v == "LGPL" for _, v in report["num2words"]["files"]),
+          str(report.get("num2words", {}).get("files", "num2words NOT FOUND in the swept tree")))
 
     print("\n== 3. negative controls: the guard actually fails on the bad cases ==")
     with tempfile.TemporaryDirectory(prefix="copyleft-negctl-") as td:
