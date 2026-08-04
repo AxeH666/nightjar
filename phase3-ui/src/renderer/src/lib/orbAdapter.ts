@@ -321,6 +321,15 @@ export function createNightjarOrbAdapter(
 
   // ── state transitions off the pipeline ───────────────────────────────────────
   function enterListening(): void {
+    // NJ-63, Bugbot PR #156: the gate is checked BEFORE any state change. Setting
+    // 'listening' first and discovering the refusal inside startMic() would leave the orb
+    // claiming to listen — and VortexOverlay mounting full-screen with pointer events live —
+    // for the whole listeningTimeoutMs (15s) with no mic actually open. Refuse up front and
+    // stay idle: no state, no timer, no overlay.
+    if (!micAllowed()) {
+      console.warn("[nightjar-orb] ignoring a wake event: voice is not enabled")
+      return
+    }
     thinkingTimer = clearTimer(thinkingTimer)
     teardownTts()
     setState("listening")
@@ -348,14 +357,10 @@ export function createNightjarOrbAdapter(
     if (!ev || typeof ev.kind !== "string") return
     switch (ev.kind) {
       case "wake":
-        // NJ-63: with voice disabled there is no legitimate producer of `wake` — the
-        // daemon is not running — so any such frame is forged or stale. Drop it before
-        // it can change state, rather than entering 'listening' with a mic we then
-        // refuse to open (which would show a listening orb that isn't listening).
-        if (!micAllowed()) {
-          console.warn("[nightjar-orb] ignoring a wake event: voice is not enabled")
-          break
-        }
+        // NJ-63: with voice disabled there is no legitimate producer of `wake` — the daemon
+        // is not running — so any such frame is forged or stale. enterListening() owns the
+        // refusal (it must happen before any state change); startMic() re-checks as the
+        // choke point every path to the mic passes through.
         if (ev.detected !== false) enterListening()
         break
       case "transcription":

@@ -69,18 +69,45 @@ export const nativeConsentAsker: ConsentAsker = async (win) => {
 // call: click-fatigue plus a stray Enter is a way to manufacture consent.
 let pending: Promise<MicConsent | null> | null = null
 
+// Bugbot PR #156. Asking is asynchronous, so the user can turn voice OFF while the dialog is
+// still up — via the orb's kill switch, DevTools, or any bridge caller. Their most recent
+// instruction wins, so a consent that was superseded mid-ask is NOT a consent.
+//
+// A generation counter rather than a mutex ON PURPOSE: serializing would make the kill switch
+// queue behind an open modal, and blocking a privacy OFF switch is the one thing that must
+// never happen. Disable stays immediate; a superseded ask resolves to null.
+let epoch = 0
+
+/**
+ * Call on EVERY disable. Any consent currently being asked for — and any already-granted
+ * consent still in flight back to its caller — is invalidated.
+ */
+export function invalidatePendingConsent(): void {
+  epoch++
+}
+
 /**
  * Returns a MicConsent on an affirmative answer, or null on denial / no window / a throwing
- * asker. Callers MUST treat null as "do not enable" and must not write any state first.
+ * asker / a disable that landed while asking. Callers MUST treat null as "do not enable" and
+ * must not write any state first.
  */
+// Known, accepted edge: a caller that JOINS an ask already invalidated by a disable also
+// gets null, even though its own request came after that disable. It fails CLOSED (the user
+// clicks Enable again), which is the correct direction for a privacy switch, and it is not
+// reachable from the UI anyway — the dialog is window-modal, so a second enable can only come
+// from another bridge caller.
 export function askForMicConsent(
   win: BrowserWindow | null,
   asker: ConsentAsker = nativeConsentAsker,
 ): Promise<MicConsent | null> {
   if (pending) return pending
+  const started = epoch
   pending = (async () => {
     try {
-      return (await asker(win)) ? MicConsent.__grant() : null
+      const granted = await asker(win)
+      // Re-check AFTER the await: a disable during the ask supersedes this answer.
+      if (epoch !== started) return null
+      return granted ? MicConsent.__grant() : null
     } catch {
       // A throwing asker (destroyed window, platform failure) is a denial. Never fail open.
       return null

@@ -125,6 +125,23 @@ describe("orb adapter mic gate (NJ-63)", () => {
     h.unsub()
   })
 
+  // Bugbot PR #156 (Medium): the refusal must happen BEFORE any state change. If
+  // enterListening() set 'listening' and started its timer first, discovering the refusal
+  // inside startMic() would leave the orb claiming to listen — and VortexOverlay mounting
+  // full-screen with pointer events live — for the whole 15s timeout, with no mic open.
+  test("a refused wake changes NO state, so no overlay and no 15s timer (Bugbot #156)", async () => {
+    const h = harness(() => false)
+    h.deliver({ kind: "wake", detected: true })
+    await flush()
+    expect(h.micCalls.length).toBe(0)
+    expect(h.adapter.getState()).toBe("idle")
+    // The state stream must never have visited 'listening': VortexOverlay is driven by
+    // `state !== "idle" && state !== "error"`, so a transient listening would flash the
+    // input-capturing overlay over the whole app.
+    expect(h.states).not.toContain("listening")
+    h.unsub()
+  })
+
   test("gating wake does NOT claim to close the transcription→overlay route (NJ-65)", async () => {
     // Documents a KNOWN residual so nobody reads the mic gate as closing it: a forged
     // `transcription` still drives 'connecting', which mounts the full-screen overlay.

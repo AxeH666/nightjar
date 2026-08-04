@@ -24,7 +24,8 @@ import { join } from "node:path"
 
 process.env.NJ_TEST_USERDATA = mkdtempSync(join(tmpdir(), "njvoice-"))
 
-const { askForMicConsent, __resetConsentForTests, nativeConsentAsker } = await import("./voiceConsent")
+const { askForMicConsent, __resetConsentForTests, nativeConsentAsker, invalidatePendingConsent } =
+  await import("./voiceConsent")
 const voice = await import("./voice")
 
 const prefPath = () => join(process.env.NJ_TEST_USERDATA!, "voice-pref.json")
@@ -107,6 +108,57 @@ describe("mic consent gate (NJ-68)", () => {
     expect(off.enabled).toBe(false)
     expect(off.consentedAt).toBe(stamped)
     expect(voice.getVoiceEnabled()).toBe(false)
+  })
+
+  // Bugbot PR #156 (High): the consent ask is async, so a disable can land while the dialog
+  // is still up — from the orb kill switch, DevTools, or any bridge caller. Before this, the
+  // enable resumed after consent and wrote {enabled:true} OVER a disable the user asked for
+  // afterwards, silently re-opening the microphone.
+  describe("a disable during a pending ask supersedes it (Bugbot #156)", () => {
+    test("consent granted after a disable does NOT produce a token", async () => {
+      let resolveAsk: (v: boolean) => void = () => {}
+      const asker = vi.fn(() => new Promise<boolean>((r) => (resolveAsk = r)))
+      const inFlight = askForMicConsent(null, asker)
+
+      // The user hits the kill switch while the dialog is open.
+      invalidatePendingConsent()
+      // ...and only then does the dialog come back affirmative.
+      resolveAsk(true)
+
+      expect(await inFlight).toBeNull()
+    })
+
+    test("the full sequence leaves voice OFF, not resurrected", async () => {
+      // Start from ON so the disable is a real state change.
+      const c0 = await askForMicConsent(null, await grant())
+      voice.enableVoice(c0!)
+      expect(voice.getVoiceEnabled()).toBe(true)
+      __resetConsentForTests()
+
+      let resolveAsk: (v: boolean) => void = () => {}
+      const enable = (async () => {
+        const c = await askForMicConsent(null, () => new Promise<boolean>((r) => (resolveAsk = r)))
+        if (!c) return "abandoned"
+        voice.enableVoice(c)
+        return "enabled"
+      })()
+
+      // Disable lands mid-ask: this is what the handler does.
+      invalidatePendingConsent()
+      voice.disableVoice()
+
+      resolveAsk(true)
+      expect(await enable).toBe("abandoned")
+      expect(voice.getVoiceEnabled()).toBe(false)
+      expect(readPref().enabled).toBe(false)
+    })
+
+    test("a disable does not poison the NEXT, legitimate ask", async () => {
+      invalidatePendingConsent()
+      __resetConsentForTests()
+      const c = await askForMicConsent(null, await grant())
+      expect(c).not.toBeNull() // the counter gates in-flight asks only, not future ones
+    })
   })
 
   test("the store fails closed on a corrupt file", async () => {

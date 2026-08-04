@@ -19,7 +19,7 @@ import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
 import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type SchedulerStatus } from "./scheduler"
 import * as preview from "./preview-server"
 import { canRestart, RESTARTABLE_STATES } from "../shared/restartPolicy"
-import { askForMicConsent } from "./voiceConsent"
+import { askForMicConsent, invalidatePendingConsent } from "./voiceConsent"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -458,6 +458,7 @@ function voiceStatusNow(): { enabled: boolean; stillListening: boolean } {
   }
 }
 ipcMain.handle("voice:get", () => voiceStatusNow())
+
 ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
   // Strict `=== true` to enable. IPC payloads are structured-clone, so a non-boolean can
   // arrive, and the old `Boolean(enabled)` meant voice.set("false") / set(1) / set({}) all
@@ -467,6 +468,9 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
     if (typeof enabled !== "boolean") {
       console.warn(`[nightjar-voice] voice:set got a non-boolean (${typeof enabled}); treating it as OFF`)
     }
+    // Bugbot PR #156: kill any consent currently being asked for, so an enable sitting on
+    // the dialog cannot resume after this disable and silently re-open the mic.
+    invalidatePendingConsent()
     const saved = voice.disableVoice()
     if (!saved.enabled) await supervisor.stopService("wake-daemon")
     const offStatus = voiceStatusNow()
@@ -477,12 +481,11 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
   // Consent is verified BEFORE the store write, not after. Writing first and rolling back on
   // denial would leave a window where a crash persists {enabled:true} — a hot mic at the next
   // launch, from a prompt the user declined.
+  // null covers denial, no window, a throwing asker, AND a disable that landed while the
+  // dialog was up (askForMicConsent invalidates a superseded ask). Not an error: return the
+  // unchanged status so the UI settles honestly. Nothing was written, the daemon untouched.
   const consent = await askForMicConsent(win)
-  if (!consent) {
-    // Denial is not an error: return the (unchanged) status so the UI settles honestly.
-    // Nothing was written and the daemon was not touched.
-    return voiceStatusNow()
-  }
+  if (!consent) return voiceStatusNow()
   voice.enableVoice(consent)
   supervisor.setEnv("wake-daemon", wakeDaemonEnv(capabilities.getPref("chat")))
   await supervisor.startService("wake-daemon")
