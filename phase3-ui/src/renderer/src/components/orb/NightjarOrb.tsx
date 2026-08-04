@@ -8,7 +8,7 @@
 // over during a voice turn. Both share this one adapter subscription (one
 // side-channel connection, one set of audio analysers) so they stay in sync.
 // (Stage 7: replaced the orb-ui circle-theme fork with the Three.js vortex.)
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { createNightjarOrbAdapter } from "../../lib/orbAdapter"
 import { useOrbAdapter } from "../../lib/useOrbAdapter"
 import { voice } from "../../lib/voice"
@@ -47,9 +47,21 @@ const LABELS: Record<string, string> = {
 
 export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string; size?: number }) {
   const [audioFailed, setAudioFailed] = useState(false)
+  // NJ-63: the adapter's mic gate. A REF, not the voiceOn state value — the adapter is
+  // memoized on [wsUrl], so a captured boolean would freeze at whatever voice was when the
+  // socket URL last changed. Starts false so an inbound wake that arrives before the first
+  // voice.get() resolves cannot open the mic: on a privacy switch, unknown means no.
+  const voiceOnRef = useRef(false)
   const adapter = useMemo(
     // setAudioFailed is a stable setState — safe to close over with [wsUrl] deps.
-    () => createNightjarOrbAdapter({ url: wsUrl, loadTtsAudio, onTtsError: () => setAudioFailed(true) }),
+    // micAllowed reads the ref on every call, so it always sees the current preference.
+    () =>
+      createNightjarOrbAdapter({
+        url: wsUrl,
+        loadTtsAudio,
+        onTtsError: () => setAudioFailed(true),
+        micAllowed: () => voiceOnRef.current,
+      }),
     [wsUrl],
   )
   const { state, volume } = useOrbAdapter(adapter)
@@ -68,6 +80,11 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
     let mounted = true
     const apply = (s: { enabled: boolean; stillListening?: boolean }) => {
       if (!mounted) return
+      // Keep the adapter's NJ-63 mic gate in lockstep with the pref, on both the initial
+      // voice.get() and every subsequent push. NOTE (NJ-64): this closes the gate for the
+      // NEXT wake event; it does not tear down a mic that is already open. That gap is
+      // tracked separately.
+      voiceOnRef.current = s.enabled
       setVoiceOn(s.enabled)
       setMicStuck(!s.enabled && Boolean(s.stillListening))
     }

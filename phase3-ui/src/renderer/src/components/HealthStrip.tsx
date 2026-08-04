@@ -1,4 +1,5 @@
 import { useRef, useState } from "react"
+import { canRestart } from "../../../shared/restartPolicy"
 
 export interface ServiceStatus {
   name: string
@@ -19,9 +20,9 @@ const DOT: Record<string, string> = {
   stopped: "bg-nightjar-text/30",
 }
 
-// States where a manual restart is a sensible affordance (the supervisor auto-restarts on crash,
-// but exhausts its budget → `failed`, or freezes → `unhealthy`).
-const RESTARTABLE = new Set(["failed", "unhealthy"])
+// NJ-66: the restartable-state rule now lives in src/shared/restartPolicy.ts and is enforced by
+// the main process too, so this component no longer OWNS the rule — it just renders it. Keeping
+// a private Set here would be the drift this fix exists to remove.
 
 // audit1.md P2-6/P2-7: the strip used to be display-only, so a red service on a fresh box was an
 // opaque dot with a tooltip. Now click a service to see WHY it's red (its captured stdout/stderr)
@@ -30,6 +31,7 @@ export function HealthStrip({ services }: { services: ServiceStatus[] }) {
   const [open, setOpen] = useState<string | null>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [restartError, setRestartError] = useState<string | null>(null)
   // Synchronous mirror of `open` so an out-of-order serviceLogs response for a DIFFERENT service
   // (switched selection, or a restart-triggered refetch) can't overwrite the current one (BugBot).
   const openRef = useRef<string | null>(null)
@@ -56,14 +58,20 @@ export function HealthStrip({ services }: { services: ServiceStatus[] }) {
     }
     select(name)
     setLogs([])
+    setRestartError(null) // a refusal message belongs to the service it came from
     await loadLogs(name)
   }
   const restart = async (name: string) => {
     setBusy(true)
+    setRestartError(null)
     try {
       await window.nightjar?.restartService?.(name)
-    } catch {
-      /* the strip will reflect the new state via the status push; logs refresh below */
+    } catch (e) {
+      // NJ-66: main now REFUSES a restart in a non-restartable state (and an unknown name),
+      // where it used to resolve silently. Swallowing that here would make a refusal look
+      // identical to a dead button — rule 8 wants a visible fallback, not a silent no-op.
+      const msg = e instanceof Error ? e.message : String(e)
+      setRestartError(msg.replace(/^Error invoking remote method '[^']*':\s*/, ""))
     } finally {
       setBusy(false)
       await loadLogs(name)
@@ -95,10 +103,10 @@ export function HealthStrip({ services }: { services: ServiceStatus[] }) {
           <div className="mb-1 flex items-center gap-3">
             <span className="text-nightjar-text/60">
               <b className="text-nightjar-text/80">{openSvc.name}</b> —{" "}
-              <span className={RESTARTABLE.has(openSvc.state) ? "text-nightjar-alert" : "text-nightjar-text/60"}>{openSvc.state}</span>
+              <span className={canRestart(openSvc.state) ? "text-nightjar-alert" : "text-nightjar-text/60"}>{openSvc.state}</span>
               {openSvc.detail ? ` · ${openSvc.detail}` : ""}
             </span>
-            {RESTARTABLE.has(openSvc.state) && (
+            {canRestart(openSvc.state) && (
               <button
                 onClick={() => restart(openSvc.name)}
                 disabled={busy}
@@ -111,6 +119,9 @@ export function HealthStrip({ services }: { services: ServiceStatus[] }) {
               close
             </button>
           </div>
+          {restartError && (
+            <div className="mb-1 text-[11px] text-nightjar-alert">restart refused — {restartError}</div>
+          )}
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-nightjar-base/60 p-2 text-[11px] leading-snug text-nightjar-text/70">
             {logs.length ? logs.join("") : "(no logs captured)"}
           </pre>

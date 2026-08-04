@@ -9,7 +9,7 @@ import { execFile } from "node:child_process"
 import { mkdtempSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 import { REPO, venvPython } from "./services"
 
 // rule 3: a hard wall-clock cap on the conversion subprocess. build123d meshing on a
@@ -27,10 +27,51 @@ export interface CadConvertResult {
   error?: string
 }
 
+// The ONE root a viewable GLB can legitimately live under. Every GLB the renderer can ask
+// for is minted by convertStepToGlb below, into a fresh mkdtemp under os.tmpdir() — the
+// renderer's `stepPath` never influences where the GLB lands. Deliberately NOT the same
+// root list as main/index.ts's AUDIO_ROOTS: that one also allows the Nightjar data dir,
+// which nightjar:saveAttachment lets the RENDERER write into with a renderer-chosen
+// extension — so allowing it here would let a compromised renderer plant <uuid>.glb and
+// read it back. Follow readAudio's *pattern* (resolve → root prefix → extension), not its
+// *root list*. If a "save this model" feature ever lands, widening this is one reviewable line.
+const GLB_ROOTS = [tmpdir()].map((r) => resolve(r) + sep)
+
+// Is `p` a path the renderer is allowed to have us read as a GLB?
+//
+// Mirrors the nightjar:readAudio guard (main/index.ts): resolve first (so `..` is collapsed
+// before comparison), require an allowed root, require the extension. The trailing `sep` on
+// each root is load-bearing — without it a sibling directory that merely starts with the
+// root name (`<tmp>-evil`) would pass the prefix test.
+//
+// RESIDUAL, known and accepted: this is prefix math on the resolved path, so it does NOT
+// follow symlinks or NTFS junctions. A junction planted inside tmp that points elsewhere
+// still passes (creating one needs no elevation on Windows, but it does need local code
+// execution). We deliberately do not realpath() the candidate: os.tmpdir() is itself a
+// symlink on macOS, so resolving one side only would reject every legitimate GLB there.
+// Tracked as NJ-62.
+export function isAllowedGlbPath(glbPath: unknown): boolean {
+  const abs = resolve(String(glbPath))
+  const okRoot = GLB_ROOTS.some((root) => abs.startsWith(root))
+  const okExt = /\.glb$/i.test(abs)
+  return okRoot && okExt
+}
+
 // Read a converted GLB off disk so the renderer can load it via GLTFLoader.parse — the
 // renderer can't fetch an arbitrary file:// path (CSP + Electron blocks file navigation), so
 // the bytes come over IPC. Returns a Uint8Array (structured-clonable to the renderer).
+//
+// Path-guarded (NJ-61): this is reachable from the renderer over `cad:readGlb`, and without
+// a guard it returned the bytes of ANY file the main process could read. Refusal returns
+// null — the declared contract, and both callers already degrade gracefully — but it MUST
+// also warn: a silent null plus a case-sensitive prefix test on a case-insensitive
+// filesystem is indistinguishable from "the viewer is just broken" (rule 8 wants a visible
+// fallback, not a silent no-op).
 export async function readGlb(glbPath: string): Promise<Uint8Array | null> {
+  if (!isAllowedGlbPath(glbPath)) {
+    console.warn(`[nightjar-cad] refused to read a GLB outside the allowed root: ${resolve(String(glbPath))}`)
+    return null
+  }
   try {
     const buf = await readFile(glbPath)
     return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)

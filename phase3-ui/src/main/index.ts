@@ -18,6 +18,8 @@ import { visionStatus, pullVisionModel, type VisionStatus } from "./vision"
 import { convertStepToGlb, readGlb, buildHeroModel } from "./cad"
 import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type SchedulerStatus } from "./scheduler"
 import * as preview from "./preview-server"
+import { canRestart, RESTARTABLE_STATES } from "../shared/restartPolicy"
+import { askForMicConsent } from "./voiceConsent"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -145,7 +147,27 @@ ipcMain.handle("nightjar:readAudio", async (_e, filePath: string): Promise<Array
 // P2-7: manual per-service restart from the health strip — for a sidecar that failed / exhausted
 // its auto-restarts. opencode-serve MUST be restarted with the authoritative env (BYOK keys +
 // slash-normalized paths); every other service uses its own def env.
+//
+// NJ-66: the failed/unhealthy restriction used to exist ONLY in HealthStrip.tsx's JSX, so this
+// channel honoured any name in any state. The rule now lives in src/shared/restartPolicy.ts and
+// is enforced on BOTH sides. Two deliberate choices:
+//   • The gate is HERE, at the IPC boundary — never inside Supervisor.restartService. Six
+//     main-side callers (byok:set/remove, capabilities:set/setBulk, the voice model re-apply)
+//     restart a healthy or adopted service ON PURPOSE; gating the supervisor would break every
+//     one of them and turn test-supervisor-restart.ts red.
+//   • It is a POLICY check, not a concurrency guard — restartService's single-flight
+//     (supervisor.ts:409-421) owns that. State can change between the status read and the call;
+//     that is fine and is not what this defends.
+// An unknown name used to resolve successfully, so a typo read as success — it now throws, and
+// is distinguishable from a state refusal.
 ipcMain.handle("nightjar:restart", async (_e, name: string) => {
+  const svc = supervisor.status().find((s) => s.name === name)
+  if (!svc) throw new Error(`unknown-service: no managed service named ${JSON.stringify(String(name))}`)
+  if (!canRestart(svc.state)) {
+    throw new Error(
+      `not-restartable: ${svc.name} is ${svc.state}; a manual restart is only offered for ${RESTARTABLE_STATES.join(" or ")}`,
+    )
+  }
   if (name === "opencode-serve") await supervisor.restartService(name, opencodeServeEnv())
   else await supervisor.restartService(name)
 })
@@ -414,12 +436,15 @@ ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabili
   return saved
 })
 
-// ── Voice master switch (NJ-57) ───────────────────────────────────────────────
-// OFF by default. Enabling starts the wake daemon (the renderer shows a consent
-// modal FIRST — this handler trusts that flow but is safe without it: enabling is
-// an explicit user IPC, never automatic). Disabling KILLS the daemon process —
+// ── Voice master switch (NJ-57, gate hardened in NJ-68) ──────────────────────
+// OFF by default. Enabling starts the wake daemon; disabling KILLS the daemon process —
 // never a soft-mute — so the OS mic-in-use indicator is the source of truth that
 // listening ended. State is pushed so the orb's indication can't go stale.
+//
+// NJ-68: this handler used to take a boolean and trust that the renderer had shown its
+// consent modal. It no longer trusts anything — consent is verified HERE, in main, before
+// any state is written, so a caller holding the preload bridge (DevTools, a compromised
+// renderer dependency) cannot open the microphone silently.
 //
 // `stillListening` is the honesty bit (Bugbot, PR #151): the pref alone must never
 // drive a "voice off" UI while the daemon's port still answers (stopService could
@@ -433,14 +458,34 @@ function voiceStatusNow(): { enabled: boolean; stillListening: boolean } {
   }
 }
 ipcMain.handle("voice:get", () => voiceStatusNow())
-ipcMain.handle("voice:set", async (_e, enabled: boolean) => {
-  const saved = voice.setVoiceEnabled(Boolean(enabled))
-  if (saved.enabled) {
-    supervisor.setEnv("wake-daemon", wakeDaemonEnv(capabilities.getPref("chat")))
-    await supervisor.startService("wake-daemon")
-  } else {
-    await supervisor.stopService("wake-daemon")
+ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
+  // Strict `=== true` to enable. IPC payloads are structured-clone, so a non-boolean can
+  // arrive, and the old `Boolean(enabled)` meant voice.set("false") / set(1) / set({}) all
+  // turned the microphone ON. A privacy switch must fail CLOSED on a type error, so
+  // anything that is not exactly `true` takes the disable path.
+  if (enabled !== true) {
+    if (typeof enabled !== "boolean") {
+      console.warn(`[nightjar-voice] voice:set got a non-boolean (${typeof enabled}); treating it as OFF`)
+    }
+    const saved = voice.disableVoice()
+    if (!saved.enabled) await supervisor.stopService("wake-daemon")
+    const offStatus = voiceStatusNow()
+    sendToRenderer("nightjar:voiceStatus", offStatus)
+    return offStatus
   }
+
+  // Consent is verified BEFORE the store write, not after. Writing first and rolling back on
+  // denial would leave a window where a crash persists {enabled:true} — a hot mic at the next
+  // launch, from a prompt the user declined.
+  const consent = await askForMicConsent(win)
+  if (!consent) {
+    // Denial is not an error: return the (unchanged) status so the UI settles honestly.
+    // Nothing was written and the daemon was not touched.
+    return voiceStatusNow()
+  }
+  voice.enableVoice(consent)
+  supervisor.setEnv("wake-daemon", wakeDaemonEnv(capabilities.getPref("chat")))
+  await supervisor.startService("wake-daemon")
   const status = voiceStatusNow()
   sendToRenderer("nightjar:voiceStatus", status)
   return status

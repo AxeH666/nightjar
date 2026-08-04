@@ -9,12 +9,13 @@
 // half is the deliberate voice-tool denial recorded in engine-workspace/opencode.json).
 //
 // Persisted like capability-prefs.json (userData/voice-pref.json, plain JSON at 0600 —
-// no secrets, just {enabled, consentedAt}). consentedAt records the first time the
-// user accepted the consent modal, for honesty in support/debugging — it is not a
-// "skip the modal" flag (the renderer shows consent on every enable, by design).
+// no secrets, just {enabled, consentedAt}). consentedAt records when the user last
+// accepted the consent prompt, for honesty in support/debugging — it is not a
+// "skip the prompt" flag (consent is asked on every enable, by design).
 import { app } from "electron"
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { join, dirname } from "node:path"
+import type { MicConsent } from "./voiceConsent"
 
 export interface VoicePref {
   enabled: boolean
@@ -47,15 +48,29 @@ export function getVoiceEnabled(): boolean {
   return readStore().enabled
 }
 
-export function setVoiceEnabled(enabled: boolean): VoicePref {
-  const cur = readStore()
-  const next: VoicePref = {
-    enabled: Boolean(enabled),
-    ...(cur.consentedAt || !enabled ? { consentedAt: cur.consentedAt } : { consentedAt: new Date().toISOString() }),
-  }
-  if (!next.consentedAt) delete next.consentedAt
+function write(next: VoicePref): VoicePref {
   const p = storePath()
   mkdirSync(dirname(p), { recursive: true })
   writeFileSync(p, JSON.stringify(next, null, 2), { mode: 0o600 })
   return next
+}
+
+// NJ-68: enabling the mic REQUIRES a MicConsent, which only askForMicConsent() can produce.
+// This is the compile-time half of the gate — the old `setVoiceEnabled(boolean)` let any
+// caller flip the switch, and its single caller (the voice:set handler) was trusting a
+// renderer-side modal that nothing in main enforced. Splitting enable from disable also
+// keeps the kill switch a zero-argument call that can never fail to typecheck.
+//
+// consentedAt is now stamped from the VERIFIED consent on every enable, so it means "when
+// the user last consented". It used to be stamped once on the first enable ever and never
+// refreshed, which made it wrong after any toggle cycle. It still has no reader in the UI —
+// tracked as NJ-69.
+export function enableVoice(consent: MicConsent): VoicePref {
+  return write({ enabled: true, consentedAt: consent.at })
+}
+
+export function disableVoice(): VoicePref {
+  const cur = readStore()
+  const next: VoicePref = { enabled: false, ...(cur.consentedAt ? { consentedAt: cur.consentedAt } : {}) }
+  return write(next)
 }
