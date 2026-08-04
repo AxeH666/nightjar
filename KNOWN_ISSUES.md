@@ -61,6 +61,235 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-72 — `PlaybackMute` ignores the event `source`, so any local process can deafen the wake daemon indefinitely — OPEN (flagged deliberately, not fixed) 2026-08-04
+
+- **Flagged by audit3 and CONFIRMED by running, end-to-end through a real `sidechannel.py`
+  hub. Deliberately NOT fixed** (maintainer instruction: flag only) — recorded so it is not
+  lost.
+- `PlaybackMute.on_event` (`phase2-mcp/wake_daemon.py:359-367`) keys only off `state`; the
+  docstring at `:345-348` says `source` is deliberately NOT filtered. So a
+  `{"kind":"tts","state":"playing"}` frame with a **foreign** `source`, or **no `source` key
+  at all**, mutes the daemon — wake scoring is skipped at `:663`. Verified live on a scratch
+  hub: `spoofed 'playing' (foreign source) muted the daemon: True`.
+- **Two corrections to audit3's description, both making it worse:**
+  1. **The mute is UNBOUNDED, not "up to 90s".** `PLAYBACK_MUTE_MAX_S = 90.0` exists
+     (`:111`), but `:364` resets `_renderer_since` on **every** `playing` frame, so the
+     rule-3 backstop never fires — it defends against a LOST `ended`, not a REPEATED
+     `playing`. Reproduced: `after 1200s simulated: muted=True, backstops fired=0`.
+  2. **The un-mute direction is spoofable too.** With a genuine `source:"orb-ui"` clip
+     playing, a foreign `ended` — or a foreign `error`, treated identically at `:365` —
+     clears the mute. That *reverts* NJ-57's shipped echo suppression rather than merely
+     denying service, which is the more damaging half and is absent from audit3's claim.
+- audit3 disagrees with itself on the citation: `audit3.md:1511` points at `:347-348`
+  (prose), `:1353` points at `:359-367` (the code). The latter is right.
+- **Fix shape when it is taken up:** filter on `source == "orb-ui"` for both directions, and
+  make the backstop count from the FIRST `playing` rather than the latest. Note the existing
+  suite (`tests/test_wake_mute.py`) has 3 checks that encode the current unfiltered
+  behaviour and would need to move with it.
+
+## NJ-71 — `nightjar:voiceStatus` is pushed from exactly one site, so a daemon crash leaves a stale "🎙 Mic is ON" UI — OPEN 2026-08-04
+
+- **Found while verifying NJ-68 (rule 7).** `sendToRenderer("nightjar:voiceStatus", …)`
+  occurs **once repo-wide**, inside the `voice:set` handler. The supervisor's own status
+  callback pushes only `nightjar:status`. So if the wake daemon dies on its own — crash, mic
+  yanked, restart budget exhausted — no voice-status push ever fires, and both the orb and
+  the Settings panel keep rendering the last `voice:set` result. `stillListening` only
+  recomputes on an explicit get/set.
+- This is the inverse of the honesty property PR #151 set out to establish: the UI can claim
+  the mic is on after it has stopped, and (with NJ-64) can also claim it is off while it is
+  briefly still open.
+- **Fix shape:** push `voiceStatusNow()` from the supervisor status callback whenever the
+  wake-daemon row changes state.
+
+## NJ-70 — `restartOnce` hard-kills with no graceful phase — OPEN 2026-08-04
+
+- **Found while verifying NJ-66 (rule 7).** `Supervisor.restartOnce` goes straight to
+  `killTree(pid, true)` — `taskkill /F` on Windows — unlike `stopService`, which does
+  graceful → verify-gone → hard. So **every** restart, including the legitimate BYOK and
+  capability-apply ones, SIGKILLs an engine that may be mid-write.
+- Combined with **NJ-67** (those routes restart without diffing, and `setBulk({})` restarts
+  on an empty payload), setting a preference to its existing value can drop in-flight agent
+  work with no graceful shutdown.
+- **Fix shape:** give `restartOnce` the same graceful-then-hard sequence `stopService`
+  already implements.
+
+## NJ-69 — `getVoicePref`/`consentedAt` still has no reader in the UI — OPEN 2026-08-04
+
+- **Found while fixing NJ-68 (rule 7 — flagged, not folded in).** `voice.ts`'s `consentedAt`
+  is now stamped from a *verified* consent on every enable (it previously recorded only the
+  first enable ever and was never refreshed, so it was wrong after any toggle cycle). But
+  `getVoicePref()` still has **zero callers repo-wide** — the field is write-only. Its own
+  comment justifies it "for honesty in support/debugging", which it cannot serve unread.
+- **Fix shape:** surface it in the voice settings panel ("consent given <date>"), or delete
+  the field. Not folded into NJ-68's PR to keep that diff to the gate itself.
+
+## NJ-68 — `voice:set` opened the microphone with NO consent check in main; `Boolean()` coercion meant `voice.set("false")` turned it ON — FIXED (PR-1) 2026-08-04
+
+- **Found by the audit3 verification pass; the coercion half was found while fixing it.**
+- **(a) The consent gate was renderer-only.** NJ-57 shipped a React consent modal in
+  `VoiceSettings.tsx`, but `ipcMain.handle("voice:set")` took a boolean and enabled the mic —
+  nothing in main enforced the prompt. Anything holding the preload bridge (DevTools, a
+  compromised renderer dependency, future in-tree code) could open the microphone silently.
+  Confirmed by running the real `voice.ts` headlessly: `setVoiceEnabled(true)` with zero
+  consent evidence wrote `{enabled:true}` and the supervisor's `enabled()` gate immediately
+  returned true. NJ-57's own entry asserted the modal as a shipped guarantee — that sentence
+  has been corrected in place.
+- **(b) `Boolean(enabled)` failed OPEN on a type error.** IPC payloads are structured-clone,
+  so `voice.set("false")`, `set(1)`, `set({})`, `set([])`, `set("0")` all coerced to true and
+  **enabled the microphone**. Verified by running the coercion table.
+- **Fix:** two layers. Enabling now requires a `MicConsent` that only `askForMicConsent()`
+  can produce (`src/main/voiceConsent.ts`), so a caller that skips the prompt is a COMPILE
+  error rather than a runtime surprise; and that function shows a **native** dialog in main —
+  the only shape that survives an arbitrary bridge caller. Consent is verified BEFORE any
+  store write (a write-then-rollback design would leave a crash window persisting
+  `{enabled:true}` → hot mic at next launch). The ask is single-flighted, fails closed with
+  no/destroyed window, and maps Esc + the default button to DENY. `voice:set` now requires
+  strict `=== true` to enable; anything else takes the disable path. The React modal was
+  removed (it would now double-prompt) and its copy became an always-visible disclosure,
+  shared with the dialog via `src/shared/voiceConsentCopy.ts`.
+- **A renderer-minted consent token was explicitly rejected**: it is a two-line defeat from
+  the same console and proves nothing about a human reading the copy — machinery that looks
+  like a gate while enforcing nothing is worse than no gate.
+- **Residual (rules 6/8):** verified headless only (`voice.consent.test.ts`, 8 tests). That
+  the dialog renders in front of the window, that Esc maps to DENY, and that the OS mic
+  indicator behaves, can only be confirmed on a native Windows desktop session — PR-1's
+  hardware checklist.
+
+## NJ-67 — `capabilities:setBulk({})` restarts opencode-serve unconditionally from the renderer — OPEN 2026-08-04
+
+- **Found while verifying NJ-66 (rule 7 — filed, not fixed).** `capabilities:set` /
+  `setBulk` (`main/index.ts:388-394`, `408-415`) and `byok:set` / `remove` (`367-378`)
+  restart `opencode-serve` **without diffing** whether anything actually changed — the
+  in-code comment at `:406-407` says so deliberately ("a redundant restart is cheap next to
+  a stale backend"). `setBulk({})` passes validation because the guard loop iterates
+  `Object.keys({})` = `[]` (verified by running that exact loop), so an empty payload is a
+  free engine bounce, callable in a loop from the renderer.
+- **Why this matters beyond tidiness:** combined with NJ-70 (restart is a hard SIGKILL with
+  no graceful phase), setting a preference to its *current* value can drop in-flight agent
+  work.
+- **This is why NJ-66 is scoped as consistency hygiene and makes NO security claim** — a PR
+  saying "the renderer can no longer restart arbitrary services" would be false while this
+  route is open. Fix shape: compare incoming prefs/key state to what is stored and skip the
+  restart when nothing changed. That contradicts the deliberate comment above, so it needs
+  an explicit decision rather than a drive-by.
+
+## NJ-66 — the restartable-state rule lived only in JSX, so `nightjar:restart` honoured any name in any state — FIXED (PR-1) 2026-08-04
+
+- **Found by the audit3 verification pass. PARTIAL verdict: the state gap is real; the
+  claimed name-validation hazard is NOT.**
+- **(a) No main-side state gate — CONFIRMED by running.** `ipcMain.handle("nightjar:restart")`
+  dispatched straight to `supervisor.restartService`; the `{failed, unhealthy}` restriction
+  existed only in `HealthStrip.tsx`'s JSX. A probe restarted a **healthy** service through
+  the exact call the handler makes (`pid 3632 → 55488`).
+- **(b) Name validation — REFUTED, do not re-file.** `restartService` does
+  `managed.find(x => x.def.name === name)` and returns on miss. Tested with `null`,
+  `undefined`, `0`, `{}`, `["svc"]`, `"__proto__"`, `"constructor"`, `"toString"`, `""`,
+  `"SVC"`, `" svc "`, `"svc\0"`, `"../svc"`: no throw, no state change, status unchanged by
+  all of them. Strict `===` against a fixed array has no injection or prototype reach. The
+  only real defect was that an unknown name **resolved successfully**, so a typo read as
+  success — that now throws.
+- **Fix:** the rule moved to `src/shared/restartPolicy.ts`, imported by both sides. The gate
+  is at the **IPC boundary only** — never inside `restartService`, because six main-side
+  callers (BYOK apply, capability apply, the voice model re-apply) restart healthy/adopted
+  services on purpose and a supervisor-level gate would break all of them. It is a POLICY
+  check, not a concurrency guard (the single-flight at `supervisor.ts:409-421` owns that).
+  `HealthStrip` now renders the refusal instead of swallowing it, so a refused restart is
+  distinguishable from a dead button.
+- **Note on layout:** the shared module is in `src/shared`, NOT `src/main`. A renderer file
+  importing from `src/main` fails `npm run typecheck` with **TS6307** (`tsconfig.web.json` is
+  `composite` with `include: ["src/renderer/**/*"]`) — reproduced with the repo's own tsc — and
+  a vite alias does not fix it, because it is a tsc project-graph error, not a bundler one.
+  Both tsconfigs now include `src/shared/**/*`.
+- **Scope honesty:** this closes an inconsistency, NOT an abuse route. See **NJ-67**.
+- **audit3 citation errors corrected:** it cites the single-flight guard as
+  `supervisor.ts:402-412` (real: **409-421**), and contradicts itself on name validation
+  (`audit3.md:791` says silent no-op — correct; `:1562` frames it as a validation gap).
+
+## NJ-65 — a forged `transcription` frame still mounts the full-screen voice overlay — OPEN 2026-08-04
+
+- **Found while fixing NJ-63 (rule 7 — flagged, not fixed; the overlay is out of scope for
+  PR-1).** `orbAdapter.handleEvent`'s `transcription` case passes on `ev.final !== false`, so
+  a frame with **no `final` field** drives `enterThinking()` → state `connecting` →
+  `VortexOverlay` mounts `fixed inset-0 z-40` **with pointer events live** for
+  `thinkingTimeoutMs` (30s default), and it is trivially re-armable. Any local process on the
+  unauthenticated hub can therefore block the entire UI, without touching the microphone.
+- **NJ-63's mic gate does NOT close this** — a regression test pins the current behaviour so
+  a future change to it is deliberate. Fix shape: gate the overlay on the same voice-enabled
+  signal, or require a plausible `final`/`source` on transcription frames.
+
+## NJ-64 — the orb's one-click kill switch does not close the RENDERER's microphone — OPEN 2026-08-04
+
+- **Found while fixing NJ-63 (rule 7 — flagged, not fixed).** `NightjarOrb.tsx`'s click
+  handler calls `voice.set(false)`, which kills the wake-daemon **process**. But if the orb
+  is in `listening` at that moment, the renderer's OWN `micStream` — opened by
+  `orbAdapter.startMic()` via `getUserMedia` — is untouched: nothing in the orb, the hook, or
+  the adapter reacts to the pref going false. It stays open until `listeningTimer` fires
+  (**15s** default) or a transcription arrives.
+- **Why it matters:** NJ-57's stated design is "disable KILLS the capture process, and the OS
+  mic-in-use indicator going dark is the user's proof". For up to 15 seconds after the kill
+  switch, that indicator can stay lit — the exact thing NJ-57 says must never happen.
+- Reading-level conclusion (React was not driven). Fix shape: have the adapter stop the mic
+  when the gate closes, not merely refuse the next open.
+
+## NJ-63 — a forged `wake` frame on the unauthenticated side-channel opened the RENDERER's microphone — FIXED (PR-1) 2026-08-04
+
+- **Found by audit3, CONFIRMED by running.** The hub (`phase2-mcp/sidechannel.py`) has no
+  auth, no `Origin` check and no producer/consumer split — `websockets.serve()` is called
+  with no `origins=`, so any local process (and, since WebSockets are not same-origin
+  restricted, potentially a web page) is a fully privileged peer. The renderer's orb adapter
+  is permanently connected (the orb lives in the always-rendered header), and its `wake` case
+  drove `enterListening()` → `startMic()` → `getUserMedia({audio:true})` with **nothing
+  consulting the user's voice preference**. Repro against the real adapter: a minimal
+  `{"kind":"wake"}` frame produced `state=listening, getUserMedia calls=1`.
+- **This was a SECOND mic-open path, around PR #151's consent gate** — that gate governs the
+  wake-daemon *process* (supervisor `enabled()`), a different process holding a different mic
+  handle. It never covered the renderer's own.
+- **Fix:** a `micAllowed` live getter on the adapter, consulted both at the `wake` case (so a
+  forged frame cannot even change state) and inside `startMic()` (the choke point every path
+  to the mic passes through). `NightjarOrb` supplies it from the voice status it already
+  subscribes to, via a **ref** — the adapter is memoized on `[wsUrl]`, so a captured boolean
+  would freeze. It starts `false`: on a privacy switch, unknown means no.
+- **Residual:** the hub itself is still unauthenticated — this fix makes the renderer refuse
+  to act on a forged frame, it does not stop the frame arriving. Origin/auth on the hub is a
+  separate change. See also **NJ-64**, **NJ-65**.
+
+## NJ-62 — the `readGlb` path guard does not follow junctions/symlinks — OPEN 2026-08-04
+
+- **Found while fixing NJ-61 (rule 7).** The new guard is prefix math on the *resolved* path,
+  so a Windows directory junction planted inside `os.tmpdir()` that points elsewhere still
+  passes. Verified by running: junction creation **needs no elevation**, and `tmpdir()` is
+  user-writable. Low reachability (planting one already requires local code execution — though
+  note this app ships an agent with a bash tool), so it is documented in-code above the
+  predicate rather than blocking the fix.
+- `realpath()` was deliberately NOT used: `os.tmpdir()` is itself a symlink on macOS, so
+  resolving one side only would reject every legitimate GLB there. A correct fix realpaths
+  **both** the candidate and the roots.
+
+## NJ-61 — `cad:readGlb` read ANY absolute path and returned the bytes to the renderer — FIXED (PR-1) 2026-08-04
+
+- **Found by audit3, CONFIRMED by execution** (not by inference): importing the real
+  `readGlb` and pointing it outside every CAD directory returned the target file's contents.
+  It was the **only** renderer-reachable `readFile` in the main process with no guard of any
+  kind — `nightjar:readAudio` is root+extension guarded, `readGeneratedImage` is
+  basename-guarded, the preview server routes through `safeResolve`. An omission, not a
+  design stance.
+- **Fix:** `isAllowedGlbPath()` in `main/cad.ts` — resolve, require an allowed root (with a
+  trailing separator, so a `<tmp>-evil` sibling cannot pass the prefix test), require `.glb`.
+  Refusal returns `null` **and warns**: a silent null plus a case-sensitive `startsWith` on a
+  case-insensitive filesystem is indistinguishable from a broken viewer.
+- **Root list is `os.tmpdir()` ONLY**, deliberately narrower than `readAudio`'s. Every GLB the
+  renderer can ask for is minted by `convertStepToGlb` into a fresh mkdtemp under `tmpdir()`.
+  `~/.nightjar` was excluded because `nightjar:saveAttachment` lets the **renderer** write
+  there with a **renderer-chosen extension**, so allowing it would let a compromised renderer
+  plant `<uuid>.glb` and read it back. Follow readAudio's *pattern*, not its *root list*.
+- `nightjar:readAttachment` was deliberately NOT touched — it is unguarded by design per its
+  own comment. `cad:convert` has a similar shape but its `stepPath` is **model-controlled**
+  (regex-scraped from tool stdout), which is a materially different trust source and deserves
+  its own pass.
+- **Verified by running:** the exploit now returns null; the real hero build still returns
+  `ok=true, bytes=482132, parts=7` — byte-identical to the pre-fix baseline. The IPC
+  round-trip itself needs a GUI session (rules 6/8) and is on PR-1's hardware checklist.
+
 ## NJ-60 — hey-buddy's licence statements conflict, and one augmentation dataset is licence-untagged — HALF-RESOLVED (b: closed by substitution, training PR; a: still open upstream) 2026-08-03
 
 - **Found during PR 5's rule-5 sweep of the hey-buddy move (rule 7 — filed, not folded in).**
@@ -227,8 +456,12 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   a persisted voice pref (`voice.ts`, **OFF by default**) gates the service via a new
   supervisor `enabled()` hook (checked at the single spawn choke point, so a pending
   crash-restart can't respawn after a disable); enabling always passes through a consent
-  modal (every enable — no "don't show again") whose copy states the cloud-egress
-  consequence plainly; the header orb shows "mic on"/"voice off" and click = one-click
+  prompt (every enable — no "don't show again") whose copy states the cloud-egress
+  consequence plainly — **CORRECTED 2026-08-04: as originally shipped that prompt was a
+  React modal in `VoiceSettings.tsx` and NOTHING in the main process enforced it, so the
+  sentence above overstated the guarantee for anything holding the preload bridge. The gate
+  now lives in main (NJ-68); this entry described intent, not enforcement**; the header orb
+  shows "mic on"/"voice off" and click = one-click
   kill; **disable KILLS the process** (and a stale listener on :8766 from a prior session
   is actively stopped at startup, sole-listener-verified per rule 4) — the OS mic-in-use
   indicator is the user's source of truth, never a soft-mute. Daemon env is now wired at

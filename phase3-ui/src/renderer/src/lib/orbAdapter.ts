@@ -61,6 +61,22 @@ export interface NightjarOrbAdapterOptions {
   createAudioContext?: () => AudioCtxLike
   /** Mic acquisition. Default: `navigator.mediaDevices.getUserMedia`. */
   getUserMedia?: (constraints: unknown) => Promise<unknown>
+  /**
+   * NJ-63 — is the renderer allowed to open the microphone right now?
+   *
+   * The side-channel hub (ws://127.0.0.1:8765) has no auth, no origin check, and no
+   * producer/consumer split: ANY local process can publish, and a `wake` event drove
+   * `enterListening()` → `startMic()` → `getUserMedia({audio:true})` with nothing
+   * consulting the user's voice preference. That was a SECOND mic-open path, entirely
+   * around the consent gate PR #151 added — that gate governs the wake-daemon PROCESS
+   * (supervisor `enabled()`), which is a different process holding a different mic handle.
+   *
+   * Must be a live GETTER, not a boolean: the app's adapter is built inside a useMemo
+   * keyed on the socket URL, so a captured value would go stale the moment the user
+   * toggled voice. Defaults to "allowed" so headless harnesses that inject their own
+   * getUserMedia keep working; the app always supplies the real one.
+   */
+  micAllowed?: () => boolean
   /** <audio> element factory for TTS playback. Default: `() => new Audio()`. */
   createAudioElement?: () => HTMLAudioElement
   /** Resolve a Kokoro WAV path (from the `tts` event) to a URL the <audio> can play. */
@@ -117,6 +133,7 @@ export function createNightjarOrbAdapter(
     ((constraints: unknown) =>
       (navigator.mediaDevices.getUserMedia as (c: unknown) => Promise<unknown>)(constraints))
   const createAudioElement = options.createAudioElement ?? (() => new Audio())
+  const micAllowed = options.micAllowed ?? (() => true)
   // No file:// default: the renderer CSP (`media-src 'self' blob:`) refuses the file:
   // scheme, so a file:// URL could only ever fail silently (NJ-37). A caller that
   // doesn't inject a real resolver (the app wires readAudio IPC → blob: URL) gets a
@@ -168,6 +185,13 @@ export function createNightjarOrbAdapter(
   // ── mic ─────────────────────────────────────────────────────────────────────
   async function startMic(): Promise<void> {
     if (micStream || micStarting) return
+    // NJ-63 choke point. Every path to the renderer's microphone passes through here, so
+    // the check lives here as well as at the wake case — a future caller that reaches
+    // startMic another way must not bypass the user's voice preference.
+    if (!micAllowed()) {
+      console.warn("[nightjar-orb] refusing to open the mic: voice is not enabled")
+      return
+    }
     micStarting = true
     try {
       const stream = (await getUserMedia({ audio: true })) as typeof micStream & object
@@ -297,6 +321,15 @@ export function createNightjarOrbAdapter(
 
   // ── state transitions off the pipeline ───────────────────────────────────────
   function enterListening(): void {
+    // NJ-63, Bugbot PR #156: the gate is checked BEFORE any state change. Setting
+    // 'listening' first and discovering the refusal inside startMic() would leave the orb
+    // claiming to listen — and VortexOverlay mounting full-screen with pointer events live —
+    // for the whole listeningTimeoutMs (15s) with no mic actually open. Refuse up front and
+    // stay idle: no state, no timer, no overlay.
+    if (!micAllowed()) {
+      console.warn("[nightjar-orb] ignoring a wake event: voice is not enabled")
+      return
+    }
     thinkingTimer = clearTimer(thinkingTimer)
     teardownTts()
     setState("listening")
@@ -324,6 +357,10 @@ export function createNightjarOrbAdapter(
     if (!ev || typeof ev.kind !== "string") return
     switch (ev.kind) {
       case "wake":
+        // NJ-63: with voice disabled there is no legitimate producer of `wake` — the daemon
+        // is not running — so any such frame is forged or stale. enterListening() owns the
+        // refusal (it must happen before any state change); startMic() re-checks as the
+        // choke point every path to the mic passes through.
         if (ev.detected !== false) enterListening()
         break
       case "transcription":

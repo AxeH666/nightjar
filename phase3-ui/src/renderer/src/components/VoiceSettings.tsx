@@ -1,31 +1,25 @@
-// Voice master switch (NJ-57) — the ONLY way to enable the always-on microphone.
+// Voice master switch (NJ-57) — the entry point for enabling the always-on microphone.
 //
-// OFF by default. Enabling always goes through the consent modal below (every enable,
-// not just the first — ephemeral like LocalModeNotice, no "don't show again"): an open
-// microphone is consequential enough that the ask should never be skippable state.
+// OFF by default. NJ-68 moved the CONSENT GATE itself into the main process: "Enable voice…"
+// now calls voice.set(true), and main shows a NATIVE consent dialog before it writes anything
+// or starts the daemon. This component no longer owns a React consent modal — it used to be
+// the only thing enforcing consent, which meant anything else holding the preload bridge
+// (DevTools, a compromised renderer dependency) could open the mic with no prompt at all.
+// Keeping the React modal as well would now double-prompt, so the copy below is rendered as
+// an always-visible disclosure instead: readable BEFORE you click, with the native dialog as
+// the actual gate.
+//
 // Disabling needs no confirm — it KILLS the wake-daemon process, and the OS mic-in-use
 // indicator disappearing is the user's own proof that listening actually ended.
 import { useEffect, useState } from "react"
 import { voice } from "../lib/voice"
-
-// The consent copy, one constant so it stays reviewable and honest. Mirrors the
-// CloudBanner invariant: the cloud-egress consequence is stated plainly — a voice
-// command goes to the ACTIVE CHAT MODEL, which is a cloud provider when the global
-// toggle is Cloud.
-export const VOICE_CONSENT_POINTS: string[] = [
-  "While voice is on and the app is open, the microphone is captured continuously so June can hear the wake word.",
-  "Wake-word scoring and speech-to-text run locally, in memory — mic audio is not saved to disk.",
-  "Your spoken command goes to the active chat model. If the Local/Cloud toggle is Cloud, that command leaves your machine to the cloud provider.",
-  "Turning voice off kills the listening process — your OS's mic-in-use indicator going dark is the proof.",
-  "Quitting the app closes the microphone; there is no background service.",
-]
+import { VOICE_CONSENT_POINTS } from "../../../shared/voiceConsentCopy"
 
 export function VoiceSettings() {
   const [enabled, setEnabled] = useState<boolean | null>(null) // null = loading
   // Stuck mic (Bugbot, PR #151): off was requested but the daemon's port still
   // answers — the UI must warn rather than present a clean "off".
   const [stillListening, setStillListening] = useState(false)
-  const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,7 +49,6 @@ export function VoiceSettings() {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
-      setAsking(false)
     }
   }
 
@@ -74,7 +67,10 @@ export function VoiceSettings() {
       ) : (
         <div className="flex items-center gap-3">
           <button
-            onClick={() => (enabled ? void apply(false) : setAsking(true))}
+            // Both directions go straight to main. Enabling triggers main's native consent
+            // dialog; declining it leaves the pref untouched and the button simply settles
+            // back to "Enable voice…" (voice.set returns the unchanged status, not an error).
+            onClick={() => void apply(!enabled)}
             disabled={busy}
             className={`rounded-md px-3 py-1.5 text-sm ${
               enabled
@@ -100,35 +96,23 @@ export function VoiceSettings() {
         </p>
       )}
 
-      {asking && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-[460px] max-w-[92vw] rounded-xl border border-nightjar-surface bg-nightjar-base shadow-2xl">
-            <div className="flex items-center gap-2 border-b border-nightjar-surface px-5 py-3">
-              <span className="text-sm font-semibold text-nightjar-text">🎙 Turn on always-listening voice?</span>
-            </div>
-            <div className="space-y-2 px-5 py-4">
-              {VOICE_CONSENT_POINTS.map((p, i) => (
-                <p key={i} className="text-[13px] leading-relaxed text-nightjar-text/80">
-                  • {p}
-                </p>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-nightjar-surface px-5 py-3">
-              <button
-                onClick={() => setAsking(false)}
-                className="rounded-md px-4 py-1.5 text-sm text-nightjar-text/70 hover:bg-nightjar-surface"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => void apply(true)}
-                disabled={busy}
-                className="rounded-md bg-nightjar-accent px-4 py-1.5 text-sm font-medium text-nightjar-base hover:brightness-110 disabled:opacity-40"
-              >
-                {busy ? "starting…" : "Enable microphone"}
-              </button>
-            </div>
-          </div>
+      {/* Always visible, not a modal (NJ-68): the authoritative ask is main's native dialog,
+          so this is the disclosure you can read BEFORE clicking rather than a second prompt
+          on top of the first. Shown only while voice is off — once it's on, the terms have
+          been accepted and the panel's job is the kill switch. */}
+      {enabled === false && (
+        <div className="rounded-md border border-nightjar-surface bg-nightjar-surface/30 px-3 py-2">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-nightjar-text/60">
+            Before you turn this on
+          </p>
+          {VOICE_CONSENT_POINTS.map((p, i) => (
+            <p key={i} className="text-[11px] leading-relaxed text-nightjar-text/70">
+              • {p}
+            </p>
+          ))}
+          <p className="mt-1.5 text-[11px] text-nightjar-text/50">
+            Your operating system will ask you to confirm before the microphone opens.
+          </p>
         </div>
       )}
     </div>
