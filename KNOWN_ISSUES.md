@@ -61,6 +61,167 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-78 — `config.WAKE_WORD` was a knob that lied: zero consumers, and `NIGHTJAR_WAKE_WORD` was inert — RESOLVED (deleted, PR-2) 2026-08-05
+
+- **Found by audit2 (E1), CONFIRMED and strengthened.** `WAKE_WORD` had **zero** consumers
+  anywhere in the tree. Confirmed beyond a normal grep: ripgrep honours `.gitignore` even
+  with `--hidden`, so a gitignored consumer (a local `.env`, a `dist/` bundle, an untracked
+  launcher) would have been invisible — a gitignore-blind `os.walk` byte scan found exactly
+  two files, the definition and audit2's own prose. No dynamic access either
+  (`getattr`/`vars`/`dir`/`__dict__` hits are all vendored site-packages).
+- **audit2 was half wrong about it.** It called the default "the last live `hey_nightjar`".
+  `git log -S'WAKE_WORD'` over ALL history returns exactly one commit — the squashed
+  Phases 1-4 import — and `git log -S'config.WAKE_WORD'` returns none. It was **born dead**
+  and never had a consumer in any revision. The stale product name in the default was real;
+  "last live" was not.
+- **Deleted rather than wired**, deliberately. The wake word is selected twice already, by
+  neither a phrase nor this name: which MODEL listens comes from `resolve_model_path()` by
+  PATH via `NIGHTJAR_WAKEWORD_MODEL` (a different variable), and which PHRASES are stripped
+  comes from `wake_daemon.WAKE_PHRASES`, a deliberate tuple that still carries the legacy
+  "hey nightjar" and is asserted by `tests/test_wake_capture.py`. A third, phrase-shaped
+  selector would have overlapped both.
+- **Verified by running:** `config`, `wakeword` and `wake_daemon` all still import;
+  `resolve_model_path()` still resolves; `WAKE_PHRASES` unchanged; `test_wake_capture.py`
+  ALL CHECKS PASSED. Note this box resolves to `hey-buddy.onnx` with `is_custom=False` —
+  `hey_june.onnx` is not present here, so the live phrase is "hey buddy" (machine-specific;
+  differs after a training run).
+
+## NJ-77 — the copyleft guard sweeps ONE site-packages root, but `sys.path` can carry more — FIXED (PR-2) 2026-08-05
+
+- **Found while fixing NJ-76 (rule 7), and it is the same class as the bug it sits beside:
+  sweep root != importable graph.** A venv created with `--system-site-packages` carries its
+  own site-packages AND the base prefix's on `sys.path`, while `sysconfig`'s `purelib` names
+  only the first — so GPL sitting in the base prefix would stay importable and never be
+  swept, and the guard would go fully green. Measured: such a venv really does carry two
+  roots. `ENABLE_USER_SITE` is likewise True on the base interpreter, making `pip install
+  --user` a second unswept-but-importable root in the non-venv case.
+- Today `phase2-mcp/venv` is safe — its `pyvenv.cfg` says `include-system-site-packages =
+  false` — but nothing asserted it.
+- **Fix:** assert we are in a venv (`sys.prefix != sys.base_prefix`), that its `pyvenv.cfg`
+  disables system site-packages, and that user-site is off. Checked via `pyvenv.cfg` rather
+  than by diffing `site.getsitepackages()`, because on Windows that returns the venv PREFIX
+  alongside the real site-packages dir and a naive set-difference flags the venv against
+  itself (hit while implementing this, and fixed).
+
+## NJ-76 — licence guards reported ALL CHECKS PASSED having swept ZERO distributions — FIXED (PR-2) 2026-08-05
+
+- **Found by audit2 (N2), reproduced independently both before and after.** `main()` derived
+  its sweep root by string-building off `sys.prefix`, so running the guard with the wrong
+  interpreter swept an empty `site-packages`, printed **ALL CHECKS PASSED** and exited **0**
+  having verified nothing. The five negative controls still passed — they build their own
+  synthetic `dist-info` dirs — so the output looked *fully* healthy. Reproduced: `0
+  distributions`, exit `0`. The correct invocation lives only in a docstring and **there is
+  no CI** (see NJ-56 family / audit2 N3), so the realistic trigger is just typing `python`.
+  For a control standing between the project and a GPL/AGPL dependency in a shipped build, a
+  false green is the worst failure it can have.
+- **Fix, three invariants routed through the existing `check()` (so a wrong-interpreter run
+  still reports whether the classifier itself is sound, rather than `sys.exit`-ing early):**
+  1. **Identity** — `os.path.samefile(sys.prefix, <repo>/phase2-mcp/venv)`. NOT
+     `Path.is_relative_to`: reached over a UNC path (`\\localhost\c$\...`) that returns
+     False and `.resolve()` does not normalise UNC to drive form, so a correct sweep would
+     fail. `samefile` compares file identity and absorbs junctions, symlinked repos and
+     `subst` drives.
+  2. **Anchor set, NOT a numeric floor** — a floor like `>= 50` is satisfied by any unrelated
+     fat environment (another project's venv, a conda base, a CI image) while proving nothing
+     about phase2-mcp, so it cannot backstop the escape hatch. Instead assert specific pinned,
+     non-platform-conditional distributions are present. *(Note for the record: a
+     requirements-derived floor was rejected, but not for the reason first given — that file
+     has zero environment markers and does not list pywin32 at all. The real reason is that
+     it is a flat full-pin freeze whose transitive closure is what actually lands, so 100 pins
+     vs 121 swept are not commensurable.)*
+  3. **Single importable root** — see NJ-77.
+- **Sweep root now comes from `sysconfig.get_paths()["purelib"]`**, which is correct on every
+  platform by construction — this *retires* the untestable POSIX glob fallback rather than
+  preserving it and logging it as an unverifiable branch.
+- **The `num2words` LGPL canary is now unconditional.** It was `if "num2words" in report:`,
+  so on a wrong-tree run it silently vanished. Written as one `check()` whose `ok` short-
+  circuits on membership — that ordering is what stops `report["num2words"]` raising KeyError
+  and killing the census with a traceback instead of a `[FAIL]` line.
+- **Same defect in the sibling guard, fixed in the same PR:** `test_model_licenses.py`'s
+  `find_spec("openwakeword") is None` is a NEGATIVE assertion, trivially satisfied where
+  nothing is installed. Reproduced: exit 0 against an empty venv. Now paired with a positive
+  control (`onnxruntime`/`httpx`/`mcp` must import).
+- **NOT duplicates, recorded so this is not re-litigated:** `test_tts_no_gpl.py` and
+  `test_websearch_no_odysseus.py` both die loudly under a wrong interpreter (ModuleNotFound
+  on the real runtime graph). audit2's N3 grouping is about CI absence, not vacuity.
+- **Verified by running, all three directions:** correct interpreter → 121 distributions,
+  exit 0 (unchanged); empty/wrong interpreter → exit 1; escape hatch pointed at an unrelated
+  fat tree → still exit 1 on the anchors, which is precisely the case a numeric floor would
+  have passed.
+- **Residual:** `NIGHTJAR_LICENSE_AND_ATTRIBUTION.md:78` says this guard "fails the build".
+  There is no build. Prose left for a docs pass — flagged so it is not mistaken for enforcement.
+
+## NJ-75 — `setup.ps1`'s retired-package purge was documented "never fatal" and was fatal — FIXED (PR-2) 2026-08-05
+
+- **Found while verifying NJ-73 (rule 7). Neither audit caught it, and it DEFEATS the NJ-73
+  fix on its own.** The purge of `kokoro-onnx`/`phonemizer-fork`/`espeakng-loader`/
+  `openwakeword` carries the comment "Idempotent; never fatal". pip writes `WARNING: Skipping
+  <pkg> as it is not installed` to **stderr** for each absent package and still exits 0;
+  under `$ErrorActionPreference='Stop'`, PowerShell 5.1 promotes any native-command stderr to
+  a terminating error. At least one of the four is absent in any freshly created venv, so it
+  threw **every time**.
+- **It was masked** only because NJ-73 killed the script at the `New-Venv` above it first.
+  Fixing NJ-73 alone would have relocated the fatal error nine lines down — same step
+  `[5/7]`, same "no browser-use-mcp venv" outcome, and a `New-Venv`-scoped test would have
+  reported PASS. **Observed exactly that** mid-implementation: with New-Venv fixed and this
+  not yet fixed, the block created `phase2-mcp/venv` and then died at the purge with
+  `browser-use-mcp venv: False`.
+- `2>$null` does **not** fix it: the ErrorRecord comes from the redirection itself, not from
+  where the output lands. The bash original guards the identical call with `|| true`
+  (`scripts/setup.sh:76`); the PowerShell port dropped it. Now wrapped in try/catch, matching
+  the pattern already used correctly for `ollama list`.
+
+## NJ-74 — `Get-Py312`'s probes threw under EAP=Stop, making the fallback and the actionable error unreachable — FIXED (PR-2) 2026-08-05
+
+- On a box that HAS the `py` launcher but NOT a 3.12 runtime, `& py -3.12 --version 2>&1`
+  raised (same PS 5.1 stderr→ErrorRecord→terminating mechanism as NJ-75), so the `python`
+  fallback branch AND the actionable `winget install Python.Python.3.12` message were both
+  unreachable — the user just got py's bare "No suitable Python runtime found".
+- Both probes are now in try/catch. **`2>$null` was explicitly rejected** as the remedy: it
+  still throws (verified), and NJ-75 is the standing proof — that line already used `2>$null`
+  and was fatal anyway. A plan adopting it would have shipped a non-fix that reviews clean.
+- **Verified by PROXY only (rule 8):** simulated with `py -3.99` on a box that HAS 3.12. It
+  exercises the same mechanism, but real confirmation needs a Windows machine with the py
+  launcher and no 3.12 runtime.
+- Note recorded, not changed: `return @('python')` unrolls to a **scalar** string. Benign —
+  `New-Venv`'s `[string[]]` parameter re-coerces it to a 1-element array, and that exact
+  scalar shape is now covered by a test.
+
+## NJ-73 — `New-Venv` could NEVER create a venv, on ANY machine: a case-insensitive variable collision, plus a reversed range — FIXED (PR-2) 2026-08-05
+
+- **audit2 (N1) found this but MATERIALLY UNDERSTATED it.** It reported "isolated (1 line)"
+  and scoped the impact to "boxes without a working `py -3.12` launcher". Both are wrong.
+- **The dominant defect is a case collision, not the range.** PowerShell variable names are
+  case-insensitive, so the parameter `[string[]]$Py` and the local
+  `$py = Join-Path $Dir 'venv\Scripts\python.exe'` were **the same variable**. The local
+  assignment clobbered the launcher before it was ever read (the `[string[]]` constraint
+  merely re-coerced the path into a 1-element array), so the creation line invoked the
+  not-yet-existing venv interpreter → `CommandNotFoundException`. Verified by executing the
+  real function's own bytes (AST-extracted) for three launcher shapes including a perfect
+  `py -3.12`: all three failed, no venv created.
+- **The reversed range is real but secondary.** `$Py[1..($Py.Length-1)]` is `1..0` for a
+  one-element launcher, which PowerShell evaluates as the reversed range `1,0`, duplicating
+  the interpreter as its own script argument. *(Correction to an earlier reading: switching
+  `@(...)` to a real `@var` splat is NOT required — PowerShell unrolls an array argument into
+  separate args for native commands identically, including the empty case. The defect was
+  only the range.)*
+- **Consequence:** `scripts\setup.ps1` — the documented native-Windows front door — has
+  **never** been able to create the phase2-mcp, browser-use-mcp or diffusion-mcp venvs.
+  Existing installs were unaffected only because the `Test-Path` guard skips creation when a
+  venv already exists, and `-CoreOnly` returns before step `[5/7]` entirely, which is very
+  likely why it went unnoticed: the advertised "fastest path" never reaches the broken code.
+- **Fix:** rename the PARAMETER to `$Launcher` (touches 2 lines; all three call sites bind
+  positionally). Renaming the local instead was rejected as higher-risk — lines 64/65/71/72
+  would all have to move together, and missing one makes `pip install` target the SYSTEM
+  Python, polluting global site-packages. Tail computed with `Select-Object -Skip 1`.
+- **Verified by running the whole `[5/7]` block**, not `New-Venv` alone — the isolated test
+  is exactly what would have gone green while the installer stayed broken (see NJ-75). Both
+  venvs created, purge silent, second pass a clean no-op. Launcher shapes covered: 2-element,
+  the REAL scalar the fallback produces, and 4-element.
+- **Still NOT verified (rule 8):** a true end-to-end `setup.ps1` run on a fresh clone. It must
+  be done under **`powershell.exe` 5.1 specifically** — PowerShell 7 changed native-stderr
+  handling, so a green run under `pwsh` proves nothing for NJ-74/NJ-75.
+
 ## NJ-72 — `PlaybackMute` ignores the event `source`, so any local process can deafen the wake daemon indefinitely — OPEN (flagged deliberately, not fixed) 2026-08-04
 
 - **Flagged by audit3 and CONFIRMED by running, end-to-end through a real `sidechannel.py`

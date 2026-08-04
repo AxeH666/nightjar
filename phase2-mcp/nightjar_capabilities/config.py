@@ -24,7 +24,21 @@ VISION_MODEL = os.environ.get("NIGHTJAR_VISION_MODEL", "gemma3:4b")
 
 # Voice / wake-word.
 WHISPER_SIZE = os.environ.get("NIGHTJAR_WHISPER_SIZE", "base.en")
-WAKE_WORD = os.environ.get("NIGHTJAR_WAKE_WORD", "hey_nightjar")
+# NJ-78: there was a `WAKE_WORD = os.environ.get("NIGHTJAR_WAKE_WORD", "hey_nightjar")` here.
+# It was DELETED, not wired: it had zero consumers anywhere in the tree (confirmed by a
+# gitignore-blind byte scan, and `git log -S` shows it never had one in any revision — it
+# arrived dead in the squashed import). Setting NIGHTJAR_WAKE_WORD changed nothing and warned
+# about nothing: a knob that lies.
+#
+# Wiring it would have been worse than deleting it, because the wake word is selected TWICE
+# and by neither a phrase nor this name:
+#   * which MODEL listens — wakeword.resolve_model_path(), by PATH, via NIGHTJAR_WAKEWORD_MODEL
+#     (a DIFFERENT variable; do not conflate the two)
+#   * which PHRASES are stripped from a transcript — wake_daemon.WAKE_PHRASES, a deliberate
+#     tuple that still includes the legacy "hey nightjar" and is asserted by
+#     tests/test_wake_capture.py
+# Adding a third, phrase-shaped selector would have overlapped both. If a phrase-level knob is
+# ever wanted, it belongs on WAKE_PHRASES with that test moved in the same commit.
 
 # Side-channel + MCP.
 WS_HOST = os.environ.get("NIGHTJAR_WS_HOST", "127.0.0.1")

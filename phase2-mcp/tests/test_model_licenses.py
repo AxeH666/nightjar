@@ -135,6 +135,15 @@ def main() -> int:
     # ── 5. openwakeword is gone: from the venv AND from imports ───────────────
     print("\n== 5. openWakeWord stays out (NJ-58) ==")
     import importlib.util
+    # NJ-76 (same class as the copyleft guard's vacuous pass): a NEGATIVE import assertion is
+    # satisfied by an interpreter where nothing at all is installed, so run with the wrong
+    # python this section printed PASS and the file exited 0 having proven nothing. Verified:
+    # it exited 0 against an empty venv. Pair it with a POSITIVE control — if these cannot be
+    # imported we are not in the phase2-mcp venv, and the negative below is worthless.
+    positive = [m for m in ("onnxruntime", "httpx", "mcp") if importlib.util.find_spec(m) is None]
+    check("running under the phase2-mcp venv (positive control for the check below)",
+          not positive,
+          f"not importable: {positive} — wrong interpreter? use phase2-mcp/venv/Scripts/python")
     check("openwakeword is NOT importable from this venv",
           importlib.util.find_spec("openwakeword") is None,
           "pip never removes on requirement removal — purge it (setup scripts do)")
