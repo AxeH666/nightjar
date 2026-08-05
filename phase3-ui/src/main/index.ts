@@ -88,7 +88,24 @@ function sendToRenderer(channel: string, ...args: unknown[]): void {
 const supervisor = new Supervisor(nightjarServices({ voiceEnabled: () => voice.getVoiceEnabled() }), (statuses) => {
   latestStatus = statuses
   sendToRenderer("nightjar:status", statuses)
+  // NJ-71: also push VOICE status whenever the supervisor's view changes. Before this, the
+  // only emitter of `nightjar:voiceStatus` in the whole tree was inside the voice:set handler
+  // — so if the daemon died on its own (crash, mic yanked, restart budget exhausted) nothing
+  // ever told the renderer, and the UI kept rendering the last voice:set result indefinitely.
+  // Deduped on the serialized value: this callback fires on every supervisor transition for
+  // every service, and re-pushing an unchanged status would be pointless traffic.
+  pushVoiceStatusIfChanged()
 })
+
+// Serialized last-pushed voice status; "" so the first real push always goes out.
+let lastVoiceStatusJson = ""
+function pushVoiceStatusIfChanged(): void {
+  const next = voiceStatusNow()
+  const json = JSON.stringify(next)
+  if (json === lastVoiceStatusJson) return
+  lastVoiceStatusJson = json
+  sendToRenderer("nightjar:voiceStatus", next)
+}
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -450,10 +467,29 @@ ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabili
 // drive a "voice off" UI while the daemon's port still answers (stopService could
 // not kill an unmanaged listener). It comes from the SUPERVISOR's actual status —
 // the renderer shows a stuck-mic warning instead of a false "off".
-function voiceStatusNow(): { enabled: boolean; stillListening: boolean } {
+// NJ-71: `enabled` is the user's PREFERENCE, not the state of the microphone. Those two
+// diverge, and on 2026-08-05 they did so on hardware: the daemon crash-looped to `failed`
+// while the pref stayed true, so the orb read a confident "mic on" with nothing listening.
+// `stillListening` did not rescue it — that only fires on state `stopped` WITH the marker,
+// and a crash-looped daemon is `failed`.
+//
+// So the status carries `running`: is the capture process actually up? The renderer must
+// claim the mic is open only when BOTH hold. Pushing this more often (below) is necessary
+// but was NOT sufficient on its own — more frequent delivery of a value derived purely from
+// the pref would have repeated the same lie on a shorter interval.
+export interface VoiceStatus {
+  enabled: boolean // the user's persisted opt-in
+  running: boolean // the wake-daemon process is actually alive
+  stillListening: boolean // pref says off, but its port still answers (NJ-57 honesty bit)
+}
+function voiceStatusNow(): VoiceStatus {
   const s = supervisor.status().find((x) => x.name === "wake-daemon")
   return {
     enabled: voice.getVoiceEnabled(),
+    // `adopted` counts: an adopted daemon is a live capture process we attached to rather
+    // than spawned. Every other state (pending/starting/restarting/stopped/failed/unhealthy)
+    // means no microphone is open, whatever the pref says.
+    running: s?.state === "healthy" || s?.state === "adopted",
     stillListening: Boolean(s?.state === "stopped" && s.detail?.includes(STILL_LISTENING_MARKER)),
   }
 }
@@ -473,9 +509,11 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
     invalidatePendingConsent()
     const saved = voice.disableVoice()
     if (!saved.enabled) await supervisor.stopService("wake-daemon")
-    const offStatus = voiceStatusNow()
-    sendToRenderer("nightjar:voiceStatus", offStatus)
-    return offStatus
+    // Push through the deduping helper (NJ-71) rather than sendToRenderer directly, so
+    // lastVoiceStatusJson stays in step. A direct send here would leave the dedupe believing
+    // it had pushed something older, and could then SWALLOW the next genuine change.
+    pushVoiceStatusIfChanged()
+    return voiceStatusNow()
   }
 
   // Consent is verified BEFORE the store write, not after. Writing first and rolling back on
@@ -489,9 +527,8 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
   voice.enableVoice(consent)
   supervisor.setEnv("wake-daemon", wakeDaemonEnv(capabilities.getPref("chat")))
   await supervisor.startService("wake-daemon")
-  const status = voiceStatusNow()
-  sendToRenderer("nightjar:voiceStatus", status)
-  return status
+  pushVoiceStatusIfChanged() // same dedupe path as the disable branch and the supervisor hook
+  return voiceStatusNow()
 })
 
 // ── Local vision (Ollama gemma3:4b) — status + auto-pull ──────────────────────

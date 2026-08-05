@@ -3,7 +3,13 @@
 // (enable = spawn, disable = KILL — the OS mic indicator is the source of truth).
 
 export interface VoiceStatus {
+  // The user's persisted opt-in. NOT the same as "a microphone is open" — see `running`.
   enabled: boolean
+  // NJ-71: the wake-daemon process is actually alive. `enabled && !running` is a real and
+  // observed state — the daemon crash-looped to `failed` on hardware while the pref stayed
+  // true, and the orb reported a confident "mic on" with nothing listening. Never render
+  // "mic on" from `enabled` alone; require both.
+  running?: boolean
   // The pref says off but the daemon's port still answers (an unmanaged listener
   // survived the kill attempt): the mic may still be LIVE. The UI must surface this
   // as a stuck-mic warning — never render "voice off" from `enabled` alone.
@@ -23,7 +29,7 @@ function bridge(): VoiceBridge | null {
 export const voice = {
   // Current state; disabled when the bridge is absent (renderer outside the app).
   async get(): Promise<VoiceStatus> {
-    return (await bridge()?.get()) ?? { enabled: false, stillListening: false }
+    return (await bridge()?.get()) ?? { enabled: false, running: false, stillListening: false }
   },
   // Flip the switch. The caller is responsible for showing the consent modal BEFORE
   // enabling — this is the apply, not the ask.

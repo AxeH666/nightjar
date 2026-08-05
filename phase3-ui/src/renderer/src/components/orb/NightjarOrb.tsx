@@ -72,13 +72,16 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
   // asymmetry is the point: turning a mic off should be one click, turning it on
   // should be a considered act.
   const [voiceOn, setVoiceOn] = useState<boolean | null>(null)
+  // NJ-71: the daemon is actually alive. `voiceOn && !micLive` is the state that lied on
+  // hardware — pref enabled, daemon crash-looped to `failed`, orb saying "mic on".
+  const [micLive, setMicLive] = useState(false)
   // Stuck mic (Bugbot, PR #151): voice pref is OFF but the daemon's port still
   // answers — the process could not be killed, so the mic may still be LIVE. The
   // orb must warn, never show a false "voice off".
   const [micStuck, setMicStuck] = useState(false)
   useEffect(() => {
     let mounted = true
-    const apply = (s: { enabled: boolean; stillListening?: boolean }) => {
+    const apply = (s: { enabled: boolean; running?: boolean; stillListening?: boolean }) => {
       if (!mounted) return
       // Keep the adapter's NJ-63 mic gate in lockstep with the pref, on both the initial
       // voice.get() and every subsequent push. NOTE (NJ-64): this closes the gate for the
@@ -86,6 +89,7 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
       // tracked separately.
       voiceOnRef.current = s.enabled
       setVoiceOn(s.enabled)
+      setMicLive(Boolean(s.running))
       setMicStuck(!s.enabled && Boolean(s.stillListening))
     }
     voice.get().then(apply)
@@ -110,17 +114,32 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
   // the wake word, "voice off" when the daemon is not running, and "mic stuck on" when
   // off was requested but the listener would not die. Non-idle states (a live voice
   // turn) keep their pipeline labels.
-  const idleLabel = micStuck ? "mic stuck on" : voiceOn === null ? LABELS.idle : voiceOn ? "mic on" : "voice off"
+  // NJ-71: "mic on" requires the pref AND a live daemon. Pref-only says "voice failed" —
+  // the daemon died (crash, restart budget exhausted, mic yanked) and nothing is listening,
+  // which is exactly what this label claimed otherwise on 2026-08-05.
+  const idleLabel = micStuck
+    ? "mic stuck on"
+    : voiceOn === null
+      ? LABELS.idle
+      : voiceOn
+        ? micLive
+          ? "mic on"
+          : "voice failed"
+        : "voice off"
   const label = state === "idle" ? idleLabel : (LABELS[state] ?? state)
   const title = micStuck
     ? "Voice orb — voice was turned OFF but something is still listening on the voice port; the mic may still be live. Check the health strip or stop the process manually."
     : audioFailed
       ? "Voice orb — the reply's audio could not be played (details in the console)"
-      : state === "idle" && voiceOn
+      : state === "idle" && voiceOn && micLive
         ? "Voice orb — mic is ON, listening for the wake word. Click to turn voice off."
-        : state === "idle" && voiceOn === false
-          ? "Voice orb — voice is off (mic closed). Enable it in Settings."
-          : `Voice orb — ${LABELS[state] ?? state}`
+        : state === "idle" && voiceOn && !micLive
+          ? // NJ-71: voice is switched on but the capture process is NOT running. Say so
+            // rather than claiming an open mic, and point at where the reason is visible.
+            "Voice orb — voice is ON but the listener is not running (it failed to start or crashed). No microphone is open. Check wake-daemon in the health strip."
+          : state === "idle" && voiceOn === false
+            ? "Voice orb — voice is off (mic closed). Enable it in Settings."
+            : `Voice orb — ${LABELS[state] ?? state}`
 
   return (
     <>
@@ -128,7 +147,9 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
         className={`flex flex-col items-center gap-1 ${voiceOn ? "cursor-pointer" : ""}`}
         data-orb-state={state}
         data-orb-audio-failed={audioFailed || undefined}
-        data-orb-mic={voiceOn === null ? undefined : voiceOn ? "on" : "off"}
+        // NJ-71: reports the MICROPHONE, not the preference — "on" only with a live daemon.
+        // Tests and any future automation read this attribute, so it must not lie either.
+        data-orb-mic={voiceOn === null ? undefined : voiceOn && micLive ? "on" : "off"}
         title={title}
         onClick={() => {
           if (voiceOn) void voice.set(false) // one-click kill switch; enabling lives in Settings

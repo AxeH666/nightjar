@@ -6,6 +6,7 @@
 // periodic health checks, and clean process-group shutdown.
 import { spawn, execFile, type ChildProcess } from "node:child_process"
 import { promisify } from "node:util"
+import { StringDecoder } from "node:string_decoder"
 
 const execFileP = promisify(execFile)
 
@@ -264,12 +265,28 @@ export class Supervisor {
       stdio: ["ignore", "pipe", "pipe"],
     })
     m.child = child
-    const cap = (b: Buffer) => {
-      m.logs.push(b.toString())
+    // NJ-80: decode with a stateful StringDecoder, one PER STREAM, instead of b.toString().
+    //
+    // `b.toString()` decodes each chunk independently. A multi-byte UTF-8 character that lands
+    // across a chunk boundary is therefore split, and BOTH halves decode to U+FFFD — the log
+    // line is silently corrupted at an arbitrary point that depends on pipe buffering, so it
+    // reproduces intermittently and never in a test. StringDecoder holds the incomplete tail
+    // until the next chunk completes it. Separate decoders because stdout and stderr are
+    // independent byte streams; sharing one would splice a partial character from one into the
+    // other. (This is a distinct defect from NJ-79 — that was the PRODUCER writing cp1252;
+    // this is the CONSUMER mis-joining correct UTF-8.)
+    const pushLog = (text: string) => {
+      if (!text) return
+      m.logs.push(text)
       if (m.logs.length > 200) m.logs.shift()
     }
-    child.stdout?.on("data", cap)
-    child.stderr?.on("data", cap)
+    const outDec = new StringDecoder("utf8")
+    const errDec = new StringDecoder("utf8")
+    // `dec.write()` returns "" while it holds an incomplete trailing character, so a chunk
+    // that ends mid-character contributes nothing until the next chunk completes it.
+    const capStream = (dec: StringDecoder) => (b: Buffer) => pushLog(dec.write(b))
+    child.stdout?.on("data", capStream(outDec))
+    child.stderr?.on("data", capStream(errDec))
 
     // A spawn failure (most often ENOENT — a legitimately-absent optional binary such as
     // llama-server when running on BYOK cloud, or a missing bun on a fresh box) emits 'error'.
@@ -277,7 +294,8 @@ export class Supervisor {
     // m.child so the readiness gate below returns immediately (no long foreground wait) and the
     // service is marked failed — the app then continues bringing up the rest (opencode-serve, …).
     child.on("error", (err) => {
-      cap(Buffer.from(`spawn error: ${(err as Error)?.message ?? String(err)}\n`))
+      // A synthesized line, not bytes off the pipe — straight to the log, no decoder.
+      pushLog(`spawn error: ${(err as Error)?.message ?? String(err)}\n`)
       if (m.child === child) {
         m.child = undefined
         this.set(m, "failed", `could not spawn: ${(err as Error)?.message ?? String(err)}`)

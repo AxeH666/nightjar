@@ -61,6 +61,79 @@ audit follow-up (**PR #37** — NJ-12 + three hardening fixes surfaced by an ind
 on a live stack per the checklist above + CLAUDE.md rule 6. The only genuinely un-fixed
 remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-only follow-up._
 
+## NJ-81 — MCP servers' stderr is still cp1252 on Windows (latent, not live) — OPEN 2026-08-05
+
+- **Flagged while fixing NJ-79 (rule 7 — filed, scope deliberately not expanded.)** The
+  `PYTHONIOENCODING=utf-8` fix reaches only sidecars the SUPERVISOR spawns. The MCP servers are
+  spawned by **opencode**, so they don't get it.
+- Their **stdout is already safe** — the `mcp` library wraps it in
+  `TextIOWrapper(..., encoding="utf-8")` (verified in the installed package), which is why the
+  JSON-RPC transport has never corrupted. Their **stderr is not**, and that is where their logs go.
+- **Currently latent, not live:** a scan of all 13 servers/backends/pollers found **zero**
+  crash-capable `print`/`log` sites (no cp1252-unencodable character in any of them). Nothing
+  is broken today.
+- **Why it still matters:** nothing prevents it. The next `print("…✓…")` added to any MCP
+  server crashes it exactly as NJ-79 crashed the wake daemon — only on Windows, only when
+  spawned rather than run by hand.
+- **Fix shape:** the same `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")`
+  preamble in each MCP server entry point, or a shared import that does it.
+
+## NJ-80 — sidecar log capture corrupted multi-byte characters split across pipe chunks — FIXED (PR-3) 2026-08-05
+
+- **Found while fixing NJ-79 (rule 7), and it is a DIFFERENT defect** — NJ-79 was the
+  *producer* writing cp1252 bytes; this is the *consumer* mis-joining perfectly correct UTF-8.
+- `Supervisor.spawn` captured output with `m.logs.push(b.toString())`, decoding each `data`
+  chunk independently. Chunk boundaries land wherever the OS pipe buffer decides, so a
+  multi-byte UTF-8 character split across two chunks had **both halves** decode to U+FFFD.
+- Silent, intermittent, and position-dependent on buffering — it would never reproduce in a
+  test that writes a single chunk, which is why it went unnoticed.
+- **Fix:** a stateful `StringDecoder` per stream (`node:string_decoder`), which holds an
+  incomplete trailing character until the next chunk completes it. **Two** decoders, not one:
+  stdout and stderr are independent byte streams, and sharing a decoder splices a partial
+  character from one into the other (pinned by a test). Synthesized log lines — e.g. the
+  spawn-error message — bypass the decoder entirely, since they are strings, not pipe bytes.
+- **Verified by running:** the naive path is asserted to corrupt; the decoder is asserted to
+  reassemble at **every** byte offset, and under worst-case byte-at-a-time delivery.
+
+## NJ-79 — the wake daemon could never start under the app: piped stdio on Windows is cp1252, and one emoji in a log line killed it — FIXED (PR-3) 2026-08-05
+
+- **First real-hardware run of the voice path. Reproduced byte-identically, then fixed.**
+- Python chooses stdout's encoding from whether stdout is a **console**. A real terminal gives
+  `_WindowsConsoleIO` at utf-8; a **pipe** falls back to the locale ANSI codepage — `cp1252` on
+  a typical Windows box. The supervisor spawns with pipes. `⚠️` (U+26A0 U+FE0F) has no cp1252
+  mapping, so `print()` raised `UnicodeEncodeError`, nothing caught it, and the daemon exited
+  before reaching the mic loop — five crash-restarts, then `failed`.
+- **This is why it survived every prior test:** run `wake_daemon.py` by hand in a terminal and
+  it works perfectly. Only the piped path breaks, so only the app could ever hit it. A
+  console-attached test PASSES ON THE BROKEN CODE — the regression test therefore spawns a
+  subprocess with `stdout=PIPE, stderr=PIPE` and forces `cp1252`, and a fourth check proves
+  the premise by showing the utf-8 case passing while the strict-cp1252 case still raises.
+- **TWO failure modes, not one** — this explains the `�` seen alongside the crash:
+  - **Crash:** characters with *no* cp1252 mapping (`⚠️`, `→`, `─`, `≥`).
+  - **Mojibake:** characters that *are* in cp1252 — the em-dash `—` encodes to the single byte
+    `0x97`, which is not valid UTF-8, so the supervisor's decode rendered it `�`. Confirmed
+    from the raw bytes. Fixing the encoding repaired both.
+- **Fix:** `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")` at the top of
+  `wake_daemon.py`, **and** `PYTHONIOENCODING=utf-8` in the supervisor env for both Python
+  services. Not redundant: the env covers output emitted *before* the reconfigure runs (an
+  import-time traceback) and every other supervisor-spawned sidecar; the reconfigure covers the
+  daemon when spawned by something that isn't the supervisor. `errors="replace"` is deliberate
+  — **a log line must never be able to kill the process**; strict would just relocate the crash.
+- Belt-and-braces: the three *reachable* `⚠️` log sites are now ASCII `WARNING:`. The other
+  ~112 non-ASCII characters in the tree were deliberately NOT touched — they are comments and
+  docstrings that never reach stdout, and the encoding is the bug, not the characters.
+  **Line 181's warning especially**: it exists to explain a DENIED microphone, so on the very
+  machine where the mic is denied it would have crashed inside its own explanation.
+- Only `wake_daemon.py` had reachable crash sites; see **NJ-81** for the latent MCP exposure.
+- **Windows-only** — verified by running: WSL reports `utf-8` for a piped stdout. **A packaged
+  build is worse**: no console exists at all, so cp1252 is guaranteed and there is no terminal
+  for the traceback to appear in.
+- **Verified by running:** the daemon, piped, now reaches `listening (live mic…)` — the line
+  it had never printed under a pipe — with zero `UnicodeEncodeError`, and the previously
+  mangled `[nightjar-wakeword]` line now shows a correct `—`.
+- **Residual (rules 6/8):** the daemon starting *under Electron's spawn* and holding the mic is
+  hardware-pending; my reproduction pipes the same code but not through the app.
+
 ## NJ-78 — `config.WAKE_WORD` was a knob that lied: zero consumers, and `NIGHTJAR_WAKE_WORD` was inert — RESOLVED (deleted, PR-2) 2026-08-05
 
 - **Found by audit2 (E1), CONFIRMED and strengthened.** `WAKE_WORD` had **zero** consumers
@@ -248,7 +321,34 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   suite (`tests/test_wake_mute.py`) has 3 checks that encode the current unfiltered
   behaviour and would need to move with it.
 
-## NJ-71 — `nightjar:voiceStatus` is pushed from exactly one site, so a daemon crash leaves a stale "🎙 Mic is ON" UI — OPEN 2026-08-04
+## NJ-71 — `nightjar:voiceStatus` is pushed from exactly one site, so a daemon crash leaves a stale "🎙 Mic is ON" UI — FIXED (PR-3) 2026-08-05
+
+**CONFIRMED ON HARDWARE 2026-08-05, and the fix needed MORE than the push.** During manual
+verification the wake daemon crash-looped to `failed` (NJ-79) while the persisted pref stayed
+`true`, and the orb rendered a confident **"mic on" with no microphone open**. The app lied
+about microphone state — worse than the crash that caused it.
+
+**The push alone would have shipped looking fixed.** `enabled` is derived purely from the
+PREF, not from the daemon, so delivering it more often just repeats the same lie on a shorter
+interval. `stillListening` didn't rescue it either — that fires only on state `stopped` WITH
+the still-listening marker, and a crash-looped daemon is `failed`.
+
+**Fix, both halves:**
+- **Push on change:** the supervisor's `onChange` callback now also emits `nightjar:voiceStatus`,
+  deduped on the serialized value so a callback that fires for every service transition can't
+  spam. The two `voice:set` sites were routed through the same helper — a direct send there
+  would leave the dedupe holding a stale value and could then SWALLOW the next real change.
+- **Make the status express reality:** added `running` (the wake-daemon process is `healthy` or
+  `adopted` — `adopted` counts, it's a live capture process we attached to). The orb, its
+  tooltip, its `data-orb-mic` attribute, and the Settings panel now require `enabled && running`
+  to claim an open mic; pref-on-but-not-running reads **"voice failed"** and points at the
+  health strip.
+
+**Verified headless** (`voice.status.test.ts`, 8 cases incl. the exact hardware state).
+**Hardware-pending (rule 8):** that the orb *visibly* stops saying "mic on" — a rendering
+claim I won't assert from a unit test.
+
+<details><summary>Original entry (2026-08-04)</summary>
 
 - **Found while verifying NJ-68 (rule 7).** `sendToRenderer("nightjar:voiceStatus", …)`
   occurs **once repo-wide**, inside the `voice:set` handler. The supervisor's own status
@@ -261,6 +361,8 @@ remainder is **NJ-11 / B3** (the server-side diffusion wall-clock cap), a GPU-on
   briefly still open.
 - **Fix shape:** push `voiceStatusNow()` from the supervisor status callback whenever the
   wake-daemon row changes state.
+
+</details>
 
 ## NJ-70 — `restartOnce` hard-kills with no graceful phase — OPEN 2026-08-04
 

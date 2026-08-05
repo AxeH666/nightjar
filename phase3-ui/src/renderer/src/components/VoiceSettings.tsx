@@ -20,12 +20,15 @@ export function VoiceSettings() {
   // Stuck mic (Bugbot, PR #151): off was requested but the daemon's port still
   // answers — the UI must warn rather than present a clean "off".
   const [stillListening, setStillListening] = useState(false)
+  // NJ-71: the capture process is actually alive, as opposed to merely preferred-on.
+  const [micLive, setMicLive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
-    const applyStatus = (s: { enabled: boolean; stillListening?: boolean }) => {
+    const applyStatus = (s: { enabled: boolean; running?: boolean; stillListening?: boolean }) => {
+      setMicLive(Boolean(s.running))
       if (!mounted) return
       setEnabled(s.enabled)
       setStillListening(!s.enabled && Boolean(s.stillListening))
@@ -44,6 +47,7 @@ export function VoiceSettings() {
     try {
       const s = await voice.set(next)
       setEnabled(s.enabled)
+      setMicLive(Boolean(s.running))
       setStillListening(!s.enabled && Boolean(s.stillListening))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -81,7 +85,13 @@ export function VoiceSettings() {
             {busy ? "applying…" : enabled ? "Turn voice off" : "Enable voice…"}
           </button>
           <span className="text-[11px] text-nightjar-text/50">
-            {enabled ? "🎙 Mic is ON — listening for the wake word." : "Mic is off (process not running)."}
+            {/* NJ-71: three states, not two. "enabled but not running" is real and was
+                previously rendered as a confident "Mic is ON" while nothing listened. */}
+            {enabled && micLive
+              ? "🎙 Mic is ON — listening for the wake word."
+              : enabled
+                ? "⚠ Voice is on, but the listener is NOT running — no mic is open. See wake-daemon in the health strip."
+                : "Mic is off (process not running)."}
           </span>
         </div>
       )}

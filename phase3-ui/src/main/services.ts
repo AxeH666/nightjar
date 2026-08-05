@@ -98,8 +98,26 @@ const LOCAL_CHAT_MODEL = "llamacpp/qwen3-4b-instruct-2507"
 // NIGHTJAR_WAKEWORD_MODEL: an explicit env wins (deliberate operator override); else
 // the PR-5 deploy path (~/.nightjar/models/hey_june.onnx) is passed once it exists —
 // zero code change on the daemon side when the trained model lands.
+// NJ-79: every Python sidecar WE spawn gets UTF-8 stdio.
+//
+// The supervisor spawns with piped stdio, and Python picks stdout's encoding from whether it
+// is a console — a pipe means the locale ANSI codepage, cp1252 on a typical Windows box. One
+// non-cp1252 character in a log line then raises UnicodeEncodeError out of print() and kills
+// the process; that is what crash-looped the wake daemon on first hardware run.
+//
+// This is NOT redundant with the daemon's own sys.stdout.reconfigure(): this covers output
+// emitted BEFORE that line runs (an import-time traceback, a library writing during import),
+// and it covers every other Python sidecar without each needing its own preamble. The
+// reconfigure covers the reverse case — the daemon spawned by something that isn't us.
+//
+// Does NOT reach the MCP servers: opencode spawns those, not the supervisor. Their stdout is
+// already safe (the mcp library wraps it in a UTF-8 TextIOWrapper) but their stderr is not.
+// Tracked as NJ-81.
+export const PY_UTF8_ENV: Record<string, string> = { PYTHONIOENCODING: "utf-8" }
+
 export function wakeDaemonEnv(chatPref?: { mode: string; providerId?: string; modelId?: string }): Record<string, string> {
   const out: Record<string, string> = {
+    ...PY_UTF8_ENV,
     NIGHTJAR_DATA_DIR: process.env.NIGHTJAR_DATA_DIR || join(HOME, ".nightjar"),
     NIGHTJAR_MODEL:
       chatPref?.mode === "online" && chatPref.providerId && chatPref.modelId
@@ -178,6 +196,7 @@ export function nightjarServices(opts?: { voiceEnabled?: () => boolean }): Servi
       name: "side-channel",
       command: venvPython(join(REPO, "phase2-mcp/venv")),
       args: [join(REPO, "phase2-mcp/sidechannel.py")],
+      env: PY_UTF8_ENV, // NJ-79 — same piped-stdio exposure as the wake daemon
       ready: () => tcpOpen("127.0.0.1", 8765),
       readyTimeoutMs: 15000,
     },
