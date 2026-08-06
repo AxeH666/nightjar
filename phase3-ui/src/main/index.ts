@@ -479,7 +479,8 @@ ipcMain.handle("capabilities:setBulk", async (_e, prefs: Record<string, capabili
 // the pref would have repeated the same lie on a shorter interval.
 export interface VoiceStatus {
   enabled: boolean // the user's persisted opt-in
-  running: boolean // the wake-daemon process is actually alive
+  running: boolean // the wake-daemon process is actually alive (mic open)
+  starting: boolean // coming up: not yet listening, but NOT a failure either
   stillListening: boolean // pref says off, but its port still answers (NJ-57 honesty bit)
 }
 function voiceStatusNow(): VoiceStatus {
@@ -487,9 +488,15 @@ function voiceStatusNow(): VoiceStatus {
   return {
     enabled: voice.getVoiceEnabled(),
     // `adopted` counts: an adopted daemon is a live capture process we attached to rather
-    // than spawned. Every other state (pending/starting/restarting/stopped/failed/unhealthy)
-    // means no microphone is open, whatever the pref says.
+    // than spawned. Every other state means no microphone is open, whatever the pref says.
     running: s?.state === "healthy" || s?.state === "adopted",
+    // Bugbot PR #158: `enabled && !running` is NOT the same as "failed". The daemon passes
+    // through pending -> starting on its way up, and its readiness window is the supervisor
+    // default of NINETY SECONDS (it declares no readyTimeoutMs). Collapsing transient states
+    // into a failure would show "voice failed" for up to 90s during a perfectly normal
+    // enable — which is exactly what the bug being fixed here looked like. Three states, not
+    // two: open / coming up / dead.
+    starting: s?.state === "pending" || s?.state === "starting" || s?.state === "restarting",
     stillListening: Boolean(s?.state === "stopped" && s.detail?.includes(STILL_LISTENING_MARKER)),
   }
 }

@@ -25,12 +25,26 @@ function deriveVoiceStatus(pref: boolean, svc?: { state: ServiceState; detail?: 
   return {
     enabled: pref,
     running: svc?.state === "healthy" || svc?.state === "adopted",
+    starting: svc?.state === "pending" || svc?.state === "starting" || svc?.state === "restarting",
     stillListening: Boolean(svc?.state === "stopped" && svc.detail?.includes(STILL_LISTENING_MARKER)),
   }
 }
 
 /** What the orb/settings render from a status — "mic on" requires BOTH. */
 const claimsMicOpen = (s: { enabled: boolean; running: boolean }) => s.enabled && s.running
+
+/**
+ * The label the UI shows. Bugbot PR #158: `enabled && !running` is NOT automatically a
+ * failure — the daemon passes through pending/starting on the way up, and its readiness
+ * window is the supervisor default of 90 SECONDS. Reporting that as "voice failed" would
+ * slander every normal enable for a minute and a half, looking exactly like the crash this
+ * PR fixes.
+ */
+function label(s: { enabled: boolean; running: boolean; starting: boolean }) {
+  if (!s.enabled) return "voice off"
+  if (s.running) return "mic on"
+  return s.starting ? "starting" : "voice failed"
+}
 
 describe("voice status honesty (NJ-71)", () => {
   test("THE HARDWARE CASE: pref on + daemon failed must NOT claim an open mic", () => {
@@ -72,6 +86,40 @@ describe("voice status honesty (NJ-71)", () => {
     expect(s.stillListening).toBe(true) // pref off, but something still holds the port
     expect(s.running).toBe(false) // not OUR managed process
     expect(claimsMicOpen(s)).toBe(false)
+  })
+
+  test("BUGBOT #158: a daemon coming up is 'starting', never 'voice failed'", () => {
+    for (const state of ["pending", "starting", "restarting"] as ServiceState[]) {
+      const s = deriveVoiceStatus(true, { state })
+      expect(s.starting).toBe(true)
+      expect(claimsMicOpen(s)).toBe(false) // still must not claim an open mic
+      expect(label(s)).toBe("starting") // but must NOT cry failure
+    }
+  })
+
+  test("only genuinely dead states read as 'voice failed'", () => {
+    for (const state of ["failed", "unhealthy", "stopped"] as ServiceState[]) {
+      expect(label(deriveVoiceStatus(true, { state }))).toBe("voice failed")
+    }
+    expect(label(deriveVoiceStatus(true, undefined))).toBe("voice failed")
+  })
+
+  test("the full enable sequence never passes through a false failure", () => {
+    // The exact transition a normal voice-enable walks. If any step reads "voice failed",
+    // the user sees an alarm during a working enable — and Test 1e would read as a failure.
+    const walk = ["pending", "starting", "healthy"] as ServiceState[]
+    const labels = walk.map((state) => label(deriveVoiceStatus(true, { state })))
+    expect(labels).toEqual(["starting", "starting", "mic on"])
+    expect(labels).not.toContain("voice failed")
+  })
+
+  test("a real crash still surfaces after the transient states", () => {
+    const walk = ["pending", "starting", "failed"] as ServiceState[]
+    expect(walk.map((state) => label(deriveVoiceStatus(true, { state })))).toEqual([
+      "starting",
+      "starting",
+      "voice failed",
+    ])
   })
 
   test("dedupe: only a real change is pushed", () => {

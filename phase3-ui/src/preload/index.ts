@@ -119,12 +119,12 @@ contextBridge.exposeInMainWorld("nightjar", {
   // `enabled`, which is only the user's persisted preference. The two diverge whenever the
   // daemon dies on its own, and the UI must never report a microphone that isn't open.
   voice: {
-    get: (): Promise<{ enabled: boolean; running: boolean; stillListening: boolean }> =>
+    get: (): Promise<{ enabled: boolean; running: boolean; starting: boolean; stillListening: boolean }> =>
       ipcRenderer.invoke("voice:get"),
-    set: (enabled: boolean): Promise<{ enabled: boolean; running: boolean; stillListening: boolean }> =>
+    set: (enabled: boolean): Promise<{ enabled: boolean; running: boolean; starting: boolean; stillListening: boolean }> =>
       ipcRenderer.invoke("voice:set", enabled),
-    onStatus: (cb: (s: { enabled: boolean; running: boolean; stillListening: boolean }) => void) => {
-      const handler = (_e: unknown, s: { enabled: boolean; running: boolean; stillListening: boolean }) => cb(s)
+    onStatus: (cb: (s: { enabled: boolean; running: boolean; starting: boolean; stillListening: boolean }) => void) => {
+      const handler = (_e: unknown, s: { enabled: boolean; running: boolean; starting: boolean; stillListening: boolean }) => cb(s)
       ipcRenderer.on("nightjar:voiceStatus", handler)
       return () => ipcRenderer.removeListener("nightjar:voiceStatus", handler)
     },
