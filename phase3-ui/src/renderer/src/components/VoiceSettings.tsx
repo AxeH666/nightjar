@@ -20,14 +20,28 @@ export function VoiceSettings() {
   // Stuck mic (Bugbot, PR #151): off was requested but the daemon's port still
   // answers — the UI must warn rather than present a clean "off".
   const [stillListening, setStillListening] = useState(false)
+  // NJ-71: the capture process is actually alive, as opposed to merely preferred-on.
+  const [micLive, setMicLive] = useState(false)
+  // Bugbot PR #158: coming up (up to the 90s readiness window) is not a failure.
+  const [micStarting, setMicStarting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
-    const applyStatus = (s: { enabled: boolean; stillListening?: boolean }) => {
+    const applyStatus = (s: {
+      enabled: boolean
+      running?: boolean
+      starting?: boolean
+      stillListening?: boolean
+    }) => {
+      // Bugbot PR #158: the mounted guard comes FIRST. I had setMicLive above it, so a late
+      // voice.get() or onStatus callback landing after unmount would still write micLive
+      // while skipping every other field — a torn update on a dead component.
       if (!mounted) return
       setEnabled(s.enabled)
+      setMicLive(Boolean(s.running))
+      setMicStarting(Boolean(s.starting))
       setStillListening(!s.enabled && Boolean(s.stillListening))
     }
     voice.get().then(applyStatus)
@@ -44,6 +58,8 @@ export function VoiceSettings() {
     try {
       const s = await voice.set(next)
       setEnabled(s.enabled)
+      setMicLive(Boolean(s.running))
+      setMicStarting(Boolean(s.starting))
       setStillListening(!s.enabled && Boolean(s.stillListening))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -81,7 +97,17 @@ export function VoiceSettings() {
             {busy ? "applying…" : enabled ? "Turn voice off" : "Enable voice…"}
           </button>
           <span className="text-[11px] text-nightjar-text/50">
-            {enabled ? "🎙 Mic is ON — listening for the wake word." : "Mic is off (process not running)."}
+            {/* NJ-71 + Bugbot #158: FOUR states, not two. "enabled but not running" is real
+                and was previously a confident "Mic is ON" while nothing listened — but it
+                splits again into "coming up" (normal, up to the 90s readiness window) and
+                "actually dead". Reporting a boot as a failure would be its own false alarm. */}
+            {enabled && micLive
+              ? "🎙 Mic is ON — listening for the wake word."
+              : enabled && micStarting
+                ? "Starting the listener… the mic is not open yet."
+                : enabled
+                  ? "⚠ Voice is on, but the listener is NOT running — no mic is open. See wake-daemon in the health strip."
+                  : "Mic is off (process not running)."}
           </span>
         </div>
       )}

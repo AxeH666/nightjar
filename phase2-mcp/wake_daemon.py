@@ -57,6 +57,28 @@ from typing import Callable, Optional
 import numpy as np
 import requests
 
+# NJ-79: force UTF-8 on our own stdio, BEFORE anything can print.
+#
+# Python picks stdout's encoding from whether stdout is a console. Under a real terminal on
+# Windows it is `_WindowsConsoleIO` at utf-8 and everything works; when the SUPERVISOR spawns
+# us the streams are PIPES, so Python falls back to the locale ANSI codepage — cp1252 on a
+# typical Windows box. A single non-cp1252 character in a log line then raises
+# UnicodeEncodeError out of print(), which nothing catches, and the daemon dies before it ever
+# reaches the mic loop. That is exactly what happened: five crash-restarts, then `failed`.
+#
+# This is why it survived every prior test — run this file by hand in a terminal and it works
+# perfectly. Only the piped path breaks, so only the app could ever hit it.
+#
+# errors="replace" is deliberate, not laziness: a LOG LINE MUST NEVER BE ABLE TO KILL THIS
+# PROCESS. Strict would merely relocate the crash to the next unmappable character.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        # Not a TextIOWrapper (redirected oddly, or already detached) — leave it alone. The
+        # supervisor also sets PYTHONIOENCODING=utf-8, which covers us either way.
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from nightjar_capabilities import config, voice as _voice, wakeword as _wakeword
@@ -178,7 +200,10 @@ class SilenceTracker:
 
 
 SILENCE_HINT_MSG = (
-    f"⚠️  mic delivers ONLY silence (all-zero frames for {int(SILENCE_HINT_S)}s+). "
+    # NJ-79: ASCII "WARNING:", not an emoji. This particular message is the one that MUST
+    # survive a hostile encoding: it exists to tell the user their microphone is DENIED, so
+    # crashing here would mean dying inside the explanation of why the mic isn't working.
+    f"WARNING: mic delivers ONLY silence (all-zero frames for {int(SILENCE_HINT_S)}s+). "
     "On Windows this is what a DENIED microphone looks like — check Settings → "
     "Privacy & security → Microphone → 'Let desktop apps access your microphone' "
     "(a denied app gets silent zeros, not an error). Also confirm the intended "
@@ -637,7 +662,7 @@ def main() -> None:
 
     detector = _wakeword.WakeWordDetector()
     if not detector.is_custom:
-        log(f"⚠️  INTERIM stand-in wake model in use ('{detector.model_key}') — say "
+        log(f"WARNING: INTERIM stand-in wake model in use ('{detector.model_key}') - say "
             f"'Hey buddy', NOT 'Hey June', until a trained hey_june.onnx is deployed "
             f"(see wakeword_training/README.md). Licensing note: the non-commercial "
             f"openWakeWord models are gone as of voice-phase PR 5 (NJ-58 resolved), but "
@@ -647,7 +672,7 @@ def main() -> None:
     # Echo suppression (NJ-57): consume the renderer's real playback events.
     mute = PlaybackMute(
         on_backstop=lambda: log(
-            f"⚠️  playback-mute backstop fired after {PLAYBACK_MUTE_MAX_S}s without a "
+            f"WARNING: playback-mute backstop fired after {PLAYBACK_MUTE_MAX_S}s without a "
             f"'tts ended' event (renderer crash or side-channel drop?) — resuming wake "
             f"scoring so a lost event can't deafen the daemon"),
     )
