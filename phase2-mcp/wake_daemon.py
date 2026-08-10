@@ -460,6 +460,7 @@ class OpenCodeVoice:
             try:
                 with requests.get(f"{self.base_url}/event", stream=True, timeout=(10, None)) as resp:
                     resp.raise_for_status()
+                    resp.encoding = "utf-8"
                     buf = ""
                     for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
                         if self._stop.is_set():
