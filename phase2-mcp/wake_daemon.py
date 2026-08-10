@@ -628,16 +628,6 @@ def handle_wake(mic: MicStream, oc: OpenCodeVoice, max_score: float,
         log(f"TTS synth exceeded {TTS_TIMEOUT_S}s timeout; not publishing (it may still finish in the background)")
         return
 
-    # NJ-86: only privacy-safe integer counts cross this boundary. Raw fallback
-    # fragments remain in-memory for isolated tests and never enter normal logs.
-    stats = _voice.last_g2p_stats()
-    spelled_count = int(stats.get("spelled", 0))
-    lexicon_error_count = int(stats.get("lexicon_errors", 0))
-    if spelled_count:
-        log(f"WARNING: G2P letter-spelled {spelled_count} fragment(s)")
-    if lexicon_error_count:
-        log(f"WARNING: G2P lexicon re-query failed {lexicon_error_count} time(s)")
-
     path = tts_result["path"]
     log(f"speaking: {path}")
     publish("tts", state="ready", path=path, text=reply)

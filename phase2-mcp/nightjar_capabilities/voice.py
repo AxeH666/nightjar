@@ -58,11 +58,6 @@ _G2P_CLASSIFICATIONS = (
     "lexicon_errors",
 )
 
-# Privacy-safe diagnostics from the most recent create(). Raw reply fragments
-# stay inside NightjarFallback.drain() and are never copied here or logged.
-_last_g2p_stats: dict = {}
-
-
 def _g2p_input_diagnostics(text: str) -> dict:
     """Return bounded, text-free metadata for characters that can hide words."""
     codepoint_counts: dict[int, int] = {}
@@ -91,13 +86,6 @@ def _g2p_input_diagnostics(text: str) -> dict:
         ],
         "codepoints_omitted": max(0, len(ordered) - len(shown)),
     }
-
-
-def last_g2p_stats() -> dict:
-    """Return privacy-safe counts and metadata from the latest synthesis."""
-    stats = dict(_last_g2p_stats)
-    stats["suspect_codepoints"] = list(stats.get("suspect_codepoints", []))
-    return stats
 
 
 def _kokoro_dir() -> Path:
@@ -213,12 +201,9 @@ class _KokoroSession:
         return drain() if drain is not None else {}
 
     def create(self, text: str, voice: str, speed: float):
-        global _last_g2p_stats
-
         if voice not in self.voices:
             raise ValueError(f"voice {voice!r} not in {sorted(self.voices.keys())}")
         style = self.voices[voice]
-        _last_g2p_stats = {}
         self._drain_g2p_stats()  # discard anything left by a previous caller
         phonemes, _ = self.g2p(text)
         raw_stats = self._drain_g2p_stats()
@@ -229,7 +214,6 @@ class _KokoroSession:
                 for classification in _G2P_CLASSIFICATIONS
             }
         )
-        _last_g2p_stats = summary
         _log.info("g2p diagnostics: %s", summary)
         parts = [self._create_audio(p, style, speed)
                  for p in self._split_phonemes(phonemes)]

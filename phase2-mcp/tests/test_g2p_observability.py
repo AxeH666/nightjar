@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix="june-g2p-observability-") as data_dir:
     check("omitted distinct codepoints are counted", diagnostics["codepoints_omitted"] == 8)
     check("diagnostics contain no input text", secret not in str(diagnostics))
 
-    print("\n== 2. Kokoro boundary stores and logs counts only ==")
+    print("\n== 2. Kokoro boundary logs counts only ==")
 
     class FakeFallback:
         def __init__(self):
@@ -90,20 +90,17 @@ with tempfile.TemporaryDirectory(prefix="june-g2p-observability-") as data_dir:
         voice._log.setLevel(old_level)
         voice._log.propagate = old_propagate
 
-    safe_stats = voice.last_g2p_stats()
     safe_log = captured_log.getvalue()
     check("stub produced audio without model or hardware", len(audio) == 1)
     check("sample rate contract preserved", sample_rate == 24000)
-    check("classification counts retained", safe_stats.get("spelled") == 1)
-    check("lexicon error count retained", safe_stats.get("lexicon_errors") == 1)
-    check("em-dash codepoint retained", "U+2014x1" in safe_stats["suspect_codepoints"])
-    check("latest stats contain no reply fragments", secret not in str(safe_stats))
     check("normal voice log emits a diagnostics record", "g2p diagnostics:" in safe_log)
     check("normal voice log includes classification counts", "'spelled': 1" in safe_log)
+    check("normal voice log includes lexicon error count", "'lexicon_errors': 1" in safe_log)
     check("normal voice log includes bounded codepoints", "U+2014x1" in safe_log)
     check("normal voice log contains no reply fragments", secret not in safe_log)
+    check("no detached process-global stats bridge remains", not hasattr(voice, "last_g2p_stats"))
 
-    print("\n== 3. wake daemon emits count-only warnings ==")
+    print("\n== 3. wake daemon does not read detached G2P state ==")
     import wake_daemon
 
     wake_logs: list[str] = []
@@ -124,7 +121,6 @@ with tempfile.TemporaryDirectory(prefix="june-g2p-observability-") as data_dir:
         "publish": wake_daemon.publish,
         "transcribe": wake_daemon._voice.transcribe,
         "speak": wake_daemon._voice.speak,
-        "last_g2p_stats": wake_daemon._voice.last_g2p_stats,
     }
     wake_daemon.COMMAND_WINDOW_S = wake_daemon.FRAME / wake_daemon.SR
     wake_daemon.PLAY_TTS_LOCALLY = False
@@ -132,18 +128,8 @@ with tempfile.TemporaryDirectory(prefix="june-g2p-observability-") as data_dir:
     wake_daemon.publish = lambda kind, **payload: published.append((kind, payload))
     wake_daemon._voice.transcribe = lambda _audio: "make a private reply"
     wake_daemon._voice.speak = lambda _text, **_kwargs: str(Path(data_dir) / "fake.wav")
-    wake_daemon._voice.last_g2p_stats = lambda: {
-        "input_chars": 31,
-        "non_ascii_chars": 1,
-        "nonstandard_whitespace_chars": 0,
-        "space_runs": 0,
-        "suspect_codepoints": ["U+2014x1"],
-        "codepoints_omitted": 0,
-        "curated_hits": 0,
-        "recovered": 1,
-        "spelled": 2,
-        "lexicon_errors": 1,
-    }
+    detached_stats_reads: list[bool] = []
+    wake_daemon._voice.last_g2p_stats = lambda: detached_stats_reads.append(True) or {}
     try:
         wake_daemon.handle_wake(FakeMic(), FakeOpenCode(), 0.99)
     finally:
@@ -153,13 +139,12 @@ with tempfile.TemporaryDirectory(prefix="june-g2p-observability-") as data_dir:
         wake_daemon.publish = replacements["publish"]
         wake_daemon._voice.transcribe = replacements["transcribe"]
         wake_daemon._voice.speak = replacements["speak"]
-        wake_daemon._voice.last_g2p_stats = replacements["last_g2p_stats"]
+        del wake_daemon._voice.last_g2p_stats
 
     joined_wake_logs = "\n".join(wake_logs)
     check("wake logs contain no assistant reply", secret not in joined_wake_logs)
     check("wake logs report reply length", "reply received (chars=" in joined_wake_logs)
-    check("wake logs report spelling count", "letter-spelled 2 fragment(s)" in joined_wake_logs)
-    check("wake logs report lexicon error count", "re-query failed 1 time(s)" in joined_wake_logs)
+    check("wake does not read detached stats", not detached_stats_reads)
     check("TTS event still reaches the live side channel", any(kind == "tts" for kind, _ in published))
 
 print("\n" + ("FAILED: " + "; ".join(FAILS) if FAILS else "ALL CHECKS PASSED"))
