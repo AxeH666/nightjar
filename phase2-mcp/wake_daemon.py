@@ -44,6 +44,7 @@ Env: NIGHTJAR_OPENCODE_URL (default http://127.0.0.1:4096), NIGHTJAR_AGENT
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import shutil
@@ -108,6 +109,17 @@ HEALTH_PORT = int(os.environ.get("NIGHTJAR_WAKE_HEALTH_PORT", "8766"))
 # voice-phase PR 5 along with openWakeWord — nothing answers to it any more.
 # Keep in sync with mcp_server.py's copy.
 WAKE_PHRASES = ("hey june", "hey buddy", "hey nightjar")
+
+# NJ-86 diagnostics come from this logger. Configure only the voice module at
+# INFO rather than the root logger so unrelated libraries cannot start writing
+# extra data to the supervisor's persistent stdout capture.
+_g2p_logger = logging.getLogger(_voice.__name__)
+_g2p_logger.setLevel(logging.INFO)
+if not _g2p_logger.handlers:
+    _g2p_handler = logging.StreamHandler(sys.stdout)
+    _g2p_handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
+    _g2p_logger.addHandler(_g2p_handler)
+_g2p_logger.propagate = False
 
 
 def log(msg: str) -> None:
@@ -603,7 +615,8 @@ def handle_wake(mic: MicStream, oc: OpenCodeVoice, max_score: float,
     if not reply.strip():
         log("no reply text produced; skipping TTS")
         return
-    log(f"reply: {reply!r}")
+    # Normal logs persist through the supervisor. Never write reply text there.
+    log(f"reply received (chars={len(reply)})")
 
     tts_result: dict = {}
     def _synth():
@@ -614,6 +627,17 @@ def handle_wake(mic: MicStream, oc: OpenCodeVoice, max_score: float,
     if "path" not in tts_result:
         log(f"TTS synth exceeded {TTS_TIMEOUT_S}s timeout; not publishing (it may still finish in the background)")
         return
+
+    # NJ-86: only privacy-safe integer counts cross this boundary. Raw fallback
+    # fragments remain in-memory for isolated tests and never enter normal logs.
+    stats = _voice.last_g2p_stats()
+    spelled_count = int(stats.get("spelled", 0))
+    lexicon_error_count = int(stats.get("lexicon_errors", 0))
+    if spelled_count:
+        log(f"WARNING: G2P letter-spelled {spelled_count} fragment(s)")
+    if lexicon_error_count:
+        log(f"WARNING: G2P lexicon re-query failed {lexicon_error_count} time(s)")
+
     path = tts_result["path"]
     log(f"speaking: {path}")
     publish("tts", state="ready", path=path, text=reply)

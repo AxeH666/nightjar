@@ -18,6 +18,7 @@ with misaki (Apache-2.0) instead — see `tts_g2p.py` for the full rationale and
 from __future__ import annotations
 
 import json
+import logging
 import re
 import wave
 from pathlib import Path
@@ -46,6 +47,57 @@ _MAX_PHONEME_LENGTH = 510
 _whisper = None
 _kokoro = None
 _vocab: Optional[dict] = None
+
+_log = logging.getLogger(__name__)
+_SPACE_RUN_RE = re.compile(r"  +")
+_G2P_CODEPOINT_LIMIT = 12
+_G2P_CLASSIFICATIONS = (
+    "curated_hits",
+    "recovered",
+    "spelled",
+    "lexicon_errors",
+)
+
+# Privacy-safe diagnostics from the most recent create(). Raw reply fragments
+# stay inside NightjarFallback.drain() and are never copied here or logged.
+_last_g2p_stats: dict = {}
+
+
+def _g2p_input_diagnostics(text: str) -> dict:
+    """Return bounded, text-free metadata for characters that can hide words."""
+    codepoint_counts: dict[int, int] = {}
+    non_ascii_chars = 0
+    nonstandard_whitespace_chars = 0
+    for char in text:
+        is_non_ascii = ord(char) > 127
+        is_nonstandard_whitespace = char.isspace() and char != " "
+        if is_non_ascii:
+            non_ascii_chars += 1
+        if is_nonstandard_whitespace:
+            nonstandard_whitespace_chars += 1
+        if is_non_ascii or is_nonstandard_whitespace:
+            codepoint = ord(char)
+            codepoint_counts[codepoint] = codepoint_counts.get(codepoint, 0) + 1
+
+    ordered = sorted(codepoint_counts.items())
+    shown = ordered[:_G2P_CODEPOINT_LIMIT]
+    return {
+        "input_chars": len(text),
+        "non_ascii_chars": non_ascii_chars,
+        "nonstandard_whitespace_chars": nonstandard_whitespace_chars,
+        "space_runs": len(_SPACE_RUN_RE.findall(text)),
+        "suspect_codepoints": [
+            f"U+{codepoint:04X}x{count}" for codepoint, count in shown
+        ],
+        "codepoints_omitted": max(0, len(ordered) - len(shown)),
+    }
+
+
+def last_g2p_stats() -> dict:
+    """Return privacy-safe counts and metadata from the latest synthesis."""
+    stats = dict(_last_g2p_stats)
+    stats["suspect_codepoints"] = list(stats.get("suspect_codepoints", []))
+    return stats
 
 
 def _kokoro_dir() -> Path:
@@ -155,11 +207,30 @@ class _KokoroSession:
             }
         return self.sess.run(None, inputs)[0]
 
+    def _drain_g2p_stats(self) -> dict:
+        """Pop the fallback's bounded per-synthesis classification details."""
+        drain = getattr(getattr(self.g2p, "fallback", None), "drain", None)
+        return drain() if drain is not None else {}
+
     def create(self, text: str, voice: str, speed: float):
+        global _last_g2p_stats
+
         if voice not in self.voices:
             raise ValueError(f"voice {voice!r} not in {sorted(self.voices.keys())}")
         style = self.voices[voice]
+        _last_g2p_stats = {}
+        self._drain_g2p_stats()  # discard anything left by a previous caller
         phonemes, _ = self.g2p(text)
+        raw_stats = self._drain_g2p_stats()
+        summary = _g2p_input_diagnostics(text)
+        summary.update(
+            {
+                classification: len(raw_stats.get(classification, ()))
+                for classification in _G2P_CLASSIFICATIONS
+            }
+        )
+        _last_g2p_stats = summary
+        _log.info("g2p diagnostics: %s", summary)
         parts = [self._create_audio(p, style, speed)
                  for p in self._split_phonemes(phonemes)]
         parts = [p for p in parts if len(p)]
