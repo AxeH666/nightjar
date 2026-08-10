@@ -260,7 +260,7 @@ export class Supervisor {
     const child = spawn(m.def.command, m.def.args, {
       cwd: m.def.cwd,
       env: { ...process.env, ...(m.def.env ?? {}) },
-      detached: true, // own process group → clean tree kill (POSIX); taskkill /T on Windows
+      detached: process.platform !== "win32", // POSIX process group; Windows uses taskkill /T
       windowsHide: true, // no console-window pop-ups for the spawned sidecars on Windows
       stdio: ["ignore", "pipe", "pipe"],
     })
