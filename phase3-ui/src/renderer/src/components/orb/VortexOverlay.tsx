@@ -52,8 +52,8 @@ export function VortexOverlay({ state, volume, active }: { state: OrbState; volu
   return (
     <div
       aria-hidden={!active}
-      className={`fixed inset-0 z-40 flex flex-col items-center justify-center gap-5 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${
-        active ? "opacity-100" : "pointer-events-none opacity-0"
+      className={`pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center gap-5 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${
+        active ? "opacity-100" : "opacity-0"
       }`}
     >
       <div
