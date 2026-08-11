@@ -165,7 +165,7 @@ export function createNightjarOrbAdapter(
   let micStarting = false
   let ttsAudio: HTMLAudioElement | null = null
   let ttsUrl: string | null = null
-  let ttsPlayId = 0 // monotonic token — any teardown bumps it, invalidating an in-flight playTts load (B11)
+  let ttsPlayId = 0 // monotonic token — teardown invalidates any in-flight playTts operation (B11)
 
   // ── side-channel connection ─────────────────────────────────────────────────
   let ws: WebSocket | null = null
@@ -226,7 +226,7 @@ export function createNightjarOrbAdapter(
 
   // ── tts playback ─────────────────────────────────────────────────────────────
   function teardownTts(): void {
-    ttsPlayId++ // invalidate any in-flight playTts load (from a newer playTts / enterListening / stop / disconnect) — B11
+    ttsPlayId++ // invalidate any in-flight load or graph attachment (new playTts / listening / stop / disconnect) — B11
     speakingTimer = clearTimer(speakingTimer) // drop the hung-clip watchdog for the clip being torn down
     ttsMonitor.stop()
     if (ttsAudio) {
@@ -290,11 +290,29 @@ export function createNightjarOrbAdapter(
     ttsAudio = audio
     ttsUrl = url
     audio.src = url
+
+    let attached: boolean
+    try {
+      // Attach before play: moving an already-playing element into Web Audio
+      // can lose its opening samples. A failed/timeout resume returns false and
+      // leaves the element on its direct playback path.
+      attached = await ttsMonitor.attachElement(audio)
+    } catch (err) {
+      console.warn("[nightjar-orb] TTS audio graph failed:", err)
+      if (myId === ttsPlayId) {
+        onTtsError?.(err)
+        endTts("idle")
+      }
+      return
+    }
+    // The attach await is another supersession window. Never let a stale clip
+    // play after a newer clip, listening state, stop, or disconnect won the race.
+    if (myId !== ttsPlayId) return
+
     audio.onplaying = () => {
       setState("speaking")
       if (publishPlayback) publish({ kind: "tts", state: "playing", source: "orb-ui" })
-      ttsMonitor.attachElement(audio)
-      ttsMonitor.start(emitVolume)
+      if (attached) ttsMonitor.start(emitVolume)
       // Watchdog: if this clip's onended/onerror never fire (hung playback), the overlay would
       // stay in 'speaking' forever and lock input. Force back to idle after speakingTimeoutMs (P2-18).
       speakingTimer = clearTimer(speakingTimer)
