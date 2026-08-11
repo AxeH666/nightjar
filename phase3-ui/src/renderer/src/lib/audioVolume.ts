@@ -89,6 +89,8 @@ export interface AudioLevelMonitorOptions {
   fftSize?: number
   attack?: number
   release?: number
+  /** Maximum time to wait for a suspended TTS context to resume. */
+  resumeTimeoutMs?: number
 }
 
 export class AudioLevelMonitor {
@@ -97,6 +99,7 @@ export class AudioLevelMonitor {
   private readonly fftSize: number
   private readonly attack: number
   private readonly release: number
+  private readonly resumeTimeoutMs: number
 
   private ctx: AudioCtxLike | null = null
   private analyser: AnalyserLike | null = null
@@ -105,6 +108,7 @@ export class AudioLevelMonitor {
   private handle = 0
   private running = false
   private ema = 0
+  private attachmentGeneration = 0
 
   constructor(opts: AudioLevelMonitorOptions) {
     this.make = opts.createAudioContext
@@ -112,6 +116,28 @@ export class AudioLevelMonitor {
     this.fftSize = opts.fftSize ?? 256
     this.attack = opts.attack ?? 0.7
     this.release = opts.release ?? 0.3
+    this.resumeTimeoutMs = opts.resumeTimeoutMs ?? 1000
+  }
+
+  private async resumeCtx(ctx: AudioCtxLike): Promise<boolean> {
+    if (ctx.state !== "suspended") return true
+    if (!ctx.resume) return false
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const resumed = ctx.resume().then(
+        () => true,
+        () => false,
+      )
+      const timedOut = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), this.resumeTimeoutMs)
+      })
+      return await Promise.race([resumed, timedOut])
+    } catch {
+      return false
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
   }
 
   private ensureCtx(): AudioCtxLike {
@@ -131,6 +157,7 @@ export class AudioLevelMonitor {
 
   /** Mic path — analyser only; deliberately NOT wired to the speakers (no echo). */
   attachStream(stream: unknown): void {
+    this.attachmentGeneration++
     this.detachSource()
     const ctx = this.ensureCtx()
     const analyser = this.prepareAnalyser()
@@ -138,14 +165,21 @@ export class AudioLevelMonitor {
     this.source.connect(analyser)
   }
 
-  /** TTS path — split to the analyser AND the speakers so it stays audible. */
-  attachElement(element: unknown): void {
+  /**
+   * TTS path — attach before playback so the opening audio is not lost while
+   * moving the element into the Web Audio graph. A failed or delayed resume
+   * leaves the element untouched so it can still play directly.
+   */
+  async attachElement(element: unknown): Promise<boolean> {
+    const generation = ++this.attachmentGeneration
     this.detachSource()
     const ctx = this.ensureCtx()
+    if (!(await this.resumeCtx(ctx)) || generation !== this.attachmentGeneration) return false
     const analyser = this.prepareAnalyser()
     this.source = ctx.createMediaElementSource(element)
     this.source.connect(analyser)
     this.source.connect(ctx.destination)
+    return true
   }
 
   start(onLevel: (level: number) => void): void {
@@ -165,6 +199,7 @@ export class AudioLevelMonitor {
   }
 
   stop(): void {
+    this.attachmentGeneration++
     this.running = false
     if (this.handle) this.scheduler.cancel(this.handle)
     this.handle = 0
