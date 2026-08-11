@@ -5,10 +5,225 @@
 // healthy (don't double-spawn), readiness gating, restart-on-crash with backoff,
 // periodic health checks, and clean process-group shutdown.
 import { spawn, execFile, type ChildProcess } from "node:child_process"
+import { appendFileSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs"
+import { constants as osConstants, homedir } from "node:os"
+import { join } from "node:path"
 import { promisify } from "node:util"
 import { StringDecoder } from "node:string_decoder"
 
 const execFileP = promisify(execFile)
+
+const SERVICE_LOG_MAX_BYTES = 5 * 1024 * 1024
+const SERVICE_LOG_RECORD_MAX_BYTES = 4096
+const SAFE_SERVICE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/i
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+const SAFE_SPAWN_ERROR_CODES = new Set([
+  "E2BIG",
+  "EACCES",
+  "EAGAIN",
+  "EINVAL",
+  "EMFILE",
+  "ENFILE",
+  "ENOENT",
+  "ENOEXEC",
+  "ENOMEM",
+  "ENOTDIR",
+  "EPERM",
+])
+const SAFE_SIGNALS = new Set(Object.keys(osConstants.signals))
+const SAFE_SERVICE_STATES = new Set(["pending", "starting", "healthy", "unhealthy", "restarting", "stopped", "failed", "adopted"])
+const SAFE_LOG_EVENTS = new Set(["state", "spawn", "exit", "spawn_error"])
+const SAFE_PERSISTED_ERROR_CODES = new Set([...SAFE_SPAWN_ERROR_CODES, "UNKNOWN"])
+const RECORD_BASE_KEYS = ["v", "at", "service", "event", "restarts", "stdoutBytes", "stdoutLines", "stderrBytes", "stderrLines"]
+// The protected raw-output draft could create these files even for a service that
+// is now conditional or absent (notably Ollama). Clean only known Supervisor names;
+// unrelated log files in the shared directory are never scanned or removed.
+const LEGACY_SUPERVISOR_SERVICE_NAMES = [
+  "llama-server",
+  "inference-proxy",
+  "opencode-serve",
+  "side-channel",
+  "wake-daemon",
+  "ollama",
+] as const
+
+interface OutputCounts {
+  stdoutBytes: number
+  stdoutLines: number
+  stderrBytes: number
+  stderrLines: number
+}
+
+type ServiceLogRecord = {
+  v: 1
+  at: string
+  service: string
+  event: "state" | "spawn" | "exit" | "spawn_error"
+  restarts: number
+  stdoutBytes: number
+  stdoutLines: number
+  stderrBytes: number
+  stderrLines: number
+  state?: ServiceState
+  pid?: number
+  exitCode?: number
+  signal?: string
+  errorCode?: string
+}
+
+function emptyOutputCounts(): OutputCounts {
+  return { stdoutBytes: 0, stdoutLines: 0, stderrBytes: 0, stderrLines: 0 }
+}
+
+function boundedAdd(current: number, increment: number): number {
+  return Math.min(Number.MAX_SAFE_INTEGER, current + increment)
+}
+
+function safeServiceName(name: string): boolean {
+  return SAFE_SERVICE_NAME.test(name) && !WINDOWS_RESERVED_NAME.test(name)
+}
+
+function safePid(pid: number | undefined): number | undefined {
+  return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0 ? pid : undefined
+}
+
+function safeExitCode(code: number | null): number | undefined {
+  return typeof code === "number" && Number.isSafeInteger(code) && code >= 0 ? code : undefined
+}
+
+function safeSignal(signal: NodeJS.Signals | null): string | undefined {
+  return signal && SAFE_SIGNALS.has(signal) ? signal : undefined
+}
+
+function safeSpawnErrorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return typeof code === "string" && SAFE_SPAWN_ERROR_CODES.has(code) ? code : "UNKNOWN"
+}
+
+function nonnegativeSafeInteger(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function safeExistingRecord(value: unknown, service: string): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  if (
+    record.v !== 1 ||
+    typeof record.at !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.at) ||
+    record.service !== service ||
+    typeof record.event !== "string" ||
+    !SAFE_LOG_EVENTS.has(record.event) ||
+    !nonnegativeSafeInteger(record.restarts) ||
+    !nonnegativeSafeInteger(record.stdoutBytes) ||
+    !nonnegativeSafeInteger(record.stdoutLines) ||
+    !nonnegativeSafeInteger(record.stderrBytes) ||
+    !nonnegativeSafeInteger(record.stderrLines)
+  ) {
+    return false
+  }
+
+  const allowed = new Set(RECORD_BASE_KEYS)
+  if (record.event === "state") {
+    allowed.add("state")
+    allowed.add("pid")
+    if (typeof record.state !== "string" || !SAFE_SERVICE_STATES.has(record.state)) return false
+  } else if (record.event === "spawn") {
+    allowed.add("pid")
+  } else if (record.event === "exit") {
+    allowed.add("pid")
+    allowed.add("exitCode")
+    allowed.add("signal")
+  } else {
+    allowed.add("pid")
+    allowed.add("errorCode")
+    if (typeof record.errorCode !== "string" || !SAFE_PERSISTED_ERROR_CODES.has(record.errorCode)) return false
+  }
+
+  if (record.pid !== undefined && safePid(record.pid as number) === undefined) return false
+  if (record.exitCode !== undefined && !nonnegativeSafeInteger(record.exitCode)) return false
+  if (record.signal !== undefined && (typeof record.signal !== "string" || !SAFE_SIGNALS.has(record.signal))) return false
+  return Object.keys(record).every((key) => allowed.has(key))
+}
+
+// The protected NJ-85 draft used the same filenames for raw child output. Before
+// adopting an existing file, require every line to match this fixed safe schema.
+// Unsafe, partial, non-file, or oversized legacy diagnostics are removed rather
+// than retained or rotated into the new metadata history.
+function sanitizeExistingServiceFile(path: string, service: string): boolean {
+  try {
+    const stat = lstatSync(path)
+    if (!stat.isFile() || stat.size > SERVICE_LOG_MAX_BYTES) {
+      rmSync(path, { force: true })
+      return true
+    }
+    if (stat.size === 0) return true
+    const text = readFileSync(path, "utf8")
+    if (!text.endsWith("\n")) {
+      rmSync(path, { force: true })
+      return true
+    }
+    const safe = text
+      .split("\n")
+      .slice(0, -1)
+      .every((line) => {
+        try {
+          const parsed: unknown = JSON.parse(line)
+          return JSON.stringify(parsed) === line && safeExistingRecord(parsed, service)
+        } catch {
+          return false
+        }
+      })
+    if (!safe) rmSync(path, { force: true })
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "ENOENT"
+  }
+}
+
+function prepareServiceFiles(logDir: string, service: string): boolean {
+  try {
+    mkdirSync(logDir, { recursive: true, mode: 0o700 })
+    const active = join(logDir, `${service}.log`)
+    return sanitizeExistingServiceFile(active, service) && sanitizeExistingServiceFile(`${active}.1`, service)
+  } catch {
+    return false
+  }
+}
+
+// Persist only Supervisor-owned, fixed-schema metadata. Child output and free-form
+// status details stay in memory; they can contain transcripts, replies, paths, URLs,
+// provider errors, or credentials and must never be copied into diagnostic files.
+function appendServiceRecord(logDir: string | undefined, prepared: Set<string>, record: ServiceLogRecord): void {
+  if (!logDir || !safeServiceName(record.service) || !safeExistingRecord(record, record.service)) return
+  if (!prepared.has(record.service)) {
+    if (!prepareServiceFiles(logDir, record.service)) return
+    prepared.add(record.service)
+  }
+  const encoded = `${JSON.stringify(record)}\n`
+  const encodedBytes = Buffer.byteLength(encoded, "utf8")
+  if (encodedBytes > SERVICE_LOG_RECORD_MAX_BYTES || encodedBytes > SERVICE_LOG_MAX_BYTES) return
+
+  const active = join(logDir, `${record.service}.log`)
+  const rotated = `${active}.1`
+  try {
+    mkdirSync(logDir, { recursive: true, mode: 0o700 })
+    let currentBytes = 0
+    try {
+      currentBytes = statSync(active).size
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") return
+    }
+    if (currentBytes + encodedBytes > SERVICE_LOG_MAX_BYTES) {
+      rmSync(rotated, { force: true })
+      renameSync(active, rotated)
+    }
+    appendFileSync(active, encoded, { encoding: "utf8", flag: "a", mode: 0o600 })
+  } catch {
+    // Observability must never take down JUNE. If rotation or writing fails, drop
+    // this record rather than appending past the cap or falling back to raw output.
+  }
+}
 
 // Cross-platform process termination. On POSIX we spawn children `detached` (their own
 // process group) and kill the GROUP via a negative pid; Windows has no process groups, so
@@ -154,12 +369,19 @@ interface Managed {
   child?: ChildProcess
   status: ServiceStatus
   logs: string[]
+  output: OutputCounts
   intentionalStop: boolean
   healthTimer?: NodeJS.Timeout
   restartTimer?: NodeJS.Timeout // pending crash-restart backoff; tracked so stop()/restartService can cancel it
   adoptedPid?: number // PID of an ADOPTED (not-spawned-by-us) process, so restartService can stop it (NJ-5)
   restartInFlight?: Promise<void> // single-flight guard: one restart pass at a time per service
   restartPending?: boolean // a restart was requested mid-pass → run exactly one more with the latest env
+}
+
+export interface SupervisorOptions {
+  // Tests must opt into a unique temporary directory. `false` disables disk
+  // diagnostics explicitly; production otherwise uses NIGHTJAR_DATA_DIR.
+  serviceLogDir?: string | false
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -177,16 +399,32 @@ export async function httpOk(url: string, matcher?: (body: string) => boolean, t
 
 export class Supervisor {
   private managed: Managed[]
+  private serviceLogDir: string | undefined
+  private preparedServiceLogs = new Set<string>()
   constructor(
     services: ServiceDef[],
     private onChange?: (statuses: ServiceStatus[]) => void,
+    options: SupervisorOptions = {},
   ) {
+    const configuredLogDir = options.serviceLogDir
+    this.serviceLogDir =
+      configuredLogDir === false ||
+      configuredLogDir === "" ||
+      (configuredLogDir === undefined && (Boolean(process.env.VITEST) || process.env.NODE_ENV === "test"))
+        ? undefined
+        : configuredLogDir ?? join(process.env.NIGHTJAR_DATA_DIR || join(homedir(), ".nightjar"), "logs")
     this.managed = services.map((def) => ({
       def,
       status: { name: def.name, state: "pending", restarts: 0 },
       logs: [],
+      output: emptyOutputCounts(),
       intentionalStop: false,
     }))
+    if (this.serviceLogDir) {
+      for (const service of LEGACY_SUPERVISOR_SERVICE_NAMES) {
+        if (prepareServiceFiles(this.serviceLogDir, service)) this.preparedServiceLogs.add(service)
+      }
+    }
   }
 
   status(): ServiceStatus[] {
@@ -199,7 +437,74 @@ export class Supervisor {
     m.status.state = state
     m.status.detail = detail
     m.status.pid = m.child?.pid ?? m.adoptedPid // show the adopted PID too (NJ-5)
+    this.writeStateRecord(m)
     this.emit()
+  }
+
+  private recordBase(
+    m: Managed,
+    event: ServiceLogRecord["event"],
+    output = m.output,
+    restarts = m.status.restarts,
+  ): ServiceLogRecord {
+    return {
+      v: 1,
+      at: new Date().toISOString(),
+      service: m.def.name,
+      event,
+      restarts,
+      stdoutBytes: output.stdoutBytes,
+      stdoutLines: output.stdoutLines,
+      stderrBytes: output.stderrBytes,
+      stderrLines: output.stderrLines,
+    }
+  }
+
+  private writeStateRecord(m: Managed): void {
+    const record = this.recordBase(m, "state")
+    record.state = m.status.state
+    const pid = safePid(m.status.pid)
+    if (pid !== undefined) record.pid = pid
+    appendServiceRecord(this.serviceLogDir, this.preparedServiceLogs, record)
+  }
+
+  private writeSpawnRecord(m: Managed, output: OutputCounts, pid: number | undefined, restarts: number): void {
+    const record = this.recordBase(m, "spawn", output, restarts)
+    const safe = safePid(pid)
+    if (safe !== undefined) record.pid = safe
+    appendServiceRecord(this.serviceLogDir, this.preparedServiceLogs, record)
+  }
+
+  private writeExitRecord(
+    m: Managed,
+    output: OutputCounts,
+    pid: number | undefined,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    restarts: number,
+  ): void {
+    const record = this.recordBase(m, "exit", output, restarts)
+    const safeProcessId = safePid(pid)
+    const safeCode = safeExitCode(code)
+    const safeProcessSignal = safeSignal(signal)
+    if (safeProcessId !== undefined) record.pid = safeProcessId
+    if (safeCode !== undefined) record.exitCode = safeCode
+    if (safeProcessSignal !== undefined) record.signal = safeProcessSignal
+    appendServiceRecord(this.serviceLogDir, this.preparedServiceLogs, record)
+  }
+
+  private writeSpawnErrorRecord(
+    m: Managed,
+    output: OutputCounts,
+    pid: number | undefined,
+    error: unknown,
+    restarts: number,
+  ): void {
+    const record = this.recordBase(m, "spawn_error", output, restarts)
+    const safe = safePid(pid)
+    if (safe !== undefined) record.pid = safe
+    record.errorCode = safeSpawnErrorCode(error)
+    appendServiceRecord(this.serviceLogDir, this.preparedServiceLogs, record)
   }
 
   // Start every service (in array order = dependency order). Resolves once all
@@ -237,6 +542,9 @@ export class Supervisor {
   }
 
   private async spawn(m: Managed): Promise<void> {
+    const output = emptyOutputCounts()
+    const generationRestarts = m.status.restarts
+    m.output = output
     // Preflight (audit1.md P0-2): if the service reports it can't start (its source/binary
     // is absent), fail fast with an actionable message instead of spawning a target that
     // just exits nonzero and drains the restart budget. Adoption is unaffected — bring()
@@ -265,6 +573,9 @@ export class Supervisor {
       stdio: ["ignore", "pipe", "pipe"],
     })
     m.child = child
+    child.once("spawn", () => {
+      this.writeSpawnRecord(m, output, child.pid, generationRestarts)
+    })
     // NJ-80: decode with a stateful StringDecoder, one PER STREAM, instead of b.toString().
     //
     // `b.toString()` decodes each chunk independently. A multi-byte UTF-8 character that lands
@@ -284,9 +595,20 @@ export class Supervisor {
     const errDec = new StringDecoder("utf8")
     // `dec.write()` returns "" while it holds an incomplete trailing character, so a chunk
     // that ends mid-character contributes nothing until the next chunk completes it.
-    const capStream = (dec: StringDecoder) => (b: Buffer) => pushLog(dec.write(b))
-    child.stdout?.on("data", capStream(outDec))
-    child.stderr?.on("data", capStream(errDec))
+    const capStream = (dec: StringDecoder, stream: "stdout" | "stderr") => (b: Buffer) => {
+      let lines = 0
+      for (const byte of b) if (byte === 0x0a) lines++ // completed lines; CRLF counts once
+      if (stream === "stdout") {
+        output.stdoutBytes = boundedAdd(output.stdoutBytes, b.length)
+        output.stdoutLines = boundedAdd(output.stdoutLines, lines)
+      } else {
+        output.stderrBytes = boundedAdd(output.stderrBytes, b.length)
+        output.stderrLines = boundedAdd(output.stderrLines, lines)
+      }
+      pushLog(dec.write(b))
+    }
+    child.stdout?.on("data", capStream(outDec, "stdout"))
+    child.stderr?.on("data", capStream(errDec, "stderr"))
 
     // A spawn failure (most often ENOENT — a legitimately-absent optional binary such as
     // llama-server when running on BYOK cloud, or a missing bun on a fresh box) emits 'error'.
@@ -296,10 +618,17 @@ export class Supervisor {
     child.on("error", (err) => {
       // A synthesized line, not bytes off the pipe — straight to the log, no decoder.
       pushLog(`spawn error: ${(err as Error)?.message ?? String(err)}\n`)
+      this.writeSpawnErrorRecord(m, output, child.pid, err, generationRestarts)
       if (m.child === child) {
         m.child = undefined
         this.set(m, "failed", `could not spawn: ${(err as Error)?.message ?? String(err)}`)
       }
+    })
+
+    // `close` fires only after both stdio streams close, so these are the final byte/line
+    // totals. Capture this process generation: a later restart must not replace its counts.
+    child.once("close", (code, signal) => {
+      this.writeExitRecord(m, output, child.pid, code, signal, generationRestarts)
     })
 
     child.on("exit", (code) => {
