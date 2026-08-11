@@ -542,6 +542,9 @@ export class Supervisor {
   }
 
   private async spawn(m: Managed): Promise<void> {
+    const output = emptyOutputCounts()
+    const generationRestarts = m.status.restarts
+    m.output = output
     // Preflight (audit1.md P0-2): if the service reports it can't start (its source/binary
     // is absent), fail fast with an actionable message instead of spawning a target that
     // just exits nonzero and drains the restart budget. Adoption is unaffected — bring()
@@ -561,9 +564,6 @@ export class Supervisor {
     }
     m.intentionalStop = false
     m.adoptedPid = undefined // we're spawning our OWN process now — no longer adopting
-    const output = emptyOutputCounts()
-    const generationRestarts = m.status.restarts
-    m.output = output
     this.set(m, "starting")
     const child = spawn(m.def.command, m.def.args, {
       cwd: m.def.cwd,

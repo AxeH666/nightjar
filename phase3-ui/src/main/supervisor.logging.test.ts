@@ -298,6 +298,63 @@ describe("Supervisor persistent service metadata (NJ-85)", () => {
     assertStrictSchema(records)
   }, 15000)
 
+  test("resets output counts before a disabled or preflight-aborted respawn", async () => {
+    const scenarios: Array<{
+      name: string
+      state: "stopped" | "failed"
+      block: (service: ServiceDef) => void
+    }> = [
+      {
+        name: "disabled",
+        state: "stopped",
+        block: (service) => {
+          service.enabled = () => false
+        },
+      },
+      {
+        name: "preflight",
+        state: "failed",
+        block: (service) => {
+          service.preflight = () => "blocked before spawn"
+        },
+      },
+    ]
+
+    for (const scenario of scenarios) {
+      const root = makeTempRoot()
+      const logDir = join(root, "logs")
+      const serviceName = `abort-${scenario.name}`
+      const logFile = join(logDir, `${serviceName}.log`)
+      const priorOutput = "previous-generation-output\n"
+      const service = shortLivedService(serviceName, priorOutput, "")
+      const supervisor = new Supervisor([service], undefined, { serviceLogDir: logDir })
+
+      await supervisor.start()
+      const beforeAbort = await waitForRecord(logFile, "exit")
+      expect(beforeAbort.find((record) => record.event === "exit")?.stdoutBytes).toBe(
+        Buffer.byteLength(priorOutput, "utf8"),
+      )
+
+      scenario.block(service)
+      await supervisor.restartService(serviceName)
+
+      const records = readRecords(logFile)
+      const matchingStates = records.filter(
+        (record) => record.event === "state" && record.state === scenario.state,
+      )
+      const aborted = matchingStates[matchingStates.length - 1]
+      expect(aborted).toEqual(
+        expect.objectContaining({
+          stdoutBytes: 0,
+          stdoutLines: 0,
+          stderrBytes: 0,
+          stderrLines: 0,
+        }),
+      )
+      assertStrictSchema(records, serviceName)
+    }
+  }, 15000)
+
   test("removes unsafe or oversized legacy raw logs before writing structured metadata", async () => {
     const root = makeTempRoot()
     const logDir = join(root, "logs")
