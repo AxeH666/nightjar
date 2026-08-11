@@ -21,7 +21,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // and holds no child/PID. A restart to apply a new BYOK key must not collide.
 async function testAdopted() {
   const def: ServiceDef = { name: "svc", command: "sleep", args: ["3600"], ready: async () => true, readyTimeoutMs: 3000 }
-  const sup = new Supervisor([def])
+  const sup = new Supervisor([def], undefined, { serviceLogDir: false })
   await sup.start()
   let s = sup.status()[0]
   check("adopted at start (not spawned)", s.state === "adopted" && s.pid === undefined, `state=${s.state} pid=${s.pid}`)
@@ -43,7 +43,7 @@ async function testAdopted() {
 async function testOwned() {
   let up = false
   const def: ServiceDef = { name: "svc", command: "sleep", args: ["3600"], ready: async () => up, readyTimeoutMs: 5000 }
-  const sup = new Supervisor([def])
+  const sup = new Supervisor([def], undefined, { serviceLogDir: false })
   setTimeout(() => (up = true), 400) // new process "comes up" shortly after spawn
   await sup.start()
   let s = sup.status()[0]
@@ -68,7 +68,7 @@ async function testOwned() {
 // env. We stub the private restartOnce to observe overlap deterministically.
 async function testCoalesce() {
   const def: ServiceDef = { name: "svc", command: "sleep", args: ["3600"], ready: async () => true, readyTimeoutMs: 3000 }
-  const sup = new Supervisor([def])
+  const sup = new Supervisor([def], undefined, { serviceLogDir: false })
   let active = 0,
     maxActive = 0,
     calls = 0

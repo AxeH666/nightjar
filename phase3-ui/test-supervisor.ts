@@ -15,7 +15,7 @@ const check = (n: string, ok: boolean, extra = "") => { console.log(`${ok ? "PAS
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function main() {
-  const sup = new Supervisor(nightjarServices())
+  const sup = new Supervisor(nightjarServices(), undefined, { serviceLogDir: false })
   const byName = () => Object.fromEntries(sup.status().map((s) => [s.name, s]))
 
   console.log("→ starting supervisor (adopt llama, spawn proxy/opencode/side-channel)…")
