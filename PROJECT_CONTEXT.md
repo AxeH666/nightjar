@@ -113,16 +113,28 @@ There is no single backup/export boundary or unified migration/rollback strategy
 
 ## Cloud and local inference
 
-**Confirmed founder decision, not yet integrated into `main`:** NJ-93 records a deliberate pivot to cloud inference for everything except on-device wake detection. The previous “offline, local-first” product claim is retired. The decision currently lives on local branch `docs/nj93-cloud-decision` (`KNOWN_ISSUES.md:278-310`).
+**Confirmed founder decision (NJ-93):** JUNE is cloud-first and quality-first.
+Offline operation and local inference parity are no longer product requirements.
+The best practical cloud path should become primary for Voice, Memory,
+reasoning, vision, and other intelligence-heavy capabilities as focused
+migrations are implemented.
 
-**Confirmed implementation conflict:** the checked-out code has not fully adopted that decision:
+**Confirmed current transition state:** local Qwen/llama.cpp, faster-whisper,
+Kokoro/Misaki, Ollama vision, local embeddings, and local memory infrastructure
+still exist. They may remain temporarily while replacements are validated, but
+they are not the long-term quality target. The historical
+`docs/nj93-cloud-decision` branch is evidence only and must not be merged or
+cherry-picked.
 
-- Agent prompts and settings still describe JUNE/Nightjar as offline or local-first (`engine-workspace/opencode.json:32-108`, `BYOKSettings.tsx:73`).
-- The service graph still contains llama.cpp and the local inference proxy.
-- Current voice code still performs local faster-whisper STT and local Kokoro TTS.
-- Generic chat/capability cloud banners exist, but clear per-turn/provider disclosure for voice remains incomplete.
+**Privacy consequence:** current STT is local, but a selected cloud chat model
+receives the resulting transcript. Future cloud Voice may transmit post-wake
+audio or transcripts. Future cloud Memory may process conversation history,
+personal context, embeddings, summaries, or retrieved memories.
 
-**Unknown:** the exact migration plan and timing for local STT/TTS and the retained local-model services. The decision text is broader than the checked-out implementation. Do not silently infer the final boundary; record and implement it explicitly.
+**Founder decisions still open:** provider selection; modular Voice versus
+realtime speech-to-speech; cloud STT/TTS vendors; cloud Memory storage; and
+privacy, retention, residency, and consent policy. Do not choose these by
+accident while migrating individual components.
 
 ## Architectural gaps blocking the JARVIS vision
 

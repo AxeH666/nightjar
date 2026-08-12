@@ -1,9 +1,19 @@
-# Nightjar
+# JUNE (formerly Nightjar)
 
-**An offline, local-first AI coding + personal assistant.** Nightjar runs a local
-LLM and a suite of capabilities (voice, vision, memory, browser, web search,
-research, calendar/notes/tasks, image gen via BYOK) on your own machine — nothing
-is sent to the cloud by default.
+**A cloud-first, quality-first personal assistant.** JUNE prioritizes the best
+practical user experience for Voice, Memory, reasoning, vision, and other
+intelligence-heavy capabilities, including cloud inference when it delivers
+better quality.
+
+The repository still contains local Qwen, faster-whisper, Kokoro/Misaki,
+Ollama, embeddings, and memory infrastructure while cloud replacements are
+built. Those implementations are transitional scaffolding, not a promise of
+offline operation or the long-term quality target.
+
+Cloud Voice may transmit post-wake audio or transcripts. Cloud Memory may
+process conversation history, personal context, embeddings, summaries, or
+retrieved memories. Provider selection, retention policy, and the final cloud
+Memory architecture remain separate founder decisions.
 
 > **License: [AGPL-3.0-or-later](NIGHTJAR_LICENSE_AND_ATTRIBUTION.md).** Nightjar is
 > a combined work built on open-source components; see
@@ -12,7 +22,7 @@ is sent to the cloud by default.
 
 ## What it is
 
-Nightjar composes several open-source projects over **MCP (Model Context Protocol)**
+JUNE composes several open-source projects over **MCP (Model Context Protocol)**
 and a small **WebSocket side-channel**, rather than merging codebases:
 
 | Component | Role | License |
@@ -93,7 +103,7 @@ export NIGHTJAR_ROOT="$(pwd)"
 (Local model weights, llama.cpp, and Ollama are a separate install — see the
 phase reports.)
 
-> **Offline caveat:** OpenCode's `grep`/`glob` tools fetch a small `ripgrep` binary on first
+> **First-run network note:** OpenCode's `grep`/`glob` tools fetch a small `ripgrep` binary on first
 > use, so the very first code-search needs network once (cached thereafter).
 
 ## Repository layout

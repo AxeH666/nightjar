@@ -1,6 +1,10 @@
-# JUNE — v1 shipping plan (source of truth)
+# JUNE — historical v1 shipping plan
 
-> **This file is the authoritative v1 plan.** Other planning/config files reconcile to it — see **Files to reconcile** below. Make those edits in **separate follow-up PRs, one at a time**, not in this pass.
+> **Superseded by NJ-93 (2026-08-12):** the local-first architecture in this plan
+> is historical, not current product direction. JUNE is now cloud-first and
+> quality-first; existing local components remain only during transition. See
+> `PROJECT_CONTEXT.md` for the current decision. The task history below is
+> retained as implementation evidence, not as an active architecture mandate.
 >
 > **v1 plan — Task 4 (attachments) is SHIPPED (PR #46); Tasks 3 → 1+2 → 5 → 6 remain.** Sequencing follows the one-PR-at-a-time rule (branch off fresh `main`, merge, pull, then next). Every task keeps a **rule-6 live-verify** (re-trigger the real behavior on a running instance, not just typecheck/build). **File:line references here are approximate guides — they drift as code changes; re-locate by symbol/grep.**
 
