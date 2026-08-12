@@ -35,6 +35,52 @@ def check(name, cond, got=""):
         FAILS.append(name)
 
 
+print("== 0. NJ-94 prototype wake threshold configuration ==")
+check("default threshold is 0.55", wd.configured_wake_threshold({}) == 0.55)
+check("module effective default is 0.55", wd.WAKE_THRESHOLD == 0.55, wd.WAKE_THRESHOLD)
+check("valid environment override works",
+      wd.configured_wake_threshold({"NIGHTJAR_WAKE_THRESHOLD": "0.72"}) == 0.72)
+
+for label, value in (
+    ("invalid text", "loud"),
+    ("negative value", "-0.01"),
+    ("zero value", "0"),
+    ("value above 1", "1.01"),
+    ("NaN", "NaN"),
+    ("positive infinity", "inf"),
+    ("negative infinity", "-inf"),
+):
+    try:
+        wd.configured_wake_threshold({"NIGHTJAR_WAKE_THRESHOLD": value})
+        check(f"{label} is rejected", False)
+    except ValueError as exc:
+        check(f"{label} is rejected safely",
+              "NIGHTJAR_WAKE_THRESHOLD" in str(exc), str(exc))
+
+received = {}
+
+
+class _ThresholdProbe:
+    def __init__(self, **kwargs):
+        self.threshold = kwargs.get("threshold")
+        received.update(kwargs)
+
+
+real_detector = wd._wakeword.WakeWordDetector
+real_threshold = wd.WAKE_THRESHOLD
+try:
+    wd._wakeword.WakeWordDetector = _ThresholdProbe
+    wd.WAKE_THRESHOLD = wd.configured_wake_threshold(
+        {"NIGHTJAR_WAKE_THRESHOLD": "0.72"}
+    )
+    wd.build_wake_detector()
+finally:
+    wd._wakeword.WakeWordDetector = real_detector
+    wd.WAKE_THRESHOLD = real_threshold
+check("detector receives the effective threshold",
+      received.get("threshold") == 0.72, received)
+
+
 print("== 1. backend selection (pure) ==")
 sel = wd.select_mic_backend
 check("sounddevice preferred when available", sel(None, True, True) == "sounddevice")

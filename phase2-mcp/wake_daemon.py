@@ -38,6 +38,7 @@ Known, explicitly-accepted limitations (not silently hidden):
 Run: python wake_daemon.py
 Env: NIGHTJAR_OPENCODE_URL (default http://127.0.0.1:4096), NIGHTJAR_AGENT
      (default "assistant"), NIGHTJAR_WAKEWORD_MODEL (optional custom .onnx),
+     NIGHTJAR_WAKE_THRESHOLD (default 0.55 for the current prototype),
      NIGHTJAR_TTS_VOICE (default af_heart), NIGHTJAR_PLAY_TTS=1 to also play
      the reply locally via `paplay` (useful without the Electron UI running).
 """
@@ -45,6 +46,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import queue
 import shutil
@@ -102,6 +104,36 @@ TTS_TIMEOUT_S = float(os.environ.get("NIGHTJAR_TTS_TIMEOUT_S", "30"))
 TTS_VOICE = os.environ.get("NIGHTJAR_TTS_VOICE", "af_heart")
 PLAY_TTS_LOCALLY = os.environ.get("NIGHTJAR_PLAY_TTS", "0") == "1"
 HEALTH_PORT = int(os.environ.get("NIGHTJAR_WAKE_HEALTH_PORT", "8766"))
+
+# Temporary prototype tuning: recalibrate this when the real hey_june.onnx model exists.
+PROTOTYPE_WAKE_THRESHOLD = 0.55
+
+
+def configured_wake_threshold(environ=None) -> float:
+    """Return a validated wake threshold, failing before mic capture on bad input."""
+    source = os.environ if environ is None else environ
+    raw = source.get("NIGHTJAR_WAKE_THRESHOLD")
+    if raw is None:
+        return PROTOTYPE_WAKE_THRESHOLD
+    try:
+        threshold = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "NIGHTJAR_WAKE_THRESHOLD must be finite, greater than 0, and at most 1"
+        ) from exc
+    if not math.isfinite(threshold) or not 0.0 < threshold <= 1.0:
+        raise ValueError(
+            "NIGHTJAR_WAKE_THRESHOLD must be finite, greater than 0, and at most 1"
+        )
+    return threshold
+
+
+# Resolve at import/startup so invalid configuration cannot enable the listener.
+WAKE_THRESHOLD = configured_wake_threshold()
+
+
+def build_wake_detector():
+    return _wakeword.WakeWordDetector(threshold=WAKE_THRESHOLD)
 
 # Stripped if the transcript leads with one. "hey june" is the product phrase (its
 # trained model is still pending); "hey buddy" is what the interim stand-in actually
@@ -675,7 +707,8 @@ def main() -> None:
         f"session created lazily at first wake)")
     oc = OpenCodeVoice(OPENCODE_URL, AGENT, MODEL)
 
-    detector = _wakeword.WakeWordDetector()
+    detector = build_wake_detector()
+    log(f"wake threshold={detector.threshold:g} (temporary prototype tuning)")
     if not detector.is_custom:
         log(f"WARNING: INTERIM stand-in wake model in use ('{detector.model_key}') - say "
             f"'Hey buddy', NOT 'Hey June', until a trained hey_june.onnx is deployed "
