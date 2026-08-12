@@ -5,6 +5,9 @@
   "license": "AGPL-3.0-or-later",
   "author": "BlackKrait / Nightjar",
   "main": "out/main/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

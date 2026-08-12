@@ -18,14 +18,17 @@ Fastest path to a working LAB/CAD via a BYOK cloud key (skips the heavy optional
     powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -CoreOnly
 
 Prereqs (install first; reopen the terminal after each so PATH refreshes):
-    Node 20+ | Bun (irm bun.sh/install.ps1 | iex) | Python 3.12 (winget install Python.Python.3.12)
+    Node.js 22.12+ | Bun (irm bun.sh/install.ps1 | iex) | Python 3.12 (winget install Python.Python.3.12)
     | uv (irm https://astral.sh/uv/install.ps1 | iex) | git
 #>
 [CmdletBinding()]
 param(
   [switch]$SkipOllama,      # skip the local vision model (gemma3:4b)
   [switch]$WithDiffusion,   # OPT-IN: local image-gen venv + Z-Image-Turbo (~6 GB) — currently unused by the app (PR E)
-  [switch]$CoreOnly         # engine + phase-cad + UI only - the minimal LAB/CAD-via-BYOK path
+  [switch]$CoreOnly,        # engine + phase-cad + UI only - the minimal LAB/CAD-via-BYOK path
+  [Parameter(DontShow)]
+  [AllowEmptyString()]
+  [string]$CheckNodeVersion # internal check-only path for synthetic boundary validation
 )
 $ErrorActionPreference = 'Stop'
 
@@ -34,6 +37,36 @@ Set-Location $Root
 Write-Host "== Nightjar setup (native Windows) - root: $Root ==" -ForegroundColor Cyan
 
 function Test-Cmd([string]$Name) { return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue) }
+
+function Assert-NodeVersion([AllowNull()][string]$VersionText) {
+  $minimum = [version]'22.12.0'
+  $normalized = if ($null -eq $VersionText) { '' } else { $VersionText.Trim().TrimStart('v') }
+  $detected = $null
+  if (-not [version]::TryParse($normalized, [ref]$detected)) {
+    $shown = if ([string]::IsNullOrWhiteSpace($VersionText)) { 'missing or unreadable' } else { "'$VersionText'" }
+    throw "Detected Node.js version: $shown. Node.js 22.12+ is required. Install or upgrade Node.js, then reopen the terminal."
+  }
+  if ($detected -lt $minimum) {
+    throw "Detected Node.js $detected. Node.js 22.12+ is required. Upgrade Node.js, then reopen the terminal."
+  }
+}
+
+if ($PSBoundParameters.ContainsKey('CheckNodeVersion')) {
+  Assert-NodeVersion $CheckNodeVersion
+  Write-Host "Node.js $($CheckNodeVersion.TrimStart('v')) satisfies the 22.12+ requirement."
+  return
+}
+
+if (-not (Test-Cmd 'node')) {
+  throw "Node.js was not found. Node.js 22.12+ is required. Install or upgrade Node.js, then reopen the terminal."
+}
+try {
+  $nodeVersionOutput = (& node --version 2>&1)
+  if ($LASTEXITCODE -ne 0) { throw "node --version exited with code $LASTEXITCODE" }
+} catch {
+  throw "Detected Node.js version: missing or unreadable. Node.js 22.12+ is required. Install or upgrade Node.js, then reopen the terminal."
+}
+Assert-NodeVersion (("$nodeVersionOutput").Trim())
 
 # Resolve bun.exe: PATH first, then the default installer location.
 function Resolve-Bun {
@@ -137,7 +170,7 @@ try {
 
 # ---- 4) UI node modules -----------------------------------------------------------
 Write-Host "-- [3/7] phase3-ui npm install --"
-if (-not (Test-Cmd 'npm')) { throw "npm not found. Install Node.js 20+ and reopen the terminal." }
+if (-not (Test-Cmd 'npm')) { throw "npm not found. Install Node.js 22.12+ and reopen the terminal." }
 Push-Location (Join-Path $Root 'phase3-ui')
 try { & npm install --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw "npm install failed" } } finally { Pop-Location }
 

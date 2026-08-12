@@ -59,7 +59,7 @@ MCP (`phase-cad/.venv`). Everything else (voice/vision/websearch/image) is optio
 ## 3. Install the components
 
 ### 3.1 Node.js + the Electron UI
-- Install **Node.js 20 LTS+** (includes npm).
+- Install **Node.js 22.12 or newer** (includes npm), then reopen the terminal so PATH refreshes.
 - ```powershell
   cd phase3-ui
   npm install
@@ -240,7 +240,7 @@ run). Keep your WSL clone until this passes — safety net.
 
 ### 9.1 · Install (minimal: LAB/CAD via Fireworks BYOK)
 First install the four prerequisites (**reopen the terminal after each** so PATH refreshes):
-1. **Node 20 LTS+** → `winget install OpenJS.NodeJS.LTS`.
+1. **Node.js 22.12 or newer** → `winget install OpenJS.NodeJS.LTS`, then reopen the terminal.
 2. **Bun** → `powershell -c "irm bun.sh/install.ps1 | iex"` (→ `%USERPROFILE%\.bun\bin\bun.exe`, found automatically).
 3. **Python 3.12** (exactly — not 3.13) → `winget install Python.Python.3.12` (confirm `py -3.12 --version`).
 4. **uv** → `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`.
