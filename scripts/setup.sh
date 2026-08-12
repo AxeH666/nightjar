@@ -14,6 +14,44 @@
 # path; this stays runnable under Git Bash. (audit1.md P1-5 — setup was previously POSIX-only.)
 set -euo pipefail
 
+node_version_supported() {
+  local version="${1#v}"
+  version="${version%$'\r'}" # node.exe under Git Bash can leave CR after command substitution strips LF
+  [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  local major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}"
+  (( major > 22 || (major == 22 && minor >= 12) ))
+}
+
+check_node_version() {
+  local version="${1:-}"
+  if ! node_version_supported "$version"; then
+    local shown="${version:-missing or unreadable}"
+    echo "Detected Node.js version: $shown. Node.js 22.12+ is required. Install or upgrade Node.js, then reopen the terminal." >&2
+    return 1
+  fi
+}
+
+# Internal check-only path for synthetic boundary validation; performs no setup work.
+if [ "${1:-}" = "--check-node-version" ]; then
+  check_node_version "${2:-}"
+  echo "Node.js ${2#v} satisfies the 22.12+ requirement."
+  exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js was not found. Node.js 22.12+ is required. Install or upgrade Node.js, then reopen the terminal." >&2
+  exit 1
+fi
+if ! NODE_VERSION="$(node --version 2>/dev/null)"; then
+  echo "Detected Node.js version: missing or unreadable. Node.js 22.12+ is required. Install or upgrade Node.js, then reopen the terminal." >&2
+  exit 1
+fi
+check_node_version "$NODE_VERSION"
+if ! command -v npm >/dev/null 2>&1; then
+  echo "npm was not found. Install Node.js 22.12+ and reopen the terminal." >&2
+  exit 1
+fi
+
 # Repo root = this script's parent dir (no hardcoded machine path).
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
