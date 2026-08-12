@@ -304,5 +304,17 @@ def build_g2p(british: bool = False):
 
     g2p = en.G2P(trf=False, british=british, fallback=None)
     g2p.fallback = NightjarFallback(g2p.lexicon)
+    # NJ-87: Misaki routes unknown all-caps words through its initialism
+    # speller before our fallback runs. Promote only jargon that has no native
+    # gold or silver entry so its curated pronunciation is stable across case
+    # without changing real initialisms or overriding Misaki's known words.
+    g2p.lexicon.golds.update(
+        {
+            word: phonemes
+            for word, phonemes in CURATED.items()
+            if word not in g2p.lexicon.golds
+            and word not in g2p.lexicon.silvers
+        }
+    )
     g2p.lexicon.golds.update(GOLD_OVERRIDES)
     return g2p
