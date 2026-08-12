@@ -119,11 +119,11 @@ def configured_wake_threshold(environ=None) -> float:
         threshold = float(raw)
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            "NIGHTJAR_WAKE_THRESHOLD must be a finite number between 0 and 1"
+            "NIGHTJAR_WAKE_THRESHOLD must be finite, greater than 0, and at most 1"
         ) from exc
-    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+    if not math.isfinite(threshold) or not 0.0 < threshold <= 1.0:
         raise ValueError(
-            "NIGHTJAR_WAKE_THRESHOLD must be a finite number between 0 and 1"
+            "NIGHTJAR_WAKE_THRESHOLD must be finite, greater than 0, and at most 1"
         )
     return threshold
 

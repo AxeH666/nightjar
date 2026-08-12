@@ -44,6 +44,7 @@ check("valid environment override works",
 for label, value in (
     ("invalid text", "loud"),
     ("negative value", "-0.01"),
+    ("zero value", "0"),
     ("value above 1", "1.01"),
     ("NaN", "NaN"),
     ("positive infinity", "inf"),
