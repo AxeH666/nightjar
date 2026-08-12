@@ -67,7 +67,7 @@ LLM_MIN = 10
 # Brevity here is not a style preference — it is a latency control. The local model is
 # decode-bound (~14 tok/s), so every sentence we don't ask for is ~1s we don't wait.
 SYSTEM_PROMPT = (
-    "You are Nightjar, an offline, local-first AI assistant, doing a QUICK web lookup. "
+    "You are Nightjar, a cloud-first, quality-first AI assistant, doing a QUICK web lookup. "
     "Answer the user's question directly from the numbered search results below, in at "
     "most 2-3 short sentences. Cite the results you used inline as [1], [2], etc. Answer "
     "immediately — do not deliberate at length. If the results do not actually answer the "

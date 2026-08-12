@@ -1,8 +1,8 @@
 import { useState } from "react"
 import type { ModelChoice } from "../lib/byok"
 
-// Indicator that the active CHAT model is a CLOUD model — data leaves the machine, breaking the
-// default offline/local-first promise. Dismissible (✕), but RE-ARMS when the cloud model changes
+// Indicator that the active CHAT model is a CLOUD model and data leaves the machine.
+// Dismissible (✕), but RE-ARMS when the cloud model changes
 // (the dismissed state is keyed to `model.id`), so switching to a different cloud model re-shows
 // it. Renders nothing when the local model is active. A persistent quiet ☁ stays in the model
 // switcher even after dismissal, so a dismiss never leaves zero cloud signal (the privacy intent).

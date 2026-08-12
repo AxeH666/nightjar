@@ -2,7 +2,7 @@
 
 ## License of the combined work: **AGPL-3.0-or-later**
 
-Nightjar is a fully open-source, local-first AI coding + personal assistant,
+JUNE (formerly Nightjar) is an open-source, cloud-first personal assistant,
 licensed under the GNU Affero General Public License, version 3 or later
 (AGPL-3.0-or-later) — see `COPYING`.
 
@@ -33,10 +33,9 @@ licensed under the GNU Affero General Public License, version 3 or later
 
 ### AGPL §13 (network use) — operational note
 AGPL requires that users interacting with the software **over a network** be
-offered its Complete Corresponding Source. Nightjar is local-first (offline), so
-this rarely triggers — but any future hosted / remote-access / "share my Nightjar
-over the LAN" mode MUST offer source to those remote users. Flagged for anyone
-adding networked access.
+offered its Complete Corresponding Source. Any JUNE version that supports remote
+user interaction must keep that source-offer obligation in scope. How it applies
+to future cloud topology must be reviewed when that topology is selected.
 
 ## Upstream components and their licenses (all preserved)
 

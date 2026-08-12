@@ -1,4 +1,10 @@
-# JUNE (Nightjar) — Full Project Context
+# JUNE (Nightjar) — Historical Project Context
+
+> **Superseded by NJ-93 (2026-08-12):** this briefing records the earlier
+> local-first architecture and is no longer the source of truth for product
+> direction. JUNE is now cloud-first and quality-first; current local components
+> remain only as transitional implementation. See `PROJECT_CONTEXT.md` for the
+> current decision and its still-open founder choices.
 
 > **Purpose:** a single, self-contained briefing on what this project is, how it's built, what
 > it depends on, where it stands, and what to watch when migrating to native Windows. Written

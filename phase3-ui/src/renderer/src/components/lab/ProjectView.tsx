@@ -338,7 +338,7 @@ function AutoMemoryPanel({ projectId, content }: { projectId: string; content: P
       title="Memory"
       optional
       save={content.saveState.autoMemory}
-      note="Durable memory for this project, sent to its chats (same cloud gate). Generated on-device from your chats (never sent to the cloud) — or edit it yourself. Private to you."
+      note="Durable memory for this project, sent to its chats (same cloud gate). It is generated on-device during the current transition; future cloud Memory may process project chats. Provider and retention policy are not decided yet."
     >
       <textarea
         value={content.autoMemory}
