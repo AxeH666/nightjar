@@ -222,7 +222,42 @@ check(
     f"{phonemes!r} {stats}",
 )
 
-print("\n== 8. standalone fallback contract ==")
+print("\n== 8. NJ-87 curated jargon is case-stable ==")
+from misaki import en  # noqa: E402
+
+baseline = en.G2P(trf=False, fallback=None)
+fallback_only = {
+    word
+    for word in CURATED
+    if word not in baseline.lexicon.golds
+    and word not in baseline.lexicon.silvers
+}
+check("fallback-only curated set is non-empty", bool(fallback_only))
+for word in sorted(fallback_only):
+    expected = CURATED[word]
+    lowercase, _ = g2p(word)
+    uppercase, _ = g2p(word.upper())
+    check(
+        f"{word!r} lowercase uses CURATED",
+        lowercase == expected,
+        repr(lowercase),
+    )
+    check(
+        f"{word.upper()!r} uses the same CURATED pronunciation",
+        uppercase == expected,
+        repr(uppercase),
+    )
+
+for initialism in ("GPU", "USB", "HDMI", "NASA", "IT", "US", "AM", "AN"):
+    expected, _ = baseline(initialism)
+    actual, _ = g2p(initialism)
+    check(
+        f"{initialism!r} initialism behavior is unchanged",
+        actual == expected,
+        f"expected={expected!r} actual={actual!r}",
+    )
+
+print("\n== 9. standalone fallback contract ==")
 standalone = NightjarFallback(g2p.lexicon)
 check("lexicon retained", standalone._lexicon is g2p.lexicon)
 check(
