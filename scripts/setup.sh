@@ -16,6 +16,7 @@ set -euo pipefail
 
 node_version_supported() {
   local version="${1#v}"
+  version="${version%$'\r'}" # node.exe under Git Bash can leave CR after command substitution strips LF
   [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
   local major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}"
   (( major > 22 || (major == 22 && minor >= 12) ))
