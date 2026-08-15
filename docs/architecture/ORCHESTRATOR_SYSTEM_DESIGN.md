@@ -375,11 +375,15 @@ Provider-generated IDs are correlation metadata only. Models do not generate sec
   "correlation_id": "uuid",
 
   "wall_time": "2026-08-15T12:00:00.000Z",
-  "monotonic_time": 123456789,
+  "monotonic_ns": 1234567890123,
   "privacy_class": "operational",
   "payload": {}
 }
 ```
+
+`wall_time` is an ISO-8601 UTC timestamp used for human-readable timing, persistence, diagnostics, and cross-process correlation. `monotonic_ns` is a non-negative integer nanosecond reading from the emitting process's monotonic clock and is used for durations and ordering only inside that process.
+
+Monotonic-clock origins are not comparable across processes. Cross-process correlation and stale-event handling use canonical IDs, producer/stream sequence numbers, causation and correlation IDs, `wall_time`, and explicit state and generation checks. Wall-clock time alone does not provide reliable ordering.
 
 ## 6.3 Event invariants
 
@@ -387,7 +391,8 @@ Provider-generated IDs are correlation metadata only. Models do not generate sec
 - `sequence` is monotonic within its owning stream.
 - Security-critical IDs and policy context are attached by trusted JUNE code.
 - Partial voice transcripts may create UI events and speculative reads only.
-- Only a final authenticated user turn may create a durable task or effect-bearing proposal.
+- `voice.user.transcript.final` is an STT result, not authority to create a durable task, effect-bearing proposal, or durable memory candidate.
+- Only `conversation.turn.finalized`, or a separately authorised scheduled/system trigger, may initiate new durable/effect-bearing work.
 - Stale events are rejected using task/action revisions, generation IDs, and sequence numbers.
 - Provider events are translated into JUNE events at the adapter boundary.
 
@@ -399,19 +404,19 @@ Provider-generated IDs are correlation metadata only. Models do not generate sec
 
 A request may arrive from:
 
-- Final desktop text turn.
-- Final voice transcript from the shared conversation.
-- Authenticated Telegram update.
-- User-approved scheduled trigger.
+- `conversation.turn.finalized`, emitted after the Conversation Service commits an authenticated desktop, Voice, or linked-channel user turn.
+- A separately authorised scheduled/system trigger.
 - Capability completion or failure event.
 - Explicit user approval, denial, pause, resume, cancel, restart, or discard command.
+
+Capability and control events may advance work that was already admitted; they do not originate new user authority. A linked-channel input such as Telegram must pass through the same Conversation Service authentication, normalisation, acceptance, and persistence boundary before it can originate a new user-requested task or effect.
 
 ## 7.2 Admission checks
 
 Before routing, JUNE checks:
 
 1. **Authentication:** Which user/channel produced the request?
-2. **Finality:** Is the input a final turn rather than provisional speech?
+2. **Finality:** Is the input `conversation.turn.finalized`, an authorised scheduled/system trigger, or a valid continuation event for already admitted work?
 3. **Replay:** Has this event/update already been processed?
 4. **Session scope:** Which conversation/project/task does it refer to?
 5. **Safety mode:** Temporary conversation, privacy mode, offline/degraded mode.
@@ -448,6 +453,8 @@ Create a durable task when work:
 
 A reminder is durable even if its creation takes milliseconds because its responsibility extends into the future. Deep Research and OpenCode tasks are durable. A normal conversational answer is not.
 
+`execution_mode` describes the lifetime of the current capability invocation, not whether its result persists. A `turn_scoped` reminder-creation invocation may create a durable reminder and completed durable task/action record.
+
 ---
 
 # 8. Routing and planning
@@ -457,7 +464,7 @@ A reminder is durable even if its creation takes milliseconds because its respon
 Use deterministic fast paths where intent is structurally clear, then a typed model router for ambiguous or compositional requests.
 
 ```text
-Authenticated final turn
+conversation.turn.finalized
         ↓
 Deterministic recognisers / active-task references
         ↓ if unresolved
@@ -491,7 +498,8 @@ The model returns constrained structured data, not executable code:
 {
   "route": "research.deep",
   "confidence": 0.94,
-  "operation_class": "long_running_read",
+  "operation_kind": "read",
+  "execution_mode": "long_running",
   "objective": "Compare current memory architectures for personal assistants",
   "capability_hint": "research",
   "requires_clarification": false,
@@ -503,7 +511,7 @@ The model returns constrained structured data, not executable code:
 }
 ```
 
-The router may propose multiple steps, but the registry provides the trusted meaning of every operation.
+The router may propose multiple steps, but `operation_kind` and `execution_mode` remain untrusted routing hints. The trusted Capability Registry and Orchestrator validate or recompute them and provide the authoritative meaning of every operation.
 
 ## 8.4 Confidence policy
 
@@ -561,8 +569,10 @@ operations:
   - operation_id: research.deep
     input_schema: schemas/research-deep-input.json
     output_schema: schemas/research-deep-output.json
-    operation_class: long_running_read
+    operation_kind: read
+    execution_mode: long_running
     risk_tier: R0
+    permission_requirement: feature_consent
     side_effects: none_external
     cancellable: cooperative
     pausable: checkpointed
@@ -589,7 +599,8 @@ Every operation declares:
 - Operation ID and schemas.
 - Human description.
 - Runtime and health contract.
-- Read/write/long-running classification.
+- `operation_kind`: `read` or `write`.
+- `execution_mode`: `turn_scoped` or `long_running`.
 - Risk tier.
 - Side effects and reversibility.
 - Required permission scopes.
@@ -604,6 +615,17 @@ Every operation declares:
 - Minimum logging/audit fields.
 - Compatibility/deprecation window.
 
+The trusted manifest and Orchestrator deterministically map each operation to `operation_kind`, `execution_mode`, side effects, `risk_tier`, permission requirement, retry class, and verification requirement. Model/provider values are proposals only and cannot author or lower any authoritative classification.
+
+The collapsed labels `local_write`, `protected_write`, `long_running_read`, and `long_running` are not canonical `operation_kind` values:
+
+- `local_write` maps to `operation_kind = write`, with risk normally derived as R1.
+- `protected_write` maps to `operation_kind = write`, with risk normally derived as R2 or R3.
+- `long_running_read` maps to `operation_kind = read` and `execution_mode = long_running`.
+- `long_running` maps only to `execution_mode = long_running`.
+
+The actual execution mode is independent of operation kind and is validated against the capability contract. Memory cannot raise a risk tier or permission ceiling.
+
 ## 9.4 MCP boundary
 
 MCP is an adapter option. It does not replace the registry.
@@ -611,7 +633,7 @@ MCP is an adapter option. It does not replace the registry.
 JUNE may map a trusted MCP tool into a capability operation, but:
 
 - JUNE validates inputs and outputs independently.
-- JUNE supplies risk, permission, retry, egress, verification, and budget metadata.
+- JUNE supplies or validates operation kind, execution mode, risk, permission, retry, egress, verification, and budget metadata.
 - Raw MCP tools are not exposed unrestricted to OpenAI Realtime.
 - Remote MCP requires authentication, authorisation, version pinning, and trust review.
 - Capability health failure cannot mutate the manifest.
@@ -645,9 +667,11 @@ Not every operation implements every method. Unsupported semantics must be expli
 - Normalises arguments.
 - Resolves references without creating effects.
 - Produces a preview and canonical proposal.
-- Calculates risk and permission inputs.
+- Supplies validated facts for JUNE to derive the authoritative risk tier and permission requirement from the trusted manifest, canonical arguments, side effects, and policy context.
 - Estimates cost/time.
 - Does not commit an effect.
+
+Provider, model, adapter, and Memory suggestions cannot author or lower the authoritative risk tier or permission requirement.
 
 `execute()`:
 
@@ -1512,13 +1536,16 @@ OpenAI Realtime receives one narrow provider-neutral tool:
   "parameters": {
     "objective": "string",
     "capability_hint": "memory|scheduling|money|search|research|coding|other",
-    "operation_class": "read|write|long_running",
+    "operation_kind": "read|write",
+    "execution_mode": "turn_scoped|long_running",
     "desired_result": "speak|display|both"
   }
 }
 ```
 
-JUNE software attaches canonical IDs, authentication, privacy mode, project scope, and policy context. The model cannot choose them.
+`operation_kind` and `execution_mode` are untrusted model/provider routing hints. JUNE validates or recomputes them against the trusted Capability Registry and derives side effects, `risk_tier`, permission requirement, retry class, and verification requirement. The model cannot supply or lower the authoritative R0-R3 tier.
+
+JUNE software attaches canonical IDs, authentication, privacy mode, project scope, policy context, and capability authority. The model cannot choose them, and Memory cannot raise a risk tier or permission ceiling.
 
 ## 22.2 Delegation response
 
@@ -1565,6 +1592,18 @@ Interrupting “I’m on it” stops the audio; accepted research continues unle
 
 ## 22.4 Final-turn safety
 
+```text
+voice.user.transcript.final
+        ↓
+Conversation Service authenticates, normalises, accepts, and persists the user message
+        ↓
+conversation.turn.finalized
+        ↓
+Orchestrator admission
+```
+
+`voice.user.transcript.final` alone is not an admissible durable/effect-bearing request. Only `conversation.turn.finalized`, an authenticated channel equivalent committed through the Conversation Service, or a separately authorised scheduled/system trigger may originate new durable/effect-bearing work.
+
 Partial transcripts may:
 
 - Update provisional UI.
@@ -1577,6 +1616,8 @@ They may not:
 - Approve actions.
 - Start effect-bearing capability calls.
 - Write durable memory.
+
+A scheduled/system trigger cannot manufacture user authority or bypass capability, policy, consent, or Memory source/write rules.
 
 ---
 
@@ -1610,6 +1651,8 @@ Memory output may improve routing/planning but cannot:
 - Change a capability manifest.
 
 The Orchestrator records which memory IDs influenced a route/action proposal and which items were sent to a provider, following the Memory System Design.
+
+Conversation-derived durable memory-candidate extraction begins only from `conversation.turn.finalized`. A separately authorised scheduled/system trigger may process otherwise eligible canonical evidence, but cannot become personal-memory evidence or bypass Memory source, consent, sensitivity, suppression, or write policy.
 
 ---
 
@@ -2081,6 +2124,7 @@ invalid schema rejected
 model cannot lower manifest risk
 memory cannot grant authority
 partial transcript cannot create task/action
+voice.user.transcript.final cannot create task/action before conversation.turn.finalized
 expired approval rejected
 changed proposal invalidates approval
 R2/R3 cannot execute without correct approval
@@ -2269,6 +2313,8 @@ The canonical Task, Action, Approval, Capability, Receipt, and Event contracts r
 - Separate encrypted `june_runtime.db` from `june_memory.db`.
 - Hybrid deterministic/model routing.
 - Trusted JUNE capability manifests; MCP is an adapter.
+- Capability classification uses `operation_kind` (`read` or `write`) and `execution_mode` (`turn_scoped` or `long_running`) as separate dimensions.
+- Models/providers may propose routing hints, but JUNE derives the authoritative R0-R3 risk tier, permission, retry, and verification requirements.
 - Action Gateway is the sole protected-effect path.
 - R0–R3 permission tiers.
 - Exact proposal-bound approval for R2/R3 as defined.
@@ -2276,7 +2322,7 @@ The canonical Task, Action, Approval, Capability, Receipt, and Event contracts r
 - `UNKNOWN` is an action-attempt outcome; task uses `RECONCILING`.
 - Restart creates a new task with lineage.
 - Voice interruption does not automatically cancel a durable task.
-- Partial voice cannot create durable/effect-bearing work.
+- Neither partial voice nor `voice.user.transcript.final` can create durable/effect-bearing work; admission begins at `conversation.turn.finalized` or a separately authorised scheduled/system trigger.
 - Memory is evidence, never authority.
 - Safe well-scoped work begins immediately.
 - Proactivity is restricted to approved reminders/status/failure/approval/budget events.
@@ -2366,6 +2412,8 @@ budget.exhausted
 ```
 
 ## Appendix B — Example `ActionProposal`
+
+The `risk_tier` below is a canonical JUNE-derived result, not a model/provider input.
 
 ```json
 {

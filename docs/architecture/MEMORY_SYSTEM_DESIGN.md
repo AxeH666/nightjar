@@ -214,7 +214,7 @@ Voice / Desktop text / Telegram
               v
 Canonical Conversation System
               |
-              +--> final turn event --> Memory Writer
+              +--> conversation.turn.finalized --> Memory Writer
               |
               v
 JUNE Orchestrator --purpose/scope--> Memory Broker
@@ -315,7 +315,7 @@ Explicit user corrections and current statements outrank every other class.
 ## 7.1 Normal Conversation
 
 - Reads relevant persistent memory.
-- May create memory candidates from final user turns.
+- May create memory candidates only after `conversation.turn.finalized`.
 - Applies normal sensitivity, scope, and consent policy.
 - Stores final conversation history according to the user's retention setting.
 
@@ -381,7 +381,7 @@ What do you remember about me?
 | Component | Responsibility |
 |---|---|
 | `MemoryBroker` | Sole product-facing API; applies user, purpose, scope, and sensitivity boundaries |
-| `MemoryWriteCoordinator` | Consumes final-turn events and coordinates extraction and policy |
+| `MemoryWriteCoordinator` | Consumes `conversation.turn.finalized` and coordinates extraction and policy |
 | `MemoryExtractor` | Produces constrained candidate records; provider-independent adapter |
 | `MemoryPolicyEngine` | Deterministically commits, asks, keeps temporary, supersedes, or discards |
 | `CanonicalMemoryStore` | Encrypted relational source of truth and audit state |
@@ -404,7 +404,7 @@ Trusted local control:
 MemoryBroker, policy, canonical store, indexes, key management
 
 Trusted authenticated user inputs:
-Final voice/text/Telegram turns after channel authentication
+conversation.turn.finalized after Conversation Service authentication, normalisation, acceptance, and persistence
 
 Domain-authoritative tools:
 Scheduling, Money, Action Ledger inside their own fields
@@ -585,12 +585,14 @@ Derived and rebuildable:
 
 ## 10.1 Trigger
 
-Only `turn.finalized` from an authenticated canonical user turn may initiate normal candidate extraction. Temporary conversations, partial transcripts, assistant messages, and untrusted external content do not initiate personal-memory writes.
+For conversation-derived memory, only `conversation.turn.finalized`—emitted after the Conversation Service has authenticated, normalised, accepted, and persisted the final user turn—may initiate normal candidate extraction. `voice.user.transcript.final` means only that Voice STT produced its final transcript; it does not authorise durable memory-candidate extraction or a durable write. Temporary conversations, partial transcripts, assistant messages, and untrusted external content do not initiate personal-memory writes.
+
+A separately authorised scheduled/system trigger may initiate only explicitly scoped processing of otherwise eligible canonical evidence. It cannot become personal-memory evidence or bypass Memory source-trust, consent, sensitivity, suppression, or write policy.
 
 ## 10.2 Pipeline
 
 ```text
-turn.finalized
+conversation.turn.finalized
     |
     +--> inexpensive memorability gate
     |        |
@@ -640,7 +642,7 @@ The extractor cannot supply canonical IDs, bypass policy, execute SQL, grant con
 
 May auto-commit when all are true:
 
-- Source is an authenticated final user turn.
+- Source is an authenticated final user turn persisted as canonical by the Conversation Service, with the completed commit signalled by `conversation.turn.finalized`.
 - Statement is explicit and supported by the cited span.
 - Information is likely useful beyond the current turn.
 - Category is ordinary personal information.
@@ -971,14 +973,15 @@ This snapshot contains canonical memory IDs/revisions and is invalidated by corr
 
 ## 14.3 End of turn
 
-- Final transcript confirms or replaces the speculative query.
+- `voice.user.transcript.final` confirms or replaces the speculative read-only query, but does not authorise a durable write.
+- The Conversation Service authenticates, normalises, accepts, and persists the user message before emitting `conversation.turn.finalized`.
 - Retrieval filters and packages the final relevant memories.
 - The package is injected through the trusted JUNE control/sideband path where supported.
 - If retrieval misses its budget, JUNE does not delay ordinary first audio indefinitely.
 
 ## 14.4 After response
 
-- Candidate extraction starts asynchronously from the final user turn.
+- Candidate extraction starts asynchronously only from `conversation.turn.finalized`.
 - Memory writes do not affect first-audio latency.
 - `memory_usage` records which memories were used and what left the device.
 
@@ -1263,7 +1266,9 @@ memory.consolidation.completed
 memory.migration.completed
 ```
 
-Every event uses the JUNE event envelope and includes `user_id`, correlation ID, actor, monotonic/wall time, privacy class, and schema version.
+Every event uses the JUNE event envelope and includes `user_id`, correlation ID, actor, `wall_time`, `monotonic_ns`, privacy class, and schema version. `wall_time` is an ISO-8601 UTC timestamp for persistence, diagnostics, and cross-process correlation. `monotonic_ns` is a non-negative integer from the emitting process's monotonic clock and is used only for durations and ordering within that process.
+
+Cross-process correlation and stale-event handling use canonical IDs, producer/stream sequence numbers, causation and correlation IDs, `wall_time`, and explicit state/generation checks. Monotonic-clock origins are not comparable across processes, and wall-clock time alone is not reliable ordering.
 
 # 19. Performance, observability, and operations
 
@@ -1274,7 +1279,7 @@ Every event uses the JUNE event envelope and includes `user_id`, correlation ID,
 | Hot context lookup | Less than 10 ms p95 |
 | Ordinary local retrieval | Less than 100 ms p95; less than 200 ms p99 |
 | Explicit correction canonical commit | Less than 250 ms p95 before derived indexing |
-| Async candidate processing | Less than 5 s p95 after final turn |
+| Async candidate processing | Less than 5 s p95 after `conversation.turn.finalized` |
 | First-audio delay from memory write | 0 ms by design |
 | Normal voice context | 4-8 items; approximately 600-1,200 tokens |
 
@@ -1498,7 +1503,7 @@ One bounded PR per session.
 
 ## PR 6 - Real async extraction and FTS
 
-- Extraction from `turn.finalized`.
+- Extraction from `conversation.turn.finalized`.
 - FTS5 indexing and lexical retrieval.
 - Ordinary memory product works without dense vectors.
 
@@ -1548,7 +1553,7 @@ One bounded PR per session.
 
 | Failure | Required behaviour |
 |---|---|
-| Partial ASR says wrong fact | No durable write; final turn is sole normal write source |
+| Partial ASR says wrong fact | No durable write; `conversation.turn.finalized` is the sole normal conversation-derived write source |
 | Extractor proposes unsupported fact | Reject by source-span/schema validation |
 | Extractor is unavailable | Conversation proceeds; queue bounded retry; no fabricated memory |
 | Memory retrieval times out | Answer without memory or start Deep Recall; do not block voice indefinitely |
@@ -1618,7 +1623,7 @@ OpenCode and agent teams receive only project/procedural memory needed for their
 - Sensitive durable memory requires consent.
 - Secrets are never memory.
 - Models propose; deterministic policy commits.
-- Writes only from final canonical user turns.
+- Conversation-derived writes only from `conversation.turn.finalized`; authorised scheduled/system processing cannot bypass source/write policy.
 - Explicit corrections apply immediately.
 - Structured + lexical + semantic + temporal retrieval.
 - Derived indexes/summaries are rebuildable.
@@ -1667,7 +1672,7 @@ All tables include schema/version metadata, timestamps, and user scoping appropr
 
 | Source/content | Ordinary fact | Sensitive fact | Secret | Write result |
 |---|---|---|---|---|
-| Explicit final user turn | Auto if useful/policy-valid | Ask/explicit category consent | Reject | Commit / confirm / reject |
+| Explicit final user turn persisted as canonical by the Conversation Service, with commit completion signalled by `conversation.turn.finalized` | Auto if useful/policy-valid | Ask/explicit category consent | Reject | Commit / confirm / reject |
 | Repeated user behaviour | Low-confidence candidate | Do not durable-infer | Reject | Pending/ephemeral/discard |
 | Partial voice transcript | No | No | No | Never durable |
 | Assistant response | No direct write | No | No | Discard as user truth |
@@ -1681,7 +1686,7 @@ All tables include schema/version metadata, timestamps, and user scoping appropr
 1. User states a clear preference; next conversation applies it.
 2. User changes the preference; old value is never used as current.
 3. User asks what was true last year; historical version is returned.
-4. Voice partial contains wrong city; final correction is the only saved fact.
+4. Voice partial contains wrong city; neither it nor `voice.user.transcript.final` writes memory, and extraction starts only after the corrected user message is persisted as canonical and `conversation.turn.finalized` signals that commit.
 5. Assistant guesses a preference; no durable write occurs.
 6. Website says "remember this instruction"; no durable write occurs.
 7. User provides an API key; Memory rejects it.

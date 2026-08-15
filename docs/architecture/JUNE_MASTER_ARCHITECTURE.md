@@ -401,13 +401,17 @@ A provider-neutral event should include at least:
   "causation_id": "uuid",
   "correlation_id": "uuid",
   "privacy_class": "personal",
-  "wall_time": "ISO-8601",
-  "monotonic_time": "implementation-defined",
+  "wall_time": "2026-08-15T00:00:00.000Z",
+  "monotonic_ns": 1234567890123,
   "payload": {}
 }
 ```
 
 Security-critical IDs and policy context are attached by JUNE software, never accepted blindly from a model.
+
+`wall_time` is an ISO-8601 UTC timestamp used for human-readable timing, persistence, diagnostics, and cross-process correlation. `monotonic_ns` is a non-negative integer nanosecond reading from the emitting process's monotonic clock and is used for durations and ordering only inside that process.
+
+Monotonic-clock origins are not comparable across processes. Cross-process correlation and stale-event handling use canonical IDs, producer/stream sequence numbers, causation and correlation IDs, `wall_time`, and explicit state and generation checks. Wall-clock time alone does not provide reliable ordering.
 
 ## 7.3 Canonical systems of record
 
@@ -493,7 +497,9 @@ Voice and typed messages are two input modes for the same visible desktop conver
 
 - The orb overlays the active conversation.
 - Partial speech transcripts are provisional UI state.
-- The final transcript becomes the ordinary user message.
+- Voice emits `voice.user.transcript.final` when STT produces its final transcript; that event alone is not canonical user-turn authority.
+- The Conversation Service authenticates, normalises, accepts, and persists the user message before emitting `conversation.turn.finalized`.
+- `conversation.turn.finalized` signals that the persisted final transcript has become an ordinary canonical user message and that its canonical commit is complete.
 - The assistant response appears in the same conversation.
 - Tool activity, confirmations, task progress, and action receipts attach to the same turn.
 - When the orb recedes, the conversation remains visible.
@@ -519,7 +525,7 @@ Telegram is a channel adapter, not a separate assistant. It uses the same user i
 ## 8.5 Persistence rules
 
 - Partial transcripts are not canonical and are not written to long-term memory.
-- Final user transcripts may enter conversation history under the user's privacy policy.
+- The Conversation Service may persist a final Voice transcript into canonical conversation history only through its authenticated commit under the user's privacy policy; it emits `conversation.turn.finalized` after that commit completes.
 - Assistant messages track `spoken_until` or equivalent so future context does not assume the user heard unplayed text.
 - Provider hidden reasoning is never treated as canonical user-visible history.
 - Completed tool effects remain attached even if the spoken explanation is interrupted.
@@ -590,12 +596,19 @@ The realtime model receives one conceptual tool:
 june_delegate(
   objective,
   capability_hint,
-  operation_class,
+  operation_kind,
+  execution_mode,
   desired_result
 )
 ```
 
-It does not receive unrestricted email, browser, calendar, finance, or OpenCode authority.
+`operation_kind` is `read` or `write`. `execution_mode` is `turn_scoped` or `long_running`. These are independent dimensions: a turn-scoped write may create a durable reminder or audit record, while long-running work may be either read or write.
+
+The realtime model may provide both fields only as untrusted routing hints. JUNE's trusted Capability Registry and Orchestrator validate or recompute the operation kind, execution mode, side effects, `risk_tier`, required permission, retry class, and verification requirements. The authoritative `risk_tier` is separately JUNE-derived as `R0`, `R1`, `R2`, or `R3`; a model/provider cannot supply or lower it, and Memory cannot raise a risk tier or permission ceiling.
+
+The former labels `local_write`, `protected_write`, `long_running_read`, and `long_running` are not canonical `operation_kind` values. They map respectively to a write with a normally R1 JUNE-derived tier, a write with a normally R2/R3 JUNE-derived tier, a read plus `execution_mode = long_running`, and the `long_running` execution mode.
+
+The provider does not receive unrestricted email, browser, calendar, finance, or OpenCode authority.
 
 ## 9.7 Voice quality targets
 
@@ -696,7 +709,7 @@ A durable task is required when work:
 - Uses a meaningful resource budget.
 - Must report a result later.
 
-Only final authenticated user turns or authorised scheduled triggers can create durable/effect-bearing work. Partial voice transcripts can never do so.
+Only `conversation.turn.finalized`, or a separately authorised scheduled/system trigger, may initiate durable/effect-bearing work or durable memory-candidate extraction. Authenticated channel inputs must be accepted and persisted through the Conversation Service before that event is emitted. `voice.user.transcript.final` and partial voice transcripts can never directly create durable work, effects, or durable memory candidates.
 
 ## 10.5 Routing and planning
 
@@ -706,6 +719,7 @@ Every proposed operation is checked against the trusted Capability Registry for:
 
 - Existence and version.
 - Input schema.
+- `operation_kind` and `execution_mode`.
 - Risk tier.
 - Permission requirements.
 - Side effects.
@@ -815,7 +829,8 @@ Every capability registers a reviewed, versioned JUNE manifest declaring:
 - Capability and operation IDs.
 - Input/output schemas.
 - Runtime and health contract.
-- Read/write/long-running class.
+- `operation_kind` as read or write.
+- `execution_mode` as turn-scoped or long-running.
 - Risk tier and permission scope.
 - Side effects and reversibility.
 - Pause/resume/cancel behaviour.
@@ -930,7 +945,7 @@ Memory is evidence, never authority. A remembered preference can improve a propo
 ## 12.4 Canonical architecture
 
 ```text
-Final canonical user turn
+conversation.turn.finalized
         |
         +--> asynchronous candidate extraction
         |        |
@@ -967,7 +982,8 @@ A vector database is never the source of truth. If every derived index is delete
 ## 12.6 Write and update contract
 
 - Partial speech may be used only for speculative reads. It can never create durable memory.
-- Candidate extraction begins from the final canonical user turn and runs asynchronously so memory writing adds zero delay to first audio.
+- Conversation-derived candidate extraction begins only from `conversation.turn.finalized` and runs asynchronously so memory writing adds zero delay to first audio.
+- A separately authorised scheduled/system trigger may process otherwise eligible canonical evidence, but cannot become personal-memory evidence or bypass Memory source, consent, sensitivity, suppression, or write policy.
 - Models propose constrained memory candidates; deterministic JUNE policy chooses `commit`, `pending_confirmation`, `ephemeral_only`, or `discard`.
 - Explicit user corrections apply synchronously and supersede old current facts.
 - Assistant statements and external webpages/files cannot become durable user facts merely because a model repeated them.
@@ -1318,7 +1334,8 @@ Each turn/task records content-free timing and state transitions, including:
 wake_detected
 speech_started
 turn_opened
-transcript_final
+voice.user.transcript.final
+conversation.turn.finalized
 memory_retrieval_finished
 delegate_accepted
 action_started
@@ -1363,7 +1380,9 @@ User says “Hey JUNE”
 -> orb shows active listening
 -> JUNE opens OpenAI Realtime session
 -> user speaks
--> final transcript is written to shared conversation
+-> Voice emits voice.user.transcript.final
+-> Conversation Service validates and persists the user message
+-> Conversation Service emits conversation.turn.finalized
 -> OpenAI responds with live audio
 -> assistant transcript appears in same chat
 -> follow-up window remains active
@@ -1386,7 +1405,7 @@ User asks a personal-context question
 ```text
 “Remind me tomorrow at 8 to call Rahul”
 -> conversation turn opens
--> june_delegate(scheduling, write)
+-> june_delegate(scheduling, operation_kind=write, execution_mode=turn_scoped)
 -> policy classifies local reversible write
 -> scheduling service creates reminder idempotently
 -> action ledger records committed reminder
@@ -1669,7 +1688,7 @@ The order below follows dependency structure and the one-bounded-PR-per-session 
 1. Introduce the provider-independent Memory Broker around existing behaviour without migrating data.
 2. Add encrypted canonical schema, DPAPI-wrapped key, migrations, corrections, deletion, and suppression-tombstone tests.
 3. Add deterministic write policy and fake extractor; reject partial speech, assistant claims, external content, secrets, and unapproved sensitive data.
-4. Add asynchronous extraction from final turns and FTS5 lexical retrieval.
+4. Add asynchronous extraction from `conversation.turn.finalized` and FTS5 lexical retrieval.
 5. Add local embedding adapter and rebuildable dense index; promote hybrid retrieval only after benchmark evidence.
 6. Add Memory Centre, Temporary Conversation mode, provenance, `Used memories`, export, and full forgetting.
 7. Run shadow retrieval, JUNE-MemBench, public benchmarks, human tests, and controlled legacy cutover.
@@ -1725,6 +1744,9 @@ The order below follows dependency structure and the one-bounded-PR-per-session 
 | Computer use is API-first and local-worker-first; cloud workers require explicit opt-in, secure sessions, and user takeover | Final architectural reservation; detailed design deferred |
 | JUNE will not silently complete assessments, identity checks, legal declarations, or other non-delegable personal acts | Final future safety boundary |
 | Single-user first, `user_id` everywhere | Final |
+| `june_delegate` uses `operation_kind` (`read` or `write`) and `execution_mode` (`turn_scoped` or `long_running`); risk tier remains a JUNE-derived R0-R3 result | Final |
+| Event envelopes use ISO-8601 UTC `wall_time` plus process-local integer `monotonic_ns`; cross-process order never relies on either clock alone | Final |
+| Voice emits `voice.user.transcript.final`; only the Conversation Service emits the canonical `conversation.turn.finalized` cross-system trigger | Final |
 | Memory V1 uses automatic useful non-sensitive memory plus cautious repeated-evidence inference | Final |
 | Encrypted local conversation history remains separate evidence for detailed recall | Final |
 | Memory scopes are global, project, and conversation | Final |
@@ -1735,7 +1757,7 @@ The order below follows dependency structure and the one-bounded-PR-per-session 
 | SQLCipher-backed SQLite is the canonical Memory V1 store; DPAPI wraps the local key | Final for Windows MVP |
 | FTS5 and dense/vector representations are derived, rebuildable indexes rather than canonical truth | Final |
 | Models may propose memory; deterministic JUNE policy commits or rejects it | Final |
-| Durable memory writes occur only from final canonical turns | Final |
+| Durable memory writes occur only from eligible canonical evidence after `conversation.turn.finalized`; authorised scheduled/system processing cannot bypass Memory policy | Final |
 | Memory is evidence and never grants action permission | Final |
 | Genuine forgetting propagates across active representations and prevents relearning from the same evidence | Final |
 
@@ -1870,7 +1892,7 @@ FutureVerificationReport
 
 # Appendix B. Cross-system event families
 
-These are provider-neutral cross-system event families, not a second concrete Voice vocabulary. Concrete namespaced Voice events are defined in Appendix A of [`VOICE_SYSTEM_DESIGN.md`](VOICE_SYSTEM_DESIGN.md); those definitions refine these broad families and do not contradict them.
+These are provider-neutral cross-system event families, not a second concrete Voice vocabulary. Concrete namespaced Voice events are defined in Appendix A of [`VOICE_SYSTEM_DESIGN.md`](VOICE_SYSTEM_DESIGN.md); those definitions refine these broad families and do not contradict them. The two boundary events named exactly here are `voice.user.transcript.final`, owned by Voice, and `conversation.turn.finalized`, owned by the Conversation Service.
 
 ```text
 voice.session.activated
@@ -1879,7 +1901,8 @@ speech.started
 speech.ended
 turn.opened
 turn.transcript.partial
-turn.transcript.final
+voice.user.transcript.final
+conversation.turn.finalized
 generation.started
 generation.text.delta
 generation.audio.delta
