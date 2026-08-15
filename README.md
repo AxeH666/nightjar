@@ -17,10 +17,12 @@ integration. Voice and text will share one visible JUNE-owned canonical
 conversation. Canonical Memory will remain local, encrypted, and JUNE-owned;
 providers will receive only bounded context under policy.
 
-## Architecture authority
+## Product and architecture authority
 
-Read these before architecture or implementation work:
+Read the JUNE 0.1 PRD, Master Architecture, and applicable subsystem design(s)
+before product, architecture, or implementation work:
 
+- [`docs/product/JUNE_0.1_PRD.md`](docs/product/JUNE_0.1_PRD.md) — JUNE 0.1 product requirements and acceptance baseline.
 - [`docs/architecture/JUNE_MASTER_ARCHITECTURE.md`](docs/architecture/JUNE_MASTER_ARCHITECTURE.md) — top-level JUNE 0.1 authority and global build order.
 - [`docs/architecture/VOICE_SYSTEM_DESIGN.md`](docs/architecture/VOICE_SYSTEM_DESIGN.md) — Voice V1.
 - [`docs/architecture/MEMORY_SYSTEM_DESIGN.md`](docs/architecture/MEMORY_SYSTEM_DESIGN.md) — Memory V1.
