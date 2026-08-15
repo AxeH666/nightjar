@@ -7,6 +7,7 @@ This file supplements the global `AGENTS.md`; it contains only JUNE-specific rul
 - Keep intended vision separate from confirmed implementation. Use **Confirmed**, **Inferred**, and **Unknown** when the distinction matters.
 - Never guess when code, Git, logs, configuration, or repository documentation can answer the question.
 - At the start of each task, read `PROJECT_CONTEXT.md` and `STATUS.md`. Treat `STATUS.md` as volatile and verify it against current Git, code, configuration, and logs before relying on it.
+- Before architecture or implementation work, read `docs/architecture/JUNE_MASTER_ARCHITECTURE.md` and the applicable Voice, Memory, and Orchestrator designs in `docs/architecture/`. The Master is the top-level JUNE 0.1 authority; subsystem designs refine it and cannot silently contradict it.
 - Preserve and verify pre-existing dirty/untracked work before any risky Git operation.
 - Never use destructive Git commands without explicit approval.
 - Voice and privacy safety must fail closed. Missing consent, configuration, or health evidence must never enable a microphone or cloud egress.

@@ -10,10 +10,23 @@ Ollama, embeddings, and memory infrastructure while cloud replacements are
 built. Those implementations are transitional scaffolding, not a promise of
 offline operation or the long-term quality target.
 
-Cloud Voice may transmit post-wake audio or transcripts. Cloud Memory may
-process conversation history, personal context, embeddings, summaries, or
-retrieved memories. Provider selection, retention policy, and the final cloud
-Memory architecture remain separate founder decisions.
+The approved JUNE 0.1 target uses OpenAI Realtime API with
+`gpt-realtime-2.1` over WebRTC after a local privacy gate; the exact model
+identifier and account availability must be reverified immediately before
+integration. Voice and text will share one visible JUNE-owned canonical
+conversation. Canonical Memory will remain local, encrypted, and JUNE-owned;
+providers will receive only bounded context under policy.
+
+## Architecture authority
+
+Read these before architecture or implementation work:
+
+- [`docs/architecture/JUNE_MASTER_ARCHITECTURE.md`](docs/architecture/JUNE_MASTER_ARCHITECTURE.md) — top-level JUNE 0.1 authority and global build order.
+- [`docs/architecture/VOICE_SYSTEM_DESIGN.md`](docs/architecture/VOICE_SYSTEM_DESIGN.md) — Voice V1.
+- [`docs/architecture/MEMORY_SYSTEM_DESIGN.md`](docs/architecture/MEMORY_SYSTEM_DESIGN.md) — Memory V1.
+- [`docs/architecture/ORCHESTRATOR_SYSTEM_DESIGN.md`](docs/architecture/ORCHESTRATOR_SYSTEM_DESIGN.md) — Orchestrator and capabilities.
+
+Subsystem designs refine the Master and cannot silently contradict it.
 
 > **License: [AGPL-3.0-or-later](NIGHTJAR_LICENSE_AND_ATTRIBUTION.md).** Nightjar is
 > a combined work built on open-source components; see
@@ -27,7 +40,7 @@ and a small **WebSocket side-channel**, rather than merging codebases:
 
 | Component | Role | License |
 |---|---|---|
-| **OpenCode** | Core agent engine (the only agent loop) | MIT |
+| **OpenCode** | Current agent/session host; target specialised coding capability beneath the JUNE Orchestrator | MIT |
 | **Row-Bot** (vendored) | Voice / vision / memory / browser, as an MCP server | Apache-2.0 |
 | ~~Odysseus~~ | REMOVED (PRs #139–#147) — every tier deleted or rebuilt Nightjar-side; no Odysseus code remains | — (historical) |
 | **three.js** | Custom voice-reactive vortex orb (WebGL) — replaced orb-ui | MIT |
@@ -49,24 +62,18 @@ Phases 1–4 are built and reported:
 - **Phase 4 — voice orb** ([report](phase3-ui/PHASE4_REPORT.md)): a voice-reactive orb + a Siri-style overlay, wired to the live pipeline. *(Phase 4 integrated orb-ui; Step 7 later replaced it with a custom three.js orb.)*
 
 **Since Phase 4:** BYOK cloud-key slots shipped (encrypted key storage + model
-switcher + a dismissible cloud banner backed by a persistent ☁ indicator; PRs #6/#8/#98) and the desktop app is verified
-running end-to-end. **The final product name is JUNE** — the rename lands with the
-UI redesign (Step 7); current strings still say "Nightjar" until then.
+switcher + a dismissible cloud banner backed by a persistent ☁ indicator; PRs #6/#8/#98). **The final product name is JUNE** — current strings and namespaces may still say "Nightjar" during migration.
 
-The master plan, findings, and the confirmed forward roadmap — **OpenRouter
-(rate-limit auto-switch) → image_gen license audit → live-preview panel → Phase 5
-OS-computer-use → Phase 6 CAD-by-voice → full UI redesign (final theme + custom orb
-+ JUNE rebrand) → form-filling → CLI → Odysseus removal (done, #139–#147) + one-command installer →
-"Hey June" wake-word → onboarding → fresh-clone + real-hardware QA → launch** — live
-in [`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md) §10; open issues in
-[`KNOWN_ISSUES.md`](KNOWN_ISSUES.md); the build rules Nightjar follows in
-[`CLAUDE.md`](CLAUDE.md).
+The four architecture documents above are the current forward authority.
+[`KNOWN_ISSUES.md`](KNOWN_ISSUES.md), [`research/AUDIT_REPORT.md`](research/AUDIT_REPORT.md),
+and [`CLAUDE.md`](CLAUDE.md) are historical context where they conflict with
+current source, Git, `AGENTS.md`, or the JUNE 0.1 architecture.
 
 ## Setup (fresh clone)
 
 Nightjar depends on one git **submodule**: the **OpenCode** engine (`research/opencode`,
-the only agent loop — pinned to the `AxeH666/opencode` fork). Clone with submodules,
-then run the setup script (`scripts/setup.ps1` on native Windows):
+the current top-level chat/session host — pinned to the `AxeH666/opencode` fork).
+Clone with submodules, then run the setup script (`scripts/setup.ps1` on native Windows):
 
 ```bash
 git clone --recurse-submodules https://github.com/AxeH666/nightjar.git
@@ -113,7 +120,7 @@ phase1-engine/     local model + inference proxy + safety plugins
 phase2-mcp/        Row-Bot-derived capabilities (MCP) + wake-word daemon + side-channel
 engine-workspace/  opencode.json (agents, MCP servers, providers) + the opencode-serve cwd
 phase3-ui/         Electron + React desktop UI (chat, modes, permissions, voice orb)
-research/opencode/ OpenCode engine source — git SUBMODULE (MIT; the only agent loop)
+research/opencode/ OpenCode engine source — git SUBMODULE (MIT; current chat/session host, target coding specialist)
 research/*         other upstream reference clones — git-ignored (re-clonable)
 ```
 
@@ -130,7 +137,12 @@ actually ships from a dependency is vendored (e.g. Row-Bot under
 
 ## Hardware / QA notes
 
-Developed on a WSL2 + WSLg box (working display + PulseAudio). The core loops
-(engine, capabilities, wake-word, orb) are verified on-box; the trained custom
-**"Hey June"** wake model (Step 12) and QA on native (non-WSL) hardware (Step 15,
-the last pre-launch step) remain open — see the phase reports and `KNOWN_ISSUES.md`.
+The founder reported that setup completed from the clean canonical repository
+and that native Windows app launch, text chat, BYOK chat, microphone input,
+wake, STT, TTS/playback, settings, and normal UI interaction worked. The CAD
+environment also passed its smoke test. This is substantial operational
+evidence, not a complete production acceptance matrix. The trained custom
+**"Hey June"** wake model and formal Windows/audio acceptance remain open. The
+same smoke run repeatedly logged a non-blocking failure from
+`phase2-mcp\venv\Scripts\python.exe` running `phase2-mcp\task_poller.py`; its root
+cause remains unknown.
