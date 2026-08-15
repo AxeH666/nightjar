@@ -10,18 +10,29 @@ Evidence labels used here:
 
 ## Identity and mission
 
-**Confirmed:** JUNE and Nightjar are the same project. Nightjar is the original repository/code name; JUNE is the product name (`JUNE_context.md:9-10`, `README.md:41-44`). Internal paths, environment variables, package names, and prompts still commonly use `nightjar` or `NIGHTJAR_*`.
+**Confirmed:** JUNE and Nightjar are the same project. Nightjar is the original repository/code name; JUNE is the product name (`JUNE_context.md:9-10`). Internal paths, environment variables, package names, and prompts still commonly use `nightjar` or `NIGHTJAR_*`.
 
 **Confirmed product direction:** JUNE's mission is to become a real-life JARVIS-like assistant: wake-word activated, voice-first, conversationally intelligent, able to use tools and create CAD/design work, and eventually able to control broader computer workflows safely.
 
 **Important:** this mission is intended vision, not proof of current capability.
+
+## Architecture authority
+
+The founder-approved JUNE 0.1 architecture is tracked in:
+
+- [`docs/architecture/JUNE_MASTER_ARCHITECTURE.md`](docs/architecture/JUNE_MASTER_ARCHITECTURE.md) — top-level product, ownership, safety, and global implementation-order authority.
+- [`docs/architecture/VOICE_SYSTEM_DESIGN.md`](docs/architecture/VOICE_SYSTEM_DESIGN.md) — Voice V1 subsystem design.
+- [`docs/architecture/MEMORY_SYSTEM_DESIGN.md`](docs/architecture/MEMORY_SYSTEM_DESIGN.md) — Memory V1 subsystem design.
+- [`docs/architecture/ORCHESTRATOR_SYSTEM_DESIGN.md`](docs/architecture/ORCHESTRATOR_SYSTEM_DESIGN.md) — Orchestrator and capability subsystem design.
+
+Read the Master and applicable subsystem designs before architecture or implementation work. Subsystem documents refine the Master and cannot silently contradict it.
 
 ## Current architecture
 
 **Confirmed:** JUNE is a source-run desktop application built around these layers:
 
 1. An Electron main process launches the React renderer and supervises local services (`phase3-ui/src/main/index.ts`, `phase3-ui/src/main/services.ts`, `phase3-ui/src/main/supervisor.ts`).
-2. OpenCode is the only agent loop. It runs from the pinned `research/opencode` submodule through Bun, with `engine-workspace/` as its workspace (`README.md:15-29`, `JUNE_context.md:113-117`).
+2. OpenCode currently hosts the desktop's top-level chat/session path and several general-assistant flows. It runs from the pinned `research/opencode` submodule through Bun, with `engine-workspace/` as its workspace (`phase3-ui/src/main/services.ts:170-193`, `phase3-ui/src/renderer/src/context/ConnectionContext.tsx:122-128`, `phase2-mcp/wake_daemon.py:482-528`). In the target architecture it becomes JUNE's specialised coding capability beneath the Orchestrator, not the universal assistant brain.
 3. The renderer talks to OpenCode over loopback HTTP/SSE on port 4096.
 4. OpenCode starts seven local stdio MCP servers configured in `engine-workspace/opencode.json:114-171`.
 5. A WebSocket side-channel on port 8765 carries wake, transcription, TTS, and orb events. The wake daemon also exposes health on port 8766 (`JUNE_context.md:145-155`).
@@ -35,7 +46,7 @@ The Electron app is the launcher and process supervisor. It starts services in d
 |---|---|
 | `phase3-ui/` | Electron main process, preload bridge, React UI, chat/session state, permissions, orb, previews, CAD viewer, and service supervisor |
 | `engine-workspace/` | Runtime OpenCode agents, prompts, provider configuration, permission maps, and MCP server definitions |
-| `research/opencode/` | Pinned OpenCode engine submodule; the only agent loop |
+| `research/opencode/` | Pinned OpenCode engine submodule; current agent/session host, targeted to become the specialised coding capability |
 | `phase2-mcp/` | Wake daemon, side-channel, voice, memory, vision, PIM, web search, research, and image-generation MCP services |
 | `browser-use-mcp/` | Browser automation MCP with a persistent local profile |
 | `phase-cad/` | Python 3.12 build123d CAD service, STEP export/conversion, validation, and measurement tools |
@@ -89,6 +100,8 @@ Under the current cloud-inference decision, on-device wake detection is the crit
 
 **Confirmed:** `engine-workspace/opencode.json` is the runtime source of truth for agents, model/provider wiring, MCP servers, and tool permissions. Primary agents include assistant, research, web search, CAD, and coding. Tool access is controlled through explicit permission maps.
 
+**Confirmed target role:** OpenCode remains during incremental migration, but the JUNE 0.1 architecture assigns durable orchestration, permissions, actions, canonical conversation, and Memory ownership to JUNE. OpenCode is the specialised coding capability.
+
 The seven configured MCP servers are `nightjar`, `nightjar-image`, `nightjar-websearch`, `nightjar-research`, `nightjar-pim`, `browser-use`, and `cad-build123d` (`JUNE_context.md:169-188`). Backend/world actions are extensive; UI actions are not.
 
 **Confirmed current security boundary:** these services are loopback-only, but the WebSocket side-channel accepts and rebroadcasts messages without authentication, origin checks, or producer roles (`phase2-mcp/sidechannel.py:43-59`). The renderer also constructs its OpenCode client without an auth token (`phase3-ui/src/renderer/src/context/ConnectionContext.tsx:122-128`). Broader computer control must not be built on this boundary unchanged.
@@ -115,9 +128,10 @@ There is no single backup/export boundary or unified migration/rollback strategy
 
 **Confirmed founder decision (NJ-93):** JUNE is cloud-first and quality-first.
 Offline operation and local inference parity are no longer product requirements.
-The best practical cloud path should become primary for Voice, Memory,
+The best practical provider-backed path should become primary for Voice,
 reasoning, vision, and other intelligence-heavy capabilities as focused
-migrations are implemented.
+migrations are implemented. Canonical Memory remains a local, encrypted,
+JUNE-owned system; providers may receive only bounded Memory context.
 
 **Confirmed current transition state:** local Qwen/llama.cpp, faster-whisper,
 Kokoro/Misaki, Ollama vision, local embeddings, and local memory infrastructure
@@ -127,18 +141,22 @@ they are not the long-term quality target. The historical
 cherry-picked.
 
 **Privacy consequence:** current STT is local, but a selected cloud chat model
-receives the resulting transcript. Future cloud Voice may transmit post-wake
-audio or transcripts. Future cloud Memory may process conversation history,
-personal context, embeddings, summaries, or retrieved memories.
+receives the resulting transcript. Under the approved target, Voice V1 may
+transmit post-wake audio to OpenAI Realtime only after the local privacy gate.
+Memory providers may process bounded context, embeddings, summaries, or
+retrieved memories, but do not own the canonical Memory store.
 
-**Founder decisions still open:** provider selection; modular Voice versus
-realtime speech-to-speech; cloud STT/TTS vendors; cloud Memory storage; and
-privacy, retention, residency, and consent policy. Do not choose these by
-accident while migrating individual components.
+**Confirmed target decisions:** Voice V1 uses OpenAI Realtime API with
+`gpt-realtime-2.1` over WebRTC; voice and text share one visible JUNE-owned
+canonical conversation; canonical Memory is local and encrypted; and the JUNE
+Orchestrator owns durable work, policy, actions, verification, and capability
+delegation. The exact realtime model identifier and account availability must
+be reverified immediately before integration. Exact implementation libraries
+and tuning remain reviewable behind those boundaries.
 
 ## Architectural gaps blocking the JARVIS vision
 
-1. Decide whether voice joins the renderer's visible OpenCode session or remains a separate conversation.
+1. Implement the approved shared JUNE-owned voice/text conversation and migrate away from the hidden voice-only session.
 2. Add a typed, permission-aware command channel and named action registry for the renderer.
 3. Lift or centralize navigation, project, CAD camera/selection, and lifecycle state so actions are addressable.
 4. Replace the stand-in wake model and close false-wake, consent, kill-switch, and fail-open microphone paths.

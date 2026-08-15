@@ -1,8 +1,22 @@
 # JUNE Development Status
 
-> Updated 2026-08-10. This is the live development-state source of truth. Code and Git outrank prose when they disagree. Do not mark work fixed unless the implementation is committed and the required real behavior is verified.
+> Updated 2026-08-15 for the JUNE 0.1 architecture-authority PR. Code and Git outrank prose when they disagree. Do not mark work fixed unless the implementation is committed and the required real behavior is verified.
 
-## Git snapshot
+## Current state — 2026-08-15
+
+- This documentation branch is based on clean `main` at `04c462571b6cc6251cb08964ad8c940f9af37252`; local `main` and the existing local `origin/main` match that base.
+- `research/opencode` is clean and pinned at `7a8e7c88f495acf5af3e7584e8ec1dbab2fe04ec`.
+- The documentation-only branch `docs/june-01-architecture-authority` adds the founder-approved [Master](docs/architecture/JUNE_MASTER_ARCHITECTURE.md), [Voice](docs/architecture/VOICE_SYSTEM_DESIGN.md), [Memory](docs/architecture/MEMORY_SYSTEM_DESIGN.md), and [Orchestrator](docs/architecture/ORCHESTRATOR_SYSTEM_DESIGN.md) authorities. The Master controls global JUNE 0.1 ordering; subsystem designs refine it and cannot silently contradict it.
+- Target decisions are settled: Voice V1 uses OpenAI Realtime API with `gpt-realtime-2.1` over WebRTC; voice and text share one visible JUNE-owned canonical conversation; Memory is local, encrypted, and JUNE-owned; the Orchestrator owns durable work and action authority; OpenCode becomes the specialised coding capability. The exact realtime model identifier and account availability must be reverified immediately before integration.
+- Current runtime implementation is unchanged by this PR. OpenCode still hosts several general-assistant flows, and the existing local wake/STT/OpenCode/TTS path remains transitional.
+- The founder reported that setup completed from the clean canonical repository and that native Windows app launch, text chat, BYOK chat, microphone input, wake, STT, TTS/playback, settings, and normal UI interaction worked. The CAD environment also passed its smoke test. This is substantial evidence, not a complete production acceptance matrix.
+- The same smoke run repeatedly logged a non-blocking failure from `phase2-mcp\venv\Scripts\python.exe` running `phase2-mcp\task_poller.py`. The root cause is unknown; no scheduler repair is included here.
+
+## Historical snapshot — 2026-08-10
+
+The remainder of this file preserves the previous development snapshot for traceability. Its branches, SHAs, milestone, issue state, and next-task instructions are historical rather than current authority.
+
+## Historical Git snapshot
 
 - Protected original worktree: `docs/nj93-cloud-decision` at `cc2df36d6c445309ae850b346e30d90c38c31ee5`.
 - Remote `main`: `ebe9777cc90a570929fc05a8190562b8e281202c`, the merge commit for PR #159. It contains NJ-82/NJ-86 commits `63f1f1328fc662c00eb2c320232fae662bd87a54` and `5623a57cce296a1acf9833680d3aff0b49743802`.
@@ -50,11 +64,11 @@
 
 The context PR work does not edit, stage, remove, or overwrite any file in that worktree.
 
-## Current milestone
+## Historical milestone
 
 Land the durable project-context files through their own reviewed PR, then replay and complete NJ-92 on the resulting remote `main`. Continue the one-issue-at-a-time voice privacy/reliability sequence after NJ-92. Sentence-by-sentence streaming follows that sequence. Do not land a fixed reply-length cap immediately before streaming.
 
-## Current P0/P1 issues
+## Historical P0/P1 issue snapshot
 
 | Priority | Issue | Current truth |
 |---|---|---|
@@ -65,7 +79,7 @@ Land the durable project-context files through their own reviewed PR, then repla
 | P1 | NJ-92 spoken-text corruption and branch integrity | Remote `main` does not yet contain the UTF-8 decoding fix. A clean local implementation exists at `f9cc72f`, but it predates the PR #159 follow-up and this context PR. Replay only its two-file NJ-92 patch onto the then-current remote `main`; do not push it as-is or reuse mixed-scope commit `d486770`. Required live acceptance remains incomplete. |
 | P1 | Test/diagnostic safety | There is no CI; some tests write real user logs (NJ-105), and the health probe rapidly rotates away diagnostics (NJ-104). |
 
-## Exact halt point
+## Historical halt point
 
 The latest completed development sequence is:
 
@@ -78,7 +92,7 @@ The latest completed development sequence is:
 
 The protected original worktree remains at `cc2df36`. The merged NJ-82/NJ-86 branch and worktree were deleted safely. The fresh and historical NJ-92 branches, plus NJ-97, NJ-94, and NJ-93, remain unchanged local topic branches. No merge, rebase, cherry-pick, or stash operation is active.
 
-## Unfinished work
+## Work recorded as unfinished in the historical snapshot
 
 - Complete review of the project-context PR and merge it only with founder approval.
 - Replay the two-file patch from `f9cc72f` onto a fresh branch from the post-context remote `main`. Drive one live reply containing an em dash, curly apostrophe, and number; report the privacy-safe G2P diagnostic line required for the turn; then obtain the founder's ear-check. Do not push `f9cc72f` as-is or reuse old mixed-scope commit `d486770`.
@@ -88,20 +102,20 @@ The protected original worktree remains at `cc2df36`. The merged NJ-82/NJ-86 bra
 - Recover/package NJ-85/NJ-90 and NJ-91 without mixing their scopes.
 - Complete native-Windows verification; the results table exists only in protected, untracked `VERIFY_WINDOWS.md` and remains blank.
 
-## Deferred work
+## Work deferred in the historical snapshot
 
 - NJ-101 markdown/OOV preprocessing and any fixed reply-length cap are held until streaming behavior is designed.
 - Sentence-by-sentence streaming is the next product-development milestone after the current safety/recovery sequence.
 - General voice-driven UI navigation, shared voice/chat sessions, CAD camera/selection control, and broad computer control come later.
 - Desktop packaging, signing, updates, migrations, backups, CI, and production observability remain future release work.
 
-## Next safe development task
+## Historical next-task instruction
 
 Finish the project-context PR review and merge it only with founder approval. Then create a fresh NJ-92 branch from the updated remote `main` and replay only the two-file patch from `f9cc72f`. Keep old mixed-scope commit `d486770` untouched and do not carry duplicate NJ-82/NJ-86 changes.
 
 Verification must drive the real OpenCode voice reply path with an em dash, curly apostrophe, and number in one turn, use only privacy-safe G2P diagnostics in normal logs, and wait for the founder's ear-check before claiming spoken output is verified.
 
-## Last known verification state
+## Historical verification state
 
 - External recovery verification: nine of nine copied files match their originals by SHA-256 and byte length. The binary diff passed a read-only reverse-apply check. Starting and ending Git status matched. Independent verifier result: PASS. These facts come from the recovery folder, not from repository history.
 - NJ-82/NJ-86 at merged head `5623a57`: `test_g2p_observability.py`, `test_tts_spellout.py`, and `test_wake_capture.py` passed after the Bugbot race correction. The Bugbot thread was resolved and marked outdated. Tests used isolated data and offline settings. No microphone, playback, hardware, or live audio was tested.
