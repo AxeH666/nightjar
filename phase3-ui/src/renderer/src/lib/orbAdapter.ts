@@ -100,6 +100,8 @@ export interface NightjarOrbAdapterOptions {
   publishPlayback?: boolean
   /** Initial side-channel event state; the desktop app explicitly starts closed. */
   voiceEventsEnabled?: boolean
+  /** Test-only fake-capture seam; production never enables renderer mic capture. */
+  testCaptureOnWake?: boolean
 }
 
 export interface NightjarOrbAdapter extends OrbAdapter {
@@ -392,7 +394,9 @@ export function createNightjarOrbAdapter(
     }, listeningTimeoutMs)
     // The legacy orb used to open a second renderer microphone solely for its
     // visual meter. Presentation now follows wake/orb state; the wake daemon is
-    // the sole current legacy microphone owner.
+    // the sole current legacy microphone owner. Unit tests opt in to a fake
+    // capture only to prove the teardown race without touching hardware.
+    if (options.testCaptureOnWake) void startMic()
   }
 
   function enterThinking(): void {

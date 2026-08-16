@@ -21,6 +21,7 @@ import * as preview from "./preview-server"
 import { canRestart, RESTARTABLE_STATES } from "../shared/restartPolicy"
 import { askForMicConsent, invalidatePendingConsent } from "./voiceConsent"
 import { RendererVoiceShutdownCoordinator } from "./rendererVoiceShutdown"
+import { shutdownRendererThenOwnedWake } from "./voiceShutdownLifecycle"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -502,8 +503,8 @@ function voiceStatusNow(): VoiceStatus {
   const s = supervisor.status().find((x) => x.name === "wake-daemon")
   return {
     enabled: voice.getVoiceEnabled(),
-    // `adopted` counts: an adopted daemon is a live capture process we attached to rather
-    // than spawned. Every other state means no microphone is open, whatever the pref says.
+    // Wake is never adopted under the owned-only MVP policy. Every other state means
+    // JUNE owns no wake microphone, whatever the pref says.
     running: s?.state === "healthy" || s?.state === "adopted",
     // Bugbot PR #158: `enabled && !running` is NOT the same as "failed". The daemon passes
     // through pending -> starting on its way up, and its readiness window is the supervisor
@@ -532,15 +533,18 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
     const saved = voice.disableVoice()
     if (!saved.enabled) {
       const target = win
-      const outcome = await requestRendererVoiceShutdown(target)
-      if (outcome !== "acknowledged" && target && !target.isDestroyed()) {
+      await shutdownRendererThenOwnedWake({
+        target,
+        requestRendererShutdown: () => requestRendererVoiceShutdown(target),
         // Window destruction is the only reliable media fallback, but Voice Off
         // must not become application Quit. window-all-closed replaces this one
         // renderer after it has closed the old media owner.
-        recreateAfterVoiceRendererFallback = true
-        destroyExactRendererWindow(target)
-      }
-      await supervisor.stopVoiceService("wake-daemon")
+        destroyTarget: (fallbackTarget) => {
+          recreateAfterVoiceRendererFallback = true
+          destroyExactRendererWindow(fallbackTarget)
+        },
+        stopOwnedWake: () => supervisor.stopVoiceService("wake-daemon"),
+      })
     }
     // Push through the deduping helper (NJ-71) rather than sendToRenderer directly, so
     // lastVoiceStatusJson stays in step. A direct send here would leave the dedupe believing
@@ -663,11 +667,14 @@ app.on("before-quit", async (e) => {
   e.preventDefault()
   quitting = true
   const target = win
-  const outcome = await requestRendererVoiceShutdown(target)
-  if (outcome !== "acknowledged") destroyExactRendererWindow(target)
+  await shutdownRendererThenOwnedWake({
+    target,
+    requestRendererShutdown: () => requestRendererVoiceShutdown(target),
+    destroyTarget: (fallbackTarget: BrowserWindow) => destroyExactRendererWindow(fallbackTarget),
+    stopOwnedWake: () => supervisor.stopVoiceService("wake-daemon").catch(() => {}),
+  })
   stopLocalScheduler()
   preview.stopServer()
-  await supervisor.stopVoiceService("wake-daemon").catch(() => {})
   await supervisor.stop().catch(() => {})
   app.quit()
 })

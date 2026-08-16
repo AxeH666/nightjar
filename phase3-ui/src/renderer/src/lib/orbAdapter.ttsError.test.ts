@@ -148,4 +148,22 @@ describe("orbAdapter TTS failure visibility (NJ-37)", () => {
     expect(adapter.getState()).toBe("speaking")
     adapter.disconnect()
   })
+
+  it("Voice shutdown pauses active playback and stale playback callbacks cannot restore speaking", async () => {
+    const { adapter, ws, getLastAudio } = makeAdapter({
+      loadTtsAudio: async () => "mock://tts",
+    })
+    ws._event({ kind: "tts", state: "ready", path: "/x.wav" })
+    await flush()
+    await flush()
+    const audio = getLastAudio()!
+    expect(adapter.getState()).toBe("speaking")
+
+    adapter.shutdownVoice()
+    expect(audio.paused).toBe(true)
+    expect(adapter.getState()).toBe("idle")
+    audio.onplaying?.()
+    expect(adapter.getState()).toBe("idle")
+    adapter.disconnect()
+  })
 })

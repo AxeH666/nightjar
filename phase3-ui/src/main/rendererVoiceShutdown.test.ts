@@ -59,4 +59,21 @@ describe("renderer Voice shutdown coordinator", () => {
     expect(firstTarget.destroyed).toBe(false)
     expect(secondTarget.destroyed).toBe(false)
   })
+
+  test("a stale acknowledgement cannot complete the request for a replacement target", async () => {
+    const coordinator = new RendererVoiceShutdownCoordinator()
+    let firstId = ""
+    const first = fakeWindow(1, (id) => { firstId = id })
+    const firstPending = coordinator.request(first, 100)
+    expect(coordinator.acknowledge(1, firstId)).toBe(true)
+    await firstPending
+
+    let secondId = ""
+    const replacement = fakeWindow(2, (id) => { secondId = id })
+    const secondPending = coordinator.request(replacement, 100)
+    expect(coordinator.acknowledge(1, firstId)).toBe(false)
+    expect(coordinator.acknowledge(2, firstId)).toBe(false)
+    expect(coordinator.acknowledge(2, secondId)).toBe(true)
+    expect(await secondPending).toBe("acknowledged")
+  })
 })

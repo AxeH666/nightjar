@@ -23,7 +23,7 @@ interface FakeSocket {
   close(): void
 }
 
-function harness(micAllowed: () => boolean) {
+function harness(micAllowed: () => boolean, testCaptureOnWake = false, capture?: (constraints: unknown) => Promise<unknown>) {
   let sock: FakeSocket | null = null
   const micCalls: unknown[] = []
 
@@ -47,10 +47,11 @@ function harness(micAllowed: () => boolean) {
     url: "ws://127.0.0.1:8765",
     WebSocketImpl: FakeWS,
     micAllowed,
-    getUserMedia: async (constraints: unknown) => {
+    getUserMedia: capture ?? (async (constraints: unknown) => {
       micCalls.push(constraints)
       return { getTracks: () => [{ stop() {}, readyState: "live" }] }
-    },
+    }),
+    testCaptureOnWake,
     // Keep the analysers out of it — this test is about the mic decision, not audio levels.
     createAudioContext: () =>
       ({
@@ -96,6 +97,36 @@ describe("orb adapter mic gate (NJ-63)", () => {
     h.deliver({ kind: "wake" })
     await flush()
     expect(h.micCalls.length).toBe(0)
+    h.unsub()
+  })
+
+  test("teardown stops a late fake capture and prevents it from restoring listening", async () => {
+    let resolveStream: ((stream: unknown) => void) | null = null
+    const stopped: boolean[] = []
+    const h = harness(() => true, true, () => new Promise((resolve) => { resolveStream = resolve }))
+    h.deliver({ kind: "wake", detected: true })
+    await flush()
+    h.adapter.shutdownVoice()
+    resolveStream!({ getTracks: () => [{ readyState: "live", stop: () => stopped.push(true) }] })
+    await flush()
+    expect(stopped).toEqual([true])
+    expect(h.adapter.getState()).toBe("idle")
+    h.unsub()
+  })
+
+  test("teardown stops every active fake capture track", async () => {
+    const stopped: boolean[] = []
+    const h = harness(() => true, true, async () => ({
+      getTracks: () => [
+        { readyState: "live", stop: () => stopped.push(true) },
+        { readyState: "live", stop: () => stopped.push(true) },
+      ],
+    }))
+    h.deliver({ kind: "wake", detected: true })
+    await flush()
+    h.adapter.shutdownVoice()
+    expect(stopped).toEqual([true, true])
+    expect(h.adapter.getState()).toBe("idle")
     h.unsub()
   })
 

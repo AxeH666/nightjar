@@ -1,242 +1,181 @@
-import { describe, test, expect } from "vitest"
-import { spawn } from "node:child_process"
-import net from "node:net"
+import { afterEach, describe, expect, test, vi } from "vitest"
+import { EventEmitter } from "node:events"
+
+const spawnState = vi.hoisted(() => ({ impl: null as ((...args: unknown[]) => unknown) | null }))
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>()
+  return {
+    ...actual,
+    spawn: (...args: unknown[]) => {
+      if (!spawnState.impl) throw new Error("unexpected test spawn")
+      return spawnState.impl(...args)
+    },
+  }
+})
+
 import { Supervisor, type ServiceDef } from "./supervisor"
 
-function tcpProbe(port: number, timeoutMs = 800): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = new net.Socket()
-    const done = (ok: boolean) => {
-      sock.destroy()
-      resolve(ok)
-    }
-    sock.setTimeout(timeoutMs)
-    sock.once("connect", () => done(true))
-    sock.once("timeout", () => done(false))
-    sock.once("error", () => done(false))
-    sock.connect(port, "127.0.0.1")
-  })
+class FakeChild extends EventEmitter {
+  readonly pid: number
+  readonly kill = vi.fn((_signal?: NodeJS.Signals) => true)
+  constructor(pid: number) {
+    super()
+    this.pid = pid
+  }
 }
 
-// NJ-57: the wake daemon (an open microphone) must be OPT-IN. These tests drive the
-// supervisor's `enabled()` gate + startService/stopService lifecycle headlessly — the
-// disable-must-KILL guarantee (OS mic indicator as source of truth) at the process-
-// lifecycle level. The real-mic/indicator confirmation is the PR-6 hardware checklist.
-describe("Supervisor enabled() gate (NJ-57)", () => {
-  test("Voice-specific shutdown stops a verified adopted wake listener without changing generic adoption", async () => {
-    const PORT = 18767
-    const adopted = spawn(
-      process.execPath,
-      ["-e", `require('net').createServer(() => {}).listen(${PORT}, '127.0.0.1'); setInterval(() => {}, 1000)`],
-      { stdio: "ignore" },
-    )
-    try {
-      const deadline = Date.now() + 5000
-      while (Date.now() < deadline && !(await tcpProbe(PORT))) await new Promise((r) => setTimeout(r, 50))
-      const sup = new Supervisor([{
-        name: "wake-daemon", command: "unused", args: [], port: PORT,
-        ready: () => tcpProbe(PORT), verifyAdoptedStop: async (pid) => pid === adopted.pid,
-      }])
-      await sup.start()
-      expect(sup.status()[0].state).toBe("adopted")
-      await sup.stopVoiceService("wake-daemon")
-      expect(await tcpProbe(PORT)).toBe(false)
-    } finally {
-      try { adopted.kill("SIGKILL") } catch { /* already stopped */ }
-    }
-  }, 20000)
+function ownedWake(listenerInitially = false, exitOnKill = true) {
+  let listener = listenerInitially
+  let child: FakeChild | undefined
+  const spawnCalls: unknown[][] = []
+  spawnState.impl = (...args: unknown[]) => {
+    spawnCalls.push(args)
+    listener = true
+    child = new FakeChild(4242)
+    child.kill.mockImplementation(() => {
+      if (exitOnKill) {
+        listener = false
+        queueMicrotask(() => child?.emit("exit", 0, null))
+      }
+      return true
+    })
+    queueMicrotask(() => child?.emit("spawn"))
+    return child
+  }
+  const def: ServiceDef = {
+    name: "wake-daemon",
+    command: "fake-wake",
+    args: [],
+    ready: async () => listener,
+    enabled: () => true,
+    blockUnmanagedListener: true,
+    readyTimeoutMs: 5,
+    autoRestart: false,
+  }
+  return {
+    def,
+    child: () => child,
+    spawnCalls,
+    listener: () => listener,
+  }
+}
 
-  test("an unverified adopted wake listener remains visibly stuck and is not killed", async () => {
-    const PORT = 18768
-    const adopted = spawn(
-      process.execPath,
-      ["-e", `require('net').createServer(() => {}).listen(${PORT}, '127.0.0.1'); setInterval(() => {}, 1000)`],
-      { stdio: "ignore" },
-    )
-    try {
-      const deadline = Date.now() + 5000
-      while (Date.now() < deadline && !(await tcpProbe(PORT))) await new Promise((r) => setTimeout(r, 50))
-      const sup = new Supervisor([{
-        name: "wake-daemon", command: "unused", args: [], port: PORT,
-        ready: () => tcpProbe(PORT), verifyAdoptedStop: async () => false,
-      }])
-      await sup.start()
-      await sup.stopVoiceService("wake-daemon")
-      expect(await tcpProbe(PORT)).toBe(true)
-      expect(sup.status()[0].detail).toContain("STILL listening")
-    } finally {
-      try { adopted.kill("SIGKILL") } catch { /* cleanup only */ }
-    }
-  }, 20000)
+afterEach(() => {
+  spawnState.impl = null
+})
 
-  test("a disabled service is never spawned — state 'stopped', no restart budget burned", async () => {
-    const def: ServiceDef = {
-      name: "wake-daemon",
-      command: "definitely-not-a-real-binary-xyz", // would error loudly if the gate leaked
-      args: [],
-      ready: async () => false,
-      enabled: () => false,
-      readyTimeoutMs: 500,
-    }
-    const sup = new Supervisor([def])
+// These lifecycle tests use only fake ChildProcess and listener objects. They never
+// inspect, adopt, or terminate an OS process.
+describe("Supervisor owned-only wake lifecycle", () => {
+  test("starts and retains one owned wake child when no listener exists", async () => {
+    const h = ownedWake()
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
     await sup.start()
 
-    const s = sup.status()[0]
-    expect(s.state).toBe("stopped")
-    expect(s.detail).toContain("disabled")
-    expect(s.pid).toBeUndefined()
-    expect(s.restarts).toBe(0)
+    expect(h.spawnCalls).toHaveLength(1)
+    expect(h.child()).toBeDefined()
+    expect(sup.status()[0]).toMatchObject({ state: "healthy", pid: 4242 })
   })
 
-  test("disabled + something already listening (no port to kill) → honest 'STILL listening' detail, never adopted", async () => {
-    // A stale daemon from a prior session answers the health probe. With no `port`
-    // declared we cannot kill it — the supervisor must NOT adopt it (that would bless
-    // the hot mic) and must say plainly that something is still listening.
-    const def: ServiceDef = {
-      name: "wake-daemon",
-      command: "unused",
-      args: [],
-      ready: async () => true,
-      enabled: () => false,
-    }
-    const sup = new Supervisor([def])
+  test("an existing listener blocks Voice without adoption, a PID, or a termination call", async () => {
+    const h = ownedWake(true)
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
     await sup.start()
+    await sup.stopVoiceService("wake-daemon")
+    await sup.startService("wake-daemon")
 
-    const s = sup.status()[0]
-    expect(s.state).toBe("stopped")
-    expect(s.detail).toContain("STILL listening")
+    expect(h.spawnCalls).toHaveLength(0)
+    expect(h.child()).toBeUndefined()
+    expect(sup.status()[0]).toMatchObject({ state: "stopped", pid: undefined })
+    expect(sup.status()[0].detail).toContain("STILL listening")
+    expect(sup.status()[0].detail).toContain("manual cleanup required")
   })
 
-  test("startService honors the gate: no-op while disabled, real start attempt once enabled", async () => {
-    let on = false
-    const def: ServiceDef = {
-      name: "wake-daemon",
-      command: "definitely-not-a-real-binary-xyz",
-      args: [],
-      ready: async () => false,
-      enabled: () => on,
-      readyTimeoutMs: 3000,
-      autoRestart: false,
-    }
-    const sup = new Supervisor([def])
+  test("a disabled wake service remains blocked when an unmanaged listener exists", async () => {
+    const h = ownedWake(true)
+    h.def.enabled = () => false
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
     await sup.start()
-    expect(sup.status()[0].state).toBe("stopped")
 
-    await sup.startService("wake-daemon") // still disabled → bring() re-checks the gate
-    expect(sup.status()[0].state).toBe("stopped")
-
-    on = true
-    await sup.startService("wake-daemon") // gate open → a real spawn is attempted
-    // The bogus binary can't spawn — but reaching "failed (could not spawn)" PROVES the
-    // gate opened and the spawn path ran (vs the gated path, which never touches spawn).
-    const deadline = Date.now() + 5000
-    while (Date.now() < deadline && sup.status()[0].state !== "failed") {
-      await new Promise((r) => setTimeout(r, 50))
-    }
-    expect(sup.status()[0].state).toBe("failed")
-    expect(sup.status()[0].detail).toContain("could not spawn")
+    expect(h.spawnCalls).toHaveLength(0)
+    expect(sup.status()[0]).toMatchObject({ state: "stopped" })
+    expect(sup.status()[0].detail).toContain("STILL listening")
   })
 
-  test("stopService KILLS a running child — 'stopped', not muted/alive", async () => {
-    // A real long-lived child (node keeping an interval alive). ready() stays false so
-    // the service parks in "unhealthy" after its short readiness window — the child is
-    // genuinely running either way, which is what stopService must end.
-    const def: ServiceDef = {
-      name: "wake-daemon",
-      command: process.execPath,
-      args: ["-e", "setInterval(() => {}, 1000)"],
-      ready: async () => false,
-      enabled: () => true,
-      readyTimeoutMs: 300,
-      autoRestart: false,
-    }
-    const sup = new Supervisor([def])
+  test("generic non-Voice services still adopt a healthy listener", async () => {
+    const sup = new Supervisor([{
+      name: "ordinary-service", command: "unused", args: [], ready: async () => true,
+    }])
     await sup.start()
-    const running = sup.status()[0]
-    expect(running.pid).toBeGreaterThan(0) // it really spawned
+    expect(sup.status()[0].state).toBe("adopted")
+  })
 
-    await sup.stopService("wake-daemon")
-    const s = sup.status()[0]
-    expect(s.state).toBe("stopped")
-    // The child's PID must no longer be alive (signal 0 probes without killing).
-    let alive = true
-    try {
-      process.kill(running.pid!, 0)
-    } catch {
-      alive = false
-    }
-    expect(alive).toBe(false)
-  }, 20000)
-
-  test("startService stops a STALE listener first — enable means OUR process under the CURRENT env, not a stale adopt", async () => {
-    // Bugbot (PR #151): bring() would ADOPT a stale daemon still answering the port —
-    // spawned pre-consent with stale env. Enable must kill it and spawn fresh.
-    const PORT = 18766
-    const stale = spawn(
-      process.execPath,
-      ["-e", `require('net').createServer(() => {}).listen(${PORT}, '127.0.0.1'); setInterval(() => {}, 1000)`],
-      { stdio: "ignore" },
-    )
-    try {
-      const up = Date.now() + 5000
-      while (Date.now() < up && !(await tcpProbe(PORT))) await new Promise((r) => setTimeout(r, 100))
-      expect(await tcpProbe(PORT)).toBe(true) // stale listener is really up
-
-      const def: ServiceDef = {
-        name: "wake-daemon",
-        command: process.execPath,
-        args: ["-e", "setInterval(() => {}, 1000)"], // our fresh process (never listens)
-        ready: () => tcpProbe(PORT),
-        enabled: () => true,
-        port: PORT,
-        readyTimeoutMs: 300,
-        autoRestart: false,
-      }
-      const sup = new Supervisor([def])
-      await sup.startService("wake-daemon")
-
-      const s = sup.status()[0]
-      expect(s.pid).toBeGreaterThan(0) // a FRESH child was spawned...
-      expect(s.pid).not.toBe(stale.pid) // ...not the stale one adopted
-      let staleAlive = true
-      try {
-        process.kill(stale.pid!, 0)
-      } catch {
-        staleAlive = false
-      }
-      expect(staleAlive).toBe(false) // and the stale listener is dead
-      await sup.stopService("wake-daemon")
-    } finally {
-      try {
-        stale.kill("SIGKILL")
-      } catch {
-        /* already gone — the assertion above wants exactly this */
-      }
-    }
-  }, 30000)
-
-  test("a disable that lands while running is honored at the spawn choke point (no respawn)", async () => {
-    // Crash-restart path: the child exits on its own while the gate has flipped off —
-    // the scheduled respawn must land in "stopped", not bring the mic back.
-    let on = true
-    const def: ServiceDef = {
-      name: "wake-daemon",
-      command: process.execPath,
-      args: ["-e", "process.exit(1)"], // exits immediately → crash-restart backoff
-      ready: async () => false,
-      enabled: () => on,
-      readyTimeoutMs: 300,
-      autoRestart: true,
-      maxRestarts: 5,
-    }
-    const sup = new Supervisor([def])
+  test("Voice Off stops the retained child, observes exit, and confirms listener disappearance", async () => {
+    const h = ownedWake()
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
     await sup.start()
-    on = false // user disabled voice while the backoff timer was pending
-    const deadline = Date.now() + 6000
-    while (Date.now() < deadline && sup.status()[0].state !== "stopped") {
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    expect(sup.status()[0].state).toBe("stopped")
-    expect(sup.status()[0].detail).toContain("disabled")
-  }, 15000)
+    await sup.stopVoiceService("wake-daemon")
+
+    expect(h.child()!.kill).toHaveBeenCalledWith("SIGTERM")
+    expect(h.listener()).toBe(false)
+    expect(sup.status()[0]).toMatchObject({ state: "stopped", detail: "disabled" })
+  })
+
+  test("repeated Voice Off is idempotent for an owned child", async () => {
+    const h = ownedWake()
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
+    await sup.start()
+    await sup.stopVoiceService("wake-daemon")
+    await sup.stopVoiceService("wake-daemon")
+
+    expect(h.child()!.kill).toHaveBeenCalledTimes(1)
+  })
+
+  test("explicit Quit uses the same owned-child shutdown", async () => {
+    const h = ownedWake()
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
+    await sup.start()
+    await sup.stop()
+
+    expect(h.child()!.kill).toHaveBeenCalledTimes(1)
+    expect(h.listener()).toBe(false)
+    expect(sup.status()[0]).toMatchObject({ state: "stopped", detail: "disabled" })
+  })
+
+  test("a listener remaining after owned child exit is reported stuck rather than safely Off", async () => {
+    const h = ownedWake()
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
+    await sup.start()
+    h.child()!.kill.mockImplementation(() => {
+      queueMicrotask(() => h.child()?.emit("exit", 0, null))
+      return true
+    })
+    await sup.stopVoiceService("wake-daemon")
+
+    expect(sup.status()[0]).toMatchObject({ state: "stopped" })
+    expect(sup.status()[0].detail).toContain("STILL listening")
+  })
+
+  test("a child that does not exit reaches a bounded stuck result with no PID fallback", async () => {
+    const h = ownedWake(false, false)
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 1 })
+    await sup.start()
+    await sup.stopVoiceService("wake-daemon")
+    await sup.stopVoiceService("wake-daemon")
+
+    expect(h.child()!.kill).toHaveBeenCalledTimes(1)
+    expect(sup.status()[0]).toMatchObject({ state: "stopped", pid: 4242 })
+    expect(sup.status()[0].detail).toContain("owned wake child did not exit")
+  })
+
+  test("wake restart denies an existing unmanaged listener without a spawn or termination call", async () => {
+    const h = ownedWake(true)
+    const sup = new Supervisor([h.def], undefined, { voiceStopTimeoutMs: 5 })
+    await sup.restartService("wake-daemon")
+
+    expect(h.spawnCalls).toHaveLength(0)
+    expect(h.child()).toBeUndefined()
+    expect(sup.status()[0].detail).toContain("STILL listening")
+  })
 })
