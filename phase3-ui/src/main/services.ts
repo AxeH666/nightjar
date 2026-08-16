@@ -126,6 +126,10 @@ async function verifiedWakeDaemonPid(pid: number): Promise<boolean> {
       })
     } else if (process.platform === "linux") {
       commandLine = readFileSync(`/proc/${pid}/cmdline`).toString("utf8").replace(/\0/g, " ")
+    } else if (process.platform === "darwin") {
+      commandLine = await new Promise<string>((resolve) => {
+        execFile("ps", ["-p", String(pid), "-o", "command="], { timeout: 2000 }, (error, stdout) => resolve(error ? "" : stdout))
+      })
     }
   } catch {
     return false

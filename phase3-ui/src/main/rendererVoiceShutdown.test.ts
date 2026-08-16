@@ -29,19 +29,34 @@ describe("renderer Voice shutdown coordinator", () => {
     expect(target.destroyed).toBe(false)
   })
 
-  test("a missing acknowledgement destroys only the requested window after the bound", async () => {
+  test("a missing acknowledgement times out without deciding the caller's window fallback", async () => {
     const coordinator = new RendererVoiceShutdownCoordinator()
     const target = fakeWindow(1)
     const unrelated = fakeWindow(2)
-    expect(await coordinator.request(target, 1)).toBe("destroyed")
-    expect(target.destroyed).toBe(true)
+    expect(await coordinator.request(target, 1)).toBe("timed-out")
+    expect(target.destroyed).toBe(false)
     expect(unrelated.destroyed).toBe(false)
   })
 
-  test("a renderer send failure fails closed by destroying the target", async () => {
+  test("a renderer send failure reports unavailable without destroying the target", async () => {
     const coordinator = new RendererVoiceShutdownCoordinator()
     const target = fakeWindow(1, () => { throw new Error("renderer gone") })
-    expect(await coordinator.request(target, 100)).toBe("destroyed")
-    expect(target.destroyed).toBe(true)
+    expect(await coordinator.request(target, 100)).toBe("unavailable")
+    expect(target.destroyed).toBe(false)
+  })
+
+  test("overlapping requests share one bounded request and cannot leave an orphaned timeout", async () => {
+    const coordinator = new RendererVoiceShutdownCoordinator()
+    let requestId = ""
+    const firstTarget = fakeWindow(1, (id) => { requestId = id })
+    const secondTarget = fakeWindow(2)
+    const first = coordinator.request(firstTarget, 20)
+    const second = coordinator.request(secondTarget, 20)
+    expect(second).toBe(first)
+    expect(coordinator.acknowledge(1, requestId)).toBe(true)
+    expect(await second).toBe("acknowledged")
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(firstTarget.destroyed).toBe(false)
+    expect(secondTarget.destroyed).toBe(false)
   })
 })

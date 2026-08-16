@@ -13,12 +13,13 @@ export interface VoiceShutdownWindow {
   webContents: VoiceShutdownWebContents
 }
 
-export type RendererShutdownOutcome = "acknowledged" | "destroyed"
+export type RendererShutdownOutcome = "acknowledged" | "timed-out" | "unavailable"
 
 interface PendingShutdown {
   requestId: string
   senderId: number
   finish: (outcome: RendererShutdownOutcome) => void
+  result: Promise<RendererShutdownOutcome>
 }
 
 // Main owns exactly one in-flight renderer teardown. The acknowledgement is bound to
@@ -27,31 +28,32 @@ interface PendingShutdown {
 export class RendererVoiceShutdownCoordinator {
   private pending: PendingShutdown | null = null
 
-  async request(window: VoiceShutdownWindow | null, timeoutMs: number): Promise<RendererShutdownOutcome> {
-    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return "destroyed"
+  request(window: VoiceShutdownWindow | null, timeoutMs: number): Promise<RendererShutdownOutcome> {
+    // Off and Quit can overlap. They share one request/timeout rather than replacing
+    // a pending request and leaving its timeout able to act later.
+    if (this.pending) return this.pending.result
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return Promise.resolve("unavailable")
     const target = window
     const request: VoiceShutdownRequest = { id: randomUUID() }
-    return new Promise<RendererShutdownOutcome>((resolve) => {
-      let settled = false
-      const finish = (outcome: RendererShutdownOutcome) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        if (this.pending?.requestId === request.id) this.pending = null
-        resolve(outcome)
-      }
-      const timeout = setTimeout(() => {
-        if (!target.isDestroyed()) target.destroy()
-        finish("destroyed")
-      }, timeoutMs)
-      this.pending = { requestId: request.id, senderId: target.webContents.id, finish }
-      try {
-        target.webContents.send("nightjar:voiceShutdown", request)
-      } catch {
-        if (!target.isDestroyed()) target.destroy()
-        finish("destroyed")
-      }
-    })
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let resolveResult: (outcome: RendererShutdownOutcome) => void = () => {}
+    const result = new Promise<RendererShutdownOutcome>((resolve) => { resolveResult = resolve })
+    const finish = (outcome: RendererShutdownOutcome) => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      if (this.pending?.requestId === request.id) this.pending = null
+      resolveResult(outcome)
+    }
+    this.pending = { requestId: request.id, senderId: target.webContents.id, finish, result }
+    timeout = setTimeout(() => finish("timed-out"), timeoutMs)
+    try {
+      target.webContents.send("nightjar:voiceShutdown", request)
+    } catch {
+      finish("unavailable")
+    }
+    return result
   }
 
   acknowledge(senderId: number, requestId: unknown): boolean {

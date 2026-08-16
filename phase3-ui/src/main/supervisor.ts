@@ -968,7 +968,7 @@ export class Supervisor {
     await this.stopUnmanagedListener(m, pid)
     m.adoptedPid = undefined
     if (await m.def.ready()) {
-      this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port â€” stop that process manually`)
+      this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port — stop that process manually`)
     } else {
       this.set(m, "stopped", "disabled")
     }

@@ -72,9 +72,14 @@ let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
 const rendererVoiceShutdown = new RendererVoiceShutdownCoordinator()
 const RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS = 750
+let recreateAfterVoiceRendererFallback = false
 
-async function shutdownRendererVoice(): Promise<void> {
-  await rendererVoiceShutdown.request(win, RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS)
+function destroyExactRendererWindow(target: BrowserWindow | null): void {
+  if (target && !target.isDestroyed()) target.destroy()
+}
+
+function requestRendererVoiceShutdown(target: BrowserWindow | null = win) {
+  return rendererVoiceShutdown.request(target, RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS)
 }
 
 // Guarded IPC → renderer. During shutdown / window close, a LATE event — a supervised
@@ -526,7 +531,15 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
     invalidatePendingConsent()
     const saved = voice.disableVoice()
     if (!saved.enabled) {
-      await shutdownRendererVoice()
+      const target = win
+      const outcome = await requestRendererVoiceShutdown(target)
+      if (outcome !== "acknowledged" && target && !target.isDestroyed()) {
+        // Window destruction is the only reliable media fallback, but Voice Off
+        // must not become application Quit. window-all-closed replaces this one
+        // renderer after it has closed the old media owner.
+        recreateAfterVoiceRendererFallback = true
+        destroyExactRendererWindow(target)
+      }
       await supervisor.stopVoiceService("wake-daemon")
     }
     // Push through the deduping helper (NJ-71) rather than sendToRenderer directly, so
@@ -649,7 +662,9 @@ app.on("before-quit", async (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
-  await shutdownRendererVoice()
+  const target = win
+  const outcome = await requestRendererVoiceShutdown(target)
+  if (outcome !== "acknowledged") destroyExactRendererWindow(target)
   stopLocalScheduler()
   preview.stopServer()
   await supervisor.stopVoiceService("wake-daemon").catch(() => {})
@@ -657,5 +672,10 @@ app.on("before-quit", async (e) => {
   app.quit()
 })
 app.on("window-all-closed", () => {
+  if (recreateAfterVoiceRendererFallback && !quitting) {
+    recreateAfterVoiceRendererFallback = false
+    createWindow()
+    return
+  }
   if (process.platform !== "darwin") app.quit()
 })
