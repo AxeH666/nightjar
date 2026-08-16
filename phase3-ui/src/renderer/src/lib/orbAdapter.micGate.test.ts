@@ -23,7 +23,7 @@ interface FakeSocket {
   close(): void
 }
 
-function harness(micAllowed: () => boolean) {
+function harness(micAllowed: () => boolean, testCaptureOnWake = false, capture?: (constraints: unknown) => Promise<unknown>) {
   let sock: FakeSocket | null = null
   const micCalls: unknown[] = []
 
@@ -47,10 +47,11 @@ function harness(micAllowed: () => boolean) {
     url: "ws://127.0.0.1:8765",
     WebSocketImpl: FakeWS,
     micAllowed,
-    getUserMedia: async (constraints: unknown) => {
+    getUserMedia: capture ?? (async (constraints: unknown) => {
       micCalls.push(constraints)
       return { getTracks: () => [{ stop() {}, readyState: "live" }] }
-    },
+    }),
+    testCaptureOnWake,
     // Keep the analysers out of it — this test is about the mic decision, not audio levels.
     createAudioContext: () =>
       ({
@@ -99,12 +100,41 @@ describe("orb adapter mic gate (NJ-63)", () => {
     h.unsub()
   })
 
-  test("a legitimate wake still opens the mic when voice is enabled (no regression)", async () => {
+  test("teardown stops a late fake capture and prevents it from restoring listening", async () => {
+    let resolveStream: ((stream: unknown) => void) | null = null
+    const stopped: boolean[] = []
+    const h = harness(() => true, true, () => new Promise((resolve) => { resolveStream = resolve }))
+    h.deliver({ kind: "wake", detected: true })
+    await flush()
+    h.adapter.shutdownVoice()
+    resolveStream!({ getTracks: () => [{ readyState: "live", stop: () => stopped.push(true) }] })
+    await flush()
+    expect(stopped).toEqual([true])
+    expect(h.adapter.getState()).toBe("idle")
+    h.unsub()
+  })
+
+  test("teardown stops every active fake capture track", async () => {
+    const stopped: boolean[] = []
+    const h = harness(() => true, true, async () => ({
+      getTracks: () => [
+        { readyState: "live", stop: () => stopped.push(true) },
+        { readyState: "live", stop: () => stopped.push(true) },
+      ],
+    }))
+    h.deliver({ kind: "wake", detected: true })
+    await flush()
+    h.adapter.shutdownVoice()
+    expect(stopped).toEqual([true, true])
+    expect(h.adapter.getState()).toBe("idle")
+    h.unsub()
+  })
+
+  test("a legitimate wake never opens the retired orb visualization microphone", async () => {
     const h = harness(() => true)
     h.deliver({ kind: "wake", detected: true })
     await flush()
-    expect(h.micCalls.length).toBe(1)
-    expect(h.micCalls[0]).toEqual({ audio: true })
+    expect(h.micCalls.length).toBe(0)
     expect(h.adapter.getState()).toBe("listening")
     h.unsub()
   })
@@ -114,14 +144,14 @@ describe("orb adapter mic gate (NJ-63)", () => {
     const h = harness(() => on)
     h.deliver({ kind: "wake", detected: true })
     await flush()
-    expect(h.micCalls.length).toBe(1)
+    expect(h.micCalls.length).toBe(0)
 
     // Back to idle, then the user turns voice off; the next wake must be refused.
     h.adapter.stop?.()
     on = false
     h.deliver({ kind: "wake", detected: true })
     await flush()
-    expect(h.micCalls.length).toBe(1) // still 1 — the second wake opened nothing
+    expect(h.micCalls.length).toBe(0) // no orb capture before or after Off
     h.unsub()
   })
 

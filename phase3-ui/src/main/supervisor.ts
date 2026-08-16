@@ -353,6 +353,9 @@ export interface ServiceDef {
   readyTimeoutMs?: number // wait this long for first healthy after spawn (default 90s)
   autoRestart?: boolean // default true
   maxRestarts?: number // default 5
+  // Internal-MVP wake policy: a listener not spawned by this Supervisor is never
+  // adopted or terminated. It remains visibly blocked for manual cleanup.
+  blockUnmanagedListener?: boolean
   port?: number // the TCP port this service LISTENs on — enables PID capture on ADOPT (NJ-5)
 }
 
@@ -376,12 +379,15 @@ interface Managed {
   adoptedPid?: number // PID of an ADOPTED (not-spawned-by-us) process, so restartService can stop it (NJ-5)
   restartInFlight?: Promise<void> // single-flight guard: one restart pass at a time per service
   restartPending?: boolean // a restart was requested mid-pass → run exactly one more with the latest env
+  voiceStopRequested?: boolean
 }
 
 export interface SupervisorOptions {
   // Tests must opt into a unique temporary directory. `false` disables disk
   // diagnostics explicitly; production otherwise uses NIGHTJAR_DATA_DIR.
   serviceLogDir?: string | false
+  /** Test-only bound for waiting on an owned wake child terminal event. */
+  voiceStopTimeoutMs?: number
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -401,11 +407,13 @@ export class Supervisor {
   private managed: Managed[]
   private serviceLogDir: string | undefined
   private preparedServiceLogs = new Set<string>()
+  private readonly voiceStopTimeoutMs: number
   constructor(
     services: ServiceDef[],
     private onChange?: (statuses: ServiceStatus[]) => void,
     options: SupervisorOptions = {},
   ) {
+    this.voiceStopTimeoutMs = options.voiceStopTimeoutMs ?? 2500
     const configuredLogDir = options.serviceLogDir
     this.serviceLogDir =
       configuredLogDir === false ||
@@ -514,11 +522,14 @@ export class Supervisor {
   }
 
   private async bring(m: Managed): Promise<void> {
-    // Disabled services must be DEAD, not muted (NJ-57). Adopt-then-ignore would leave
-    // a stale instance (e.g. a wake daemon from a previous session = a live mic the
-    // user believes is off) running — actively stop it instead, then report honestly.
+    // The owned-only wake policy must never adopt or terminate an existing listener.
+    // It stays visibly blocked so Voice cannot be reported safely off.
     if (m.def.enabled && !m.def.enabled()) {
       if (await m.def.ready()) {
+        if (m.def.blockUnmanagedListener) {
+          this.set(m, "stopped", `disabled, but something is ${STILL_LISTENING_MARKER} on its port — unmanaged wake listener; manual cleanup required`)
+          return
+        }
         await this.stopUnmanagedListener(m)
         if (await m.def.ready()) {
           this.set(m, "stopped", `disabled, but something is ${STILL_LISTENING_MARKER} on its port — stop that process manually`)
@@ -528,8 +539,13 @@ export class Supervisor {
       this.set(m, "stopped", "disabled")
       return
     }
-    // adopt if something is already answering the health probe on that port
+    // Adopt ordinary services, but never an unmanaged wake listener.
     if (await m.def.ready()) {
+      if (m.def.blockUnmanagedListener) {
+        m.adoptedPid = undefined
+        this.set(m, "stopped", `cannot start: something is ${STILL_LISTENING_MARKER} on its port — unmanaged wake listener; manual cleanup required`)
+        return
+      }
       // NJ-5: capture the adopted process's PID (via its declared port) so a later
       // restartService (e.g. a BYOK key change) can stop + re-exec it under the new
       // env — instead of bailing because we have no handle on it.
@@ -563,6 +579,7 @@ export class Supervisor {
       return
     }
     m.intentionalStop = false
+    m.voiceStopRequested = false
     m.adoptedPid = undefined // we're spawning our OWN process now — no longer adopting
     this.set(m, "starting")
     const child = spawn(m.def.command, m.def.args, {
@@ -634,7 +651,10 @@ export class Supervisor {
     child.on("exit", (code) => {
       m.child = undefined
       if (m.intentionalStop) {
-        this.set(m, "stopped")
+        // Wake shutdown verifies both the owned child terminal event and listener
+        // disappearance before it can report safe Off. A late event after that
+        // bounded check must not overwrite its truthful stuck state.
+        if (!m.def.blockUnmanagedListener) this.set(m, "stopped")
         return
       }
       // unexpected exit → restart with backoff
@@ -779,6 +799,23 @@ export class Supervisor {
       m.restartTimer = undefined
     }
     const c = m.child
+    if (m.def.blockUnmanagedListener) {
+      if (c) {
+        await this.stopOwnedWakeChild(m, c)
+        if (m.child || (await m.def.ready())) return
+        m.intentionalStop = false
+        m.voiceStopRequested = false
+        m.status.restarts = 0
+        await this.spawn(m)
+        return
+      }
+      if (await m.def.ready()) {
+        this.set(m, "stopped", `cannot restart: something is ${STILL_LISTENING_MARKER} on its port — unmanaged wake listener; manual cleanup required`)
+      } else {
+        this.set(m, "stopped", "disabled")
+      }
+      return
+    }
     const owned = Boolean(c) // did WE spawn it? (adopted processes have no child)
     if (c) {
       m.intentionalStop = true
@@ -856,9 +893,9 @@ export class Supervisor {
   // wake daemon from a prior session is a live mic the user believes is off). Same
   // rule-4 care as restartOnce's adopted path: only ever the port's SOLE listener
   // (pidOnPort returns undefined on zero/ambiguous), re-verified before the hard kill.
-  private async stopUnmanagedListener(m: Managed): Promise<void> {
-    const pid = m.def.port ? await pidOnPort(m.def.port) : undefined
-    if (!pid) return
+  private async stopUnmanagedListener(m: Managed, expectedPid?: number): Promise<void> {
+    const pid = expectedPid ?? (m.def.port ? await pidOnPort(m.def.port) : undefined)
+    if (!pid || (expectedPid !== undefined && (await pidOnPort(m.def.port!)) !== expectedPid)) return
     killProc(pid, false)
     let freeBy = Date.now() + 4000
     while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
@@ -885,12 +922,15 @@ export class Supervisor {
       m.restartTimer = undefined
     }
     m.intentionalStop = false
+    m.voiceStopRequested = false
     m.status.restarts = 0
-    // For an opt-in gated service, enable must mean OUR process under the CURRENT env.
-    // bring() would ADOPT a stale instance still answering the port (spawned pre-consent
-    // with stale env — e.g. an old chat-model overlay; Bugbot, PR #151) — stop it first,
-    // NJ-5-style. If it won't die, bring() adopts and the status says so honestly.
+    // Only ordinary services retain the legacy stale-listener cleanup behavior.
+    // Wake intentionally never kills or adopts an unmanaged listener.
     if (m.def.enabled && (await m.def.ready())) {
+      if (m.def.blockUnmanagedListener) {
+        this.set(m, "stopped", `cannot start: something is ${STILL_LISTENING_MARKER} on its port — unmanaged wake listener; manual cleanup required`)
+        return
+      }
       await this.stopUnmanagedListener(m)
     }
     await this.bring(m)
@@ -899,6 +939,10 @@ export class Supervisor {
   async stopService(name: string): Promise<void> {
     const m = this.managed.find((x) => x.def.name === name)
     if (!m) return
+    if (m.def.blockUnmanagedListener) {
+      await this.stopVoiceService(name)
+      return
+    }
     m.intentionalStop = true
     if (m.healthTimer) {
       clearInterval(m.healthTimer)
@@ -933,8 +977,86 @@ export class Supervisor {
     }
   }
 
+  private async stopOwnedWakeChild(m: Managed, child: ChildProcess): Promise<void> {
+    if (m.voiceStopRequested) return
+    m.voiceStopRequested = true
+    let settled = false
+    let timer: NodeJS.Timeout | undefined
+    const terminal = new Promise<boolean>((resolve) => {
+      child.once("exit", () => {
+        if (!settled) {
+          settled = true
+          if (timer) clearTimeout(timer)
+          resolve(true)
+        }
+      })
+      timer = setTimeout(() => {
+        if (!settled) {
+          settled = true
+          resolve(false)
+        }
+      }, this.voiceStopTimeoutMs)
+    })
+    try {
+      child.kill("SIGTERM")
+    } catch {
+      // The child object is our sole termination authority. A failed signal is a
+      // bounded failed cleanup, never permission to rediscover or kill a PID.
+    }
+    if (!(await terminal)) {
+      this.set(m, "stopped", `stop requested, but the owned wake child did not exit — ${STILL_LISTENING_MARKER}; manual cleanup required`)
+      return
+    }
+    if (m.child === child) m.child = undefined
+    if (await m.def.ready()) {
+      this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port — unmanaged wake listener; manual cleanup required`)
+    } else {
+      this.set(m, "stopped", "disabled")
+    }
+  }
+
+  // Privacy-specific lifecycle: only a child spawned by this Supervisor is owned.
+  // A listener already on the wake port is neither adopted nor terminated.
+  async stopVoiceService(name: string): Promise<void> {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (!m) return
+    if (m.child) {
+      m.intentionalStop = true
+      if (m.healthTimer) {
+        clearInterval(m.healthTimer)
+        m.healthTimer = undefined
+      }
+      if (m.restartTimer) {
+        clearTimeout(m.restartTimer)
+        m.restartTimer = undefined
+      }
+      await this.stopOwnedWakeChild(m, m.child)
+      return
+    }
+    m.intentionalStop = true
+    if (m.healthTimer) {
+      clearInterval(m.healthTimer)
+      m.healthTimer = undefined
+    }
+    if (m.restartTimer) {
+      clearTimeout(m.restartTimer)
+      m.restartTimer = undefined
+    }
+    if (!(await m.def.ready())) {
+      m.adoptedPid = undefined
+      this.set(m, "stopped", "disabled")
+      return
+    }
+    m.adoptedPid = undefined
+    this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port — unmanaged wake listener; manual cleanup required`)
+  }
+
   async stop(): Promise<void> {
     for (const m of this.managed) {
+      if (m.def.blockUnmanagedListener) {
+        await this.stopVoiceService(m.def.name)
+        continue
+      }
       m.intentionalStop = true
       if (m.healthTimer) clearInterval(m.healthTimer)
       if (m.restartTimer) {
@@ -951,6 +1073,7 @@ export class Supervisor {
     // grace, then hard-kill survivors
     await sleep(2500)
     for (const m of this.managed) {
+      if (m.def.blockUnmanagedListener) continue
       const c = m.child
       if (c?.pid) {
         killTree(c.pid, true)

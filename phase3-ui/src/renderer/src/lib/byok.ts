@@ -75,7 +75,7 @@ interface NightjarByokBridge {
 }
 
 function bridge(): NightjarByokBridge | null {
-  return (window as unknown as { nightjar?: { byok?: NightjarByokBridge } }).nightjar?.byok ?? null
+  return window.nightjar?.byok ?? null
 }
 
 export const byok = {

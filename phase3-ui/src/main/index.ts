@@ -20,6 +20,8 @@ import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type Sched
 import * as preview from "./preview-server"
 import { canRestart, RESTARTABLE_STATES } from "../shared/restartPolicy"
 import { askForMicConsent, invalidatePendingConsent } from "./voiceConsent"
+import { RendererVoiceShutdownCoordinator } from "./rendererVoiceShutdown"
+import { shutdownRendererThenOwnedWake } from "./voiceShutdownLifecycle"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -69,6 +71,17 @@ const AUDIO_ROOTS = [
 
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
+const rendererVoiceShutdown = new RendererVoiceShutdownCoordinator()
+const RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS = 750
+let recreateAfterVoiceRendererFallback = false
+
+function destroyExactRendererWindow(target: BrowserWindow | null): void {
+  if (target && !target.isDestroyed()) target.destroy()
+}
+
+function requestRendererVoiceShutdown(target: BrowserWindow | null = win) {
+  return rendererVoiceShutdown.request(target, RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS)
+}
 
 // Guarded IPC → renderer. During shutdown / window close, a LATE event — a supervised
 // child process exiting (→ Supervisor.onChange), a vision-status push, an image reconcile
@@ -150,6 +163,9 @@ ipcMain.handle("nightjar:config", () => ({
   isWSL: isWSL(), // renderer uses this to swap the drag-drop zone for a browse-instead fallback
 }))
 ipcMain.handle("nightjar:status", () => latestStatus)
+ipcMain.handle("voice:shutdownAck", (event, requestId: unknown) => {
+  rendererVoiceShutdown.acknowledge(event.sender.id, requestId)
+})
 
 // Read a TTS WAV for the orb to play + analyse. Path-guarded to the audio roots
 // and to audio extensions so the renderer can't read arbitrary files.
@@ -487,8 +503,8 @@ function voiceStatusNow(): VoiceStatus {
   const s = supervisor.status().find((x) => x.name === "wake-daemon")
   return {
     enabled: voice.getVoiceEnabled(),
-    // `adopted` counts: an adopted daemon is a live capture process we attached to rather
-    // than spawned. Every other state means no microphone is open, whatever the pref says.
+    // Wake is never adopted under the owned-only MVP policy. Every other state means
+    // JUNE owns no wake microphone, whatever the pref says.
     running: s?.state === "healthy" || s?.state === "adopted",
     // Bugbot PR #158: `enabled && !running` is NOT the same as "failed". The daemon passes
     // through pending -> starting on its way up, and its readiness window is the supervisor
@@ -515,7 +531,21 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
     // the dialog cannot resume after this disable and silently re-open the mic.
     invalidatePendingConsent()
     const saved = voice.disableVoice()
-    if (!saved.enabled) await supervisor.stopService("wake-daemon")
+    if (!saved.enabled) {
+      const target = win
+      await shutdownRendererThenOwnedWake({
+        target,
+        requestRendererShutdown: () => requestRendererVoiceShutdown(target),
+        // Window destruction is the only reliable media fallback, but Voice Off
+        // must not become application Quit. window-all-closed replaces this one
+        // renderer after it has closed the old media owner.
+        destroyTarget: (fallbackTarget) => {
+          recreateAfterVoiceRendererFallback = true
+          destroyExactRendererWindow(fallbackTarget)
+        },
+        stopOwnedWake: () => supervisor.stopVoiceService("wake-daemon"),
+      })
+    }
     // Push through the deduping helper (NJ-71) rather than sendToRenderer directly, so
     // lastVoiceStatusJson stays in step. A direct send here would leave the dedupe believing
     // it had pushed something older, and could then SWALLOW the next genuine change.
@@ -636,11 +666,23 @@ app.on("before-quit", async (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
+  const target = win
+  await shutdownRendererThenOwnedWake({
+    target,
+    requestRendererShutdown: () => requestRendererVoiceShutdown(target),
+    destroyTarget: (fallbackTarget: BrowserWindow) => destroyExactRendererWindow(fallbackTarget),
+    stopOwnedWake: () => supervisor.stopVoiceService("wake-daemon").catch(() => {}),
+  })
   stopLocalScheduler()
   preview.stopServer()
   await supervisor.stop().catch(() => {})
   app.quit()
 })
 app.on("window-all-closed", () => {
+  if (recreateAfterVoiceRendererFallback && !quitting) {
+    recreateAfterVoiceRendererFallback = false
+    createWindow()
+    return
+  }
   if (process.platform !== "darwin") app.quit()
 })

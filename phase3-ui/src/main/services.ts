@@ -207,18 +207,18 @@ export function nightjarServices(opts?: { voiceEnabled?: () => boolean }): Servi
       cwd: join(REPO, "phase2-mcp"),
       env: wakeDaemonEnv(), // index.ts overlays the chat pref via setEnv before start
       // NJ-57: an always-on MICROPHONE must be opt-in — gated on the persisted voice
-      // pref (OFF by default; index.ts supplies the getter). Disabled = the process is
-      // never spawned (and a stale listener on :8766 is actively stopped), so the OS
-      // mic-in-use indicator is the user's source of truth. Toggling runs through
-      // supervisor.startService/stopService from the voice:set IPC.
+      // pref (OFF by default; index.ts supplies the getter). This internal MVP only
+      // stops a daemon spawned by this Supervisor. An existing listener is never
+      // adopted or terminated; it blocks Voice and requires manual cleanup.
       enabled: opts?.voiceEnabled,
-      port: 8766, // health port — also the disable-path kill target (sole listener only)
+      port: 8766,
       // Best-effort: no mic/audio hardware is not a reason the rest of Nightjar
       // should fail to start, so this is last in dependency order and its
       // failure doesn't block the other services (each service starts/gates
       // independently in nightjarServices() array order).
       ready: () => tcpOpen("127.0.0.1", 8766),
       readyTimeoutMs: 20000,
+      blockUnmanagedListener: true,
     },
   ]
   // Ollama hosts the local VISION model (gemma3:4b) for nightjar_analyze_image — add

@@ -13,7 +13,7 @@ interface SchedulerBridge {
   onSchedulerStatus(cb: (s: SchedulerStatus) => void): () => void
 }
 function bridge(): SchedulerBridge | null {
-  return (window as unknown as { nightjar?: SchedulerBridge }).nightjar ?? null
+  return window.nightjar ?? null
 }
 
 const BAR =

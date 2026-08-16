@@ -26,10 +26,8 @@ const DEFAULT_WS =
 // file: scheme, so that branch could only ever fail silently (NJ-37) — a missing
 // bridge must fail loudly and reach onTtsError instead.
 async function loadTtsAudio(path: string): Promise<string> {
-  const nj = (window as unknown as { nightjar?: { readAudio?: (p: string) => Promise<ArrayBuffer> } })
-    .nightjar
-  if (!nj?.readAudio) throw new Error("nightjar.readAudio bridge unavailable")
-  const buf = await nj.readAudio(path)
+  if (!window.nightjar?.readAudio) throw new Error("nightjar.readAudio bridge unavailable")
+  const buf = await window.nightjar.readAudio(path)
   return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }))
 }
 
@@ -61,6 +59,7 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
         loadTtsAudio,
         onTtsError: () => setAudioFailed(true),
         micAllowed: () => voiceOnRef.current,
+        voiceEventsEnabled: false,
       }),
     [wsUrl],
   )
@@ -91,6 +90,7 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
       // NEXT wake event; it does not tear down a mic that is already open. That gap is
       // tracked separately.
       voiceOnRef.current = s.enabled
+      adapter.setVoiceEnabled(s.enabled)
       setVoiceOn(s.enabled)
       setMicLive(Boolean(s.running))
       setMicStarting(Boolean(s.starting))
@@ -102,7 +102,17 @@ export function NightjarOrb({ wsUrl = DEFAULT_WS, size = 36 }: { wsUrl?: string;
       mounted = false
       off()
     }
-  }, [])
+  }, [adapter])
+
+  const acknowledgedShutdowns = useRef(new Set<string>())
+  useEffect(() => {
+    return window.nightjar?.voice.onShutdown((request) => {
+      adapter.shutdownVoice()
+      if (acknowledgedShutdowns.current.has(request.id)) return
+      acknowledgedShutdowns.current.add(request.id)
+      void window.nightjar?.voice.acknowledgeShutdown(request.id)
+    })
+  }, [adapter])
 
   // Tear the adapter fully down (WS + audio) when it's replaced or unmounted.
   useEffect(() => () => adapter.disconnect(), [adapter])

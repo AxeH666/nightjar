@@ -98,6 +98,10 @@ export interface NightjarOrbAdapterOptions {
   speakingTimeoutMs?: number
   /** Publish tts playing/ended back to the side-channel so it reflects real playback. Default true. */
   publishPlayback?: boolean
+  /** Initial side-channel event state; the desktop app explicitly starts closed. */
+  voiceEventsEnabled?: boolean
+  /** Test-only fake-capture seam; production never enables renderer mic capture. */
+  testCaptureOnWake?: boolean
 }
 
 export interface NightjarOrbAdapter extends OrbAdapter {
@@ -107,6 +111,10 @@ export interface NightjarOrbAdapter extends OrbAdapter {
   connect(): void
   /** Close the side-channel connection and tear down audio. */
   disconnect(): void
+  /** Idempotently silence all renderer-owned legacy Voice media. */
+  shutdownVoice(): void
+  /** Re-open event handling only after an explicit current Voice enable. */
+  setVoiceEnabled(enabled: boolean): void
 }
 
 const DEFAULT_URL = "ws://127.0.0.1:8765"
@@ -163,6 +171,8 @@ export function createNightjarOrbAdapter(
   const ttsMonitor = new AudioLevelMonitor({ createAudioContext, scheduler })
   let micStream: { getTracks(): { stop(): void; readonly readyState?: string }[] } | null = null
   let micStarting = false
+  let micGeneration = 0
+  let voiceEventsEnabled = options.voiceEventsEnabled ?? true
   let ttsAudio: HTMLAudioElement | null = null
   let ttsUrl: string | null = null
   let ttsPlayId = 0 // monotonic token — teardown invalidates any in-flight playTts operation (B11)
@@ -192,11 +202,13 @@ export function createNightjarOrbAdapter(
       console.warn("[nightjar-orb] refusing to open the mic: voice is not enabled")
       return
     }
+    const generation = ++micGeneration
     micStarting = true
     try {
       const stream = (await getUserMedia({ audio: true })) as typeof micStream & object
-      // If we left the listening state while awaiting the mic, drop it.
-      if (state !== "listening") {
+      // A teardown while permission was pending invalidates this completion. The
+      // returned tracks are stopped before they can become an active owner.
+      if (generation !== micGeneration || state !== "listening" || !voiceEventsEnabled) {
         ;(stream as unknown as { getTracks(): { stop(): void }[] })
           .getTracks()
           .forEach((t) => t.stop())
@@ -222,6 +234,28 @@ export function createNightjarOrbAdapter(
       micStream = null
     }
     emitVolume(0)
+  }
+
+  function shutdownVoice(): void {
+    // One idempotent renderer teardown primitive. It invalidates an in-flight
+    // acquisition before stopping current media and playback, so a late result can
+    // never re-arm the legacy path after Off/Quit.
+    voiceEventsEnabled = false
+    micGeneration++
+    micStarting = false
+    listeningTimer = clearTimer(listeningTimer)
+    thinkingTimer = clearTimer(thinkingTimer)
+    stopMic()
+    teardownTts()
+    setState("idle")
+  }
+
+  function setVoiceEnabled(enabled: boolean): void {
+    if (!enabled) {
+      shutdownVoice()
+      return
+    }
+    voiceEventsEnabled = true
   }
 
   // ── tts playback ─────────────────────────────────────────────────────────────
@@ -358,7 +392,11 @@ export function createNightjarOrbAdapter(
         setState("idle")
       }
     }, listeningTimeoutMs)
-    void startMic()
+    // The legacy orb used to open a second renderer microphone solely for its
+    // visual meter. Presentation now follows wake/orb state; the wake daemon is
+    // the sole current legacy microphone owner. Unit tests opt in to a fake
+    // capture only to prove the teardown race without touching hardware.
+    if (options.testCaptureOnWake) void startMic()
   }
 
   function enterThinking(): void {
@@ -372,6 +410,7 @@ export function createNightjarOrbAdapter(
   }
 
   function handleEvent(ev: SideChannelEvent): void {
+    if (!voiceEventsEnabled) return
     if (!ev || typeof ev.kind !== "string") return
     switch (ev.kind) {
       case "wake":
@@ -470,10 +509,7 @@ export function createNightjarOrbAdapter(
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
-    listeningTimer = clearTimer(listeningTimer)
-    thinkingTimer = clearTimer(thinkingTimer)
-    stopMic()
-    teardownTts()
+    shutdownVoice()
     if (ws) {
       const sock = ws
       ws = null
@@ -493,6 +529,8 @@ export function createNightjarOrbAdapter(
     getState: () => state,
     connect,
     disconnect,
+    shutdownVoice,
+    setVoiceEnabled,
 
     subscribe(callbacks: AdapterCallbacks) {
       subscribers.add(callbacks)
@@ -510,12 +548,7 @@ export function createNightjarOrbAdapter(
       connect()
     },
     stop() {
-      // Cancel whatever is in flight and go quiet.
-      listeningTimer = clearTimer(listeningTimer)
-      thinkingTimer = clearTimer(thinkingTimer)
-      stopMic()
-      teardownTts()
-      setState("idle")
+      shutdownVoice()
     },
   }
 }
