@@ -27,7 +27,7 @@ interface CapabilitiesBridge {
 }
 
 function bridge(): CapabilitiesBridge | null {
-  return (window as unknown as { nightjar?: { capabilities?: CapabilitiesBridge } }).nightjar?.capabilities ?? null
+  return window.nightjar?.capabilities ?? null
 }
 
 export const capabilities = {

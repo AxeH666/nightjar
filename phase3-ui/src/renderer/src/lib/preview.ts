@@ -20,7 +20,7 @@ interface PreviewBridge {
 }
 
 export function previewBridge(): PreviewBridge | null {
-  return (window as unknown as { nightjar?: { preview?: PreviewBridge } }).nightjar?.preview ?? null
+  return window.nightjar?.preview ?? null
 }
 
 // A write/edit tool-call → the mirror action to perform, or null if it isn't a

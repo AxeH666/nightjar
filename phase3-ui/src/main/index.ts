@@ -20,6 +20,7 @@ import { startLocalScheduler, stopLocalScheduler, getSchedulerStatus, type Sched
 import * as preview from "./preview-server"
 import { canRestart, RESTARTABLE_STATES } from "../shared/restartPolicy"
 import { askForMicConsent, invalidatePendingConsent } from "./voiceConsent"
+import { RendererVoiceShutdownCoordinator } from "./rendererVoiceShutdown"
 
 const OPENCODE_URL = process.env.NIGHTJAR_OPENCODE_URL || "http://127.0.0.1:4096"
 const SIDE_CHANNEL_URL = process.env.NIGHTJAR_WS_URL || "ws://127.0.0.1:8765"
@@ -69,6 +70,12 @@ const AUDIO_ROOTS = [
 
 let win: BrowserWindow | null = null
 let latestStatus: ServiceStatus[] = []
+const rendererVoiceShutdown = new RendererVoiceShutdownCoordinator()
+const RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS = 750
+
+async function shutdownRendererVoice(): Promise<void> {
+  await rendererVoiceShutdown.request(win, RENDERER_VOICE_SHUTDOWN_TIMEOUT_MS)
+}
 
 // Guarded IPC → renderer. During shutdown / window close, a LATE event — a supervised
 // child process exiting (→ Supervisor.onChange), a vision-status push, an image reconcile
@@ -150,6 +157,9 @@ ipcMain.handle("nightjar:config", () => ({
   isWSL: isWSL(), // renderer uses this to swap the drag-drop zone for a browse-instead fallback
 }))
 ipcMain.handle("nightjar:status", () => latestStatus)
+ipcMain.handle("voice:shutdownAck", (event, requestId: unknown) => {
+  rendererVoiceShutdown.acknowledge(event.sender.id, requestId)
+})
 
 // Read a TTS WAV for the orb to play + analyse. Path-guarded to the audio roots
 // and to audio extensions so the renderer can't read arbitrary files.
@@ -515,7 +525,10 @@ ipcMain.handle("voice:set", async (_e, enabled: unknown) => {
     // the dialog cannot resume after this disable and silently re-open the mic.
     invalidatePendingConsent()
     const saved = voice.disableVoice()
-    if (!saved.enabled) await supervisor.stopService("wake-daemon")
+    if (!saved.enabled) {
+      await shutdownRendererVoice()
+      await supervisor.stopVoiceService("wake-daemon")
+    }
     // Push through the deduping helper (NJ-71) rather than sendToRenderer directly, so
     // lastVoiceStatusJson stays in step. A direct send here would leave the dedupe believing
     // it had pushed something older, and could then SWALLOW the next genuine change.
@@ -636,8 +649,10 @@ app.on("before-quit", async (e) => {
   if (quitting) return
   e.preventDefault()
   quitting = true
+  await shutdownRendererVoice()
   stopLocalScheduler()
   preview.stopServer()
+  await supervisor.stopVoiceService("wake-daemon").catch(() => {})
   await supervisor.stop().catch(() => {})
   app.quit()
 })

@@ -23,6 +23,52 @@ function tcpProbe(port: number, timeoutMs = 800): Promise<boolean> {
 // disable-must-KILL guarantee (OS mic indicator as source of truth) at the process-
 // lifecycle level. The real-mic/indicator confirmation is the PR-6 hardware checklist.
 describe("Supervisor enabled() gate (NJ-57)", () => {
+  test("Voice-specific shutdown stops a verified adopted wake listener without changing generic adoption", async () => {
+    const PORT = 18767
+    const adopted = spawn(
+      process.execPath,
+      ["-e", `require('net').createServer(() => {}).listen(${PORT}, '127.0.0.1'); setInterval(() => {}, 1000)`],
+      { stdio: "ignore" },
+    )
+    try {
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline && !(await tcpProbe(PORT))) await new Promise((r) => setTimeout(r, 50))
+      const sup = new Supervisor([{
+        name: "wake-daemon", command: "unused", args: [], port: PORT,
+        ready: () => tcpProbe(PORT), verifyAdoptedStop: async (pid) => pid === adopted.pid,
+      }])
+      await sup.start()
+      expect(sup.status()[0].state).toBe("adopted")
+      await sup.stopVoiceService("wake-daemon")
+      expect(await tcpProbe(PORT)).toBe(false)
+    } finally {
+      try { adopted.kill("SIGKILL") } catch { /* already stopped */ }
+    }
+  }, 20000)
+
+  test("an unverified adopted wake listener remains visibly stuck and is not killed", async () => {
+    const PORT = 18768
+    const adopted = spawn(
+      process.execPath,
+      ["-e", `require('net').createServer(() => {}).listen(${PORT}, '127.0.0.1'); setInterval(() => {}, 1000)`],
+      { stdio: "ignore" },
+    )
+    try {
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline && !(await tcpProbe(PORT))) await new Promise((r) => setTimeout(r, 50))
+      const sup = new Supervisor([{
+        name: "wake-daemon", command: "unused", args: [], port: PORT,
+        ready: () => tcpProbe(PORT), verifyAdoptedStop: async () => false,
+      }])
+      await sup.start()
+      await sup.stopVoiceService("wake-daemon")
+      expect(await tcpProbe(PORT)).toBe(true)
+      expect(sup.status()[0].detail).toContain("STILL listening")
+    } finally {
+      try { adopted.kill("SIGKILL") } catch { /* cleanup only */ }
+    }
+  }, 20000)
+
   test("a disabled service is never spawned — state 'stopped', no restart budget burned", async () => {
     const def: ServiceDef = {
       name: "wake-daemon",

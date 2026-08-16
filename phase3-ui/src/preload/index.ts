@@ -1,5 +1,6 @@
 // Nightjar preload — minimal safe bridge to the renderer.
 import { contextBridge, ipcRenderer, webUtils } from "electron"
+import type { BridgeSchedulerStatus, BridgeVisionStatus, KeyStorageMode, NightjarBridge, VoiceShutdownRequest } from "../shared/nightjarBridge"
 
 export interface ServiceStatus {
   name: string
@@ -30,7 +31,7 @@ export interface CapabilityMeta {
   offlineLabel: string
 }
 
-contextBridge.exposeInMainWorld("nightjar", {
+const nightjarBridge: NightjarBridge = {
   getConfig: (): Promise<{ opencodeUrl: string; sideChannelUrl: string; isWSL: boolean }> =>
     ipcRenderer.invoke("nightjar:config"),
   getStatus: (): Promise<ServiceStatus[]> => ipcRenderer.invoke("nightjar:status"),
@@ -77,24 +78,24 @@ contextBridge.exposeInMainWorld("nightjar", {
   },
   // Local vision (Ollama gemma3:4b): status, one-click model install, and an
   // "install Ollama" link for when it isn't present.
-  getVisionStatus: (): Promise<unknown> => ipcRenderer.invoke("nightjar:visionStatus"),
-  installVisionModel: (): Promise<unknown> => ipcRenderer.invoke("nightjar:visionInstallModel"),
+  getVisionStatus: (): Promise<BridgeVisionStatus> => ipcRenderer.invoke("nightjar:visionStatus"),
+  installVisionModel: (): Promise<BridgeVisionStatus> => ipcRenderer.invoke("nightjar:visionInstallModel"),
   openOllamaDownload: (): Promise<void> => ipcRenderer.invoke("nightjar:openOllamaDownload"),
-  onVisionStatus: (cb: (s: unknown) => void) => {
-    const handler = (_e: unknown, s: unknown) => cb(s)
+  onVisionStatus: (cb: (s: BridgeVisionStatus) => void) => {
+    const handler = (_e: unknown, s: BridgeVisionStatus) => cb(s)
     ipcRenderer.on("nightjar:visionStatus", handler)
     return () => ipcRenderer.removeListener("nightjar:visionStatus", handler)
   },
   // Local reminder scheduler availability (P2-20): pull on mount + subscribe to pushes.
-  getSchedulerStatus: (): Promise<unknown> => ipcRenderer.invoke("nightjar:schedulerStatus"),
-  onSchedulerStatus: (cb: (s: unknown) => void) => {
-    const handler = (_e: unknown, s: unknown) => cb(s)
+  getSchedulerStatus: (): Promise<BridgeSchedulerStatus> => ipcRenderer.invoke("nightjar:schedulerStatus"),
+  onSchedulerStatus: (cb: (s: BridgeSchedulerStatus) => void) => {
+    const handler = (_e: unknown, s: BridgeSchedulerStatus) => cb(s)
     ipcRenderer.on("nightjar:schedulerStatus", handler)
     return () => ipcRenderer.removeListener("nightjar:schedulerStatus", handler)
   },
   // BYOK — raw keys never cross this bridge; only masked status in, key text out.
   byok: {
-    keyStorageMode: (): Promise<string> => ipcRenderer.invoke("byok:keyStorageMode"),
+    keyStorageMode: (): Promise<KeyStorageMode> => ipcRenderer.invoke("byok:keyStorageMode"),
     list: (): Promise<ByokProviderStatus[]> => ipcRenderer.invoke("byok:list"),
     set: (providerId: string, key: string): Promise<void> => ipcRenderer.invoke("byok:set", providerId, key),
     remove: (providerId: string): Promise<void> => ipcRenderer.invoke("byok:remove", providerId),
@@ -103,7 +104,7 @@ contextBridge.exposeInMainWorld("nightjar", {
   // only {mode, providerId, modelId}. The main process persists + (in later PRs)
   // applies the choice to the engine.
   capabilities: {
-    catalog: (): Promise<{ capabilities: CapabilityMeta[]; ui: string[] }> => ipcRenderer.invoke("capabilities:catalog"),
+    catalog: (): Promise<{ capabilities: { id: "chat" | "image" | "research" | "vision" | "browser"; name: string; onlineProviders: string[]; offlineLabel: string }[]; ui: string[] }> => ipcRenderer.invoke("capabilities:catalog"),
     list: (): Promise<Record<string, CapabilityPref>> => ipcRenderer.invoke("capabilities:list"),
     set: (id: string, pref: CapabilityPref): Promise<CapabilityPref> => ipcRenderer.invoke("capabilities:set", id, pref),
     // Bulk-apply for the global Local/Cloud toggle — one store write + one engine restart.
@@ -128,6 +129,12 @@ contextBridge.exposeInMainWorld("nightjar", {
       ipcRenderer.on("nightjar:voiceStatus", handler)
       return () => ipcRenderer.removeListener("nightjar:voiceStatus", handler)
     },
+    onShutdown: (cb: (request: VoiceShutdownRequest) => void) => {
+      const handler = (_e: unknown, request: VoiceShutdownRequest) => cb(request)
+      ipcRenderer.on("nightjar:voiceShutdown", handler)
+      return () => ipcRenderer.removeListener("nightjar:voiceShutdown", handler)
+    },
+    acknowledgeShutdown: (requestId: string): Promise<void> => ipcRenderer.invoke("voice:shutdownAck", requestId),
   },
   // CAD (Task 5): convert a model-exported STEP file to a viewable GLB, and read its bytes.
   cad: {
@@ -139,4 +146,6 @@ contextBridge.exposeInMainWorld("nightjar", {
     loadHero: (): Promise<{ ok: boolean; glb?: Uint8Array; parts?: string[]; error?: string }> =>
       ipcRenderer.invoke("cad:loadHero"),
   },
-})
+}
+
+contextBridge.exposeInMainWorld("nightjar", nightjarBridge)

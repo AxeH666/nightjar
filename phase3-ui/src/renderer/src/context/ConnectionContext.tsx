@@ -15,25 +15,6 @@ import { connectingHint } from "../lib/connectionStatus"
 
 // The sole renderer↔main bridge surface (preload contextBridge). Declared here
 // (globally) so every context/component sees it.
-declare global {
-  interface Window {
-    nightjar?: {
-      getConfig(): Promise<{ opencodeUrl: string; sideChannelUrl?: string; isWSL?: boolean }>
-      getStatus?(): Promise<ServiceStatus[]>
-      onStatus?(cb: (s: ServiceStatus[]) => void): () => void
-      restartService?(name: string): Promise<void>
-      serviceLogs?(name: string): Promise<string[]>
-      readAudio?(path: string): Promise<ArrayBuffer>
-      byok?: {
-        keyStorageMode(): Promise<string>
-        list(): Promise<unknown[]>
-        set(providerId: string, key: string): Promise<void>
-        remove(providerId: string): Promise<void>
-      }
-    }
-  }
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 interface ConnectionValue {

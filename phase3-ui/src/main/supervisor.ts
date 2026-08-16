@@ -353,6 +353,7 @@ export interface ServiceDef {
   readyTimeoutMs?: number // wait this long for first healthy after spawn (default 90s)
   autoRestart?: boolean // default true
   maxRestarts?: number // default 5
+  verifyAdoptedStop?: (pid: number) => Promise<boolean>
   port?: number // the TCP port this service LISTENs on — enables PID capture on ADOPT (NJ-5)
 }
 
@@ -856,9 +857,9 @@ export class Supervisor {
   // wake daemon from a prior session is a live mic the user believes is off). Same
   // rule-4 care as restartOnce's adopted path: only ever the port's SOLE listener
   // (pidOnPort returns undefined on zero/ambiguous), re-verified before the hard kill.
-  private async stopUnmanagedListener(m: Managed): Promise<void> {
-    const pid = m.def.port ? await pidOnPort(m.def.port) : undefined
-    if (!pid) return
+  private async stopUnmanagedListener(m: Managed, expectedPid?: number): Promise<void> {
+    const pid = expectedPid ?? (m.def.port ? await pidOnPort(m.def.port) : undefined)
+    if (!pid || (expectedPid !== undefined && (await pidOnPort(m.def.port!)) !== expectedPid)) return
     killProc(pid, false)
     let freeBy = Date.now() + 4000
     while (Date.now() < freeBy && (await m.def.ready())) await sleep(300)
@@ -928,6 +929,46 @@ export class Supervisor {
     m.adoptedPid = undefined
     if (await m.def.ready()) {
       this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port — stop that process manually`)
+    } else {
+      this.set(m, "stopped", "disabled")
+    }
+  }
+
+  // Privacy-specific lifecycle: stop an adopted wake listener only after its
+  // exact port PID verifies as the expected wake service. Generic adopted-service
+  // behavior remains in stop() unchanged.
+  async stopVoiceService(name: string): Promise<void> {
+    const m = this.managed.find((x) => x.def.name === name)
+    if (!m) return
+    if (m.child?.pid) {
+      await this.stopService(name)
+      return
+    }
+    m.intentionalStop = true
+    if (m.healthTimer) {
+      clearInterval(m.healthTimer)
+      m.healthTimer = undefined
+    }
+    if (m.restartTimer) {
+      clearTimeout(m.restartTimer)
+      m.restartTimer = undefined
+    }
+    if (!(await m.def.ready())) {
+      m.adoptedPid = undefined
+      this.set(m, "stopped", "disabled")
+      return
+    }
+    const pid = m.def.port ? await pidOnPort(m.def.port) : undefined
+    const verified = Boolean(pid && m.def.verifyAdoptedStop && (await m.def.verifyAdoptedStop(pid)))
+    if (!verified || !pid) {
+      m.adoptedPid = undefined
+      this.set(m, "stopped", `stop requested, but ${STILL_LISTENING_MARKER}: adopted wake listener was not verified`)
+      return
+    }
+    await this.stopUnmanagedListener(m, pid)
+    m.adoptedPid = undefined
+    if (await m.def.ready()) {
+      this.set(m, "stopped", `stop requested, but something is ${STILL_LISTENING_MARKER} on its port â€” stop that process manually`)
     } else {
       this.set(m, "stopped", "disabled")
     }

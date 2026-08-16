@@ -36,7 +36,7 @@ interface AttachmentBridge {
 }
 
 function bridge(): AttachmentBridge | null {
-  return (window as unknown as { nightjar?: AttachmentBridge }).nightjar ?? null
+  return window.nightjar ?? null
 }
 
 export function isImageMime(mime: string): boolean {

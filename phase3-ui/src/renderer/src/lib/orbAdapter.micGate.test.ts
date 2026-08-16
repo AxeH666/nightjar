@@ -99,12 +99,11 @@ describe("orb adapter mic gate (NJ-63)", () => {
     h.unsub()
   })
 
-  test("a legitimate wake still opens the mic when voice is enabled (no regression)", async () => {
+  test("a legitimate wake never opens the retired orb visualization microphone", async () => {
     const h = harness(() => true)
     h.deliver({ kind: "wake", detected: true })
     await flush()
-    expect(h.micCalls.length).toBe(1)
-    expect(h.micCalls[0]).toEqual({ audio: true })
+    expect(h.micCalls.length).toBe(0)
     expect(h.adapter.getState()).toBe("listening")
     h.unsub()
   })
@@ -114,14 +113,14 @@ describe("orb adapter mic gate (NJ-63)", () => {
     const h = harness(() => on)
     h.deliver({ kind: "wake", detected: true })
     await flush()
-    expect(h.micCalls.length).toBe(1)
+    expect(h.micCalls.length).toBe(0)
 
     // Back to idle, then the user turns voice off; the next wake must be refused.
     h.adapter.stop?.()
     on = false
     h.deliver({ kind: "wake", detected: true })
     await flush()
-    expect(h.micCalls.length).toBe(1) // still 1 — the second wake opened nothing
+    expect(h.micCalls.length).toBe(0) // no orb capture before or after Off
     h.unsub()
   })
 

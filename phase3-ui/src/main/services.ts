@@ -2,6 +2,7 @@
 // Paths are absolute (Electron main won't inherit a dev PATH) and overridable via env.
 import net from "node:net"
 import os from "node:os"
+import { execFile } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -115,6 +116,23 @@ const LOCAL_CHAT_MODEL = "llamacpp/qwen3-4b-instruct-2507"
 // Tracked as NJ-81.
 export const PY_UTF8_ENV: Record<string, string> = { PYTHONIOENCODING: "utf-8" }
 
+async function verifiedWakeDaemonPid(pid: number): Promise<boolean> {
+  const expectedScript = join(REPO, "phase2-mcp", "wake_daemon.py").replace(/\\/g, "/").toLowerCase()
+  let commandLine = ""
+  try {
+    if (process.platform === "win32") {
+      commandLine = await new Promise<string>((resolve) => {
+        execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`], { windowsHide: true, timeout: 2000 }, (error, stdout) => resolve(error ? "" : stdout))
+      })
+    } else if (process.platform === "linux") {
+      commandLine = readFileSync(`/proc/${pid}/cmdline`).toString("utf8").replace(/\0/g, " ")
+    }
+  } catch {
+    return false
+  }
+  return commandLine.replace(/\\/g, "/").toLowerCase().includes(expectedScript)
+}
+
 export function wakeDaemonEnv(chatPref?: { mode: string; providerId?: string; modelId?: string }): Record<string, string> {
   const out: Record<string, string> = {
     ...PY_UTF8_ENV,
@@ -219,6 +237,7 @@ export function nightjarServices(opts?: { voiceEnabled?: () => boolean }): Servi
       // independently in nightjarServices() array order).
       ready: () => tcpOpen("127.0.0.1", 8766),
       readyTimeoutMs: 20000,
+      verifyAdoptedStop: verifiedWakeDaemonPid,
     },
   ]
   // Ollama hosts the local VISION model (gemma3:4b) for nightjar_analyze_image — add

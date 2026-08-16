@@ -16,7 +16,7 @@ interface VisionBridge {
   onVisionStatus(cb: (s: VisionStatus) => void): () => void
 }
 function bridge(): VisionBridge | null {
-  return (window as unknown as { nightjar?: VisionBridge }).nightjar ?? null
+  return window.nightjar ?? null
 }
 
 const BAR = "flex items-center gap-3 border-b border-nightjar-surface/70 bg-nightjar-surface/40 px-4 py-1.5 text-xs text-nightjar-text/70"

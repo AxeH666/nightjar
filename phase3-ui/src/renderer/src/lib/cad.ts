@@ -17,7 +17,7 @@ interface CadBridge {
 }
 
 function bridge(): CadBridge | null {
-  return (window as unknown as { nightjar?: { cad?: CadBridge } }).nightjar?.cad ?? null
+  return window.nightjar?.cad ?? null
 }
 
 export const cad = {
